@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { usePathname } from 'next/navigation';
 import { ShoppingCart, FileText, RotateCcw, Plus, Search, Filter, Download, Eye, Edit2, Trash2, Printer } from 'lucide-react';
+import { formatNumber } from '@/lib/formatNumber';
 
 interface Sale {
   id: number; code: string; customer: string; date: string; items: number;
@@ -122,7 +123,7 @@ export default function SalesPage() {
                           <td className="py-2"><input type="number" defaultValue={item.price} className="input-field w-24 py-1" /></td>
                           <td className="py-2"><input type="number" defaultValue={item.qty} className="input-field w-16 py-1" /></td>
                           <td className="py-2"><input type="number" defaultValue={item.disc} className="input-field w-16 py-1" /></td>
-                          <td className="py-2 font-semibold text-foreground">RD$ {item.total.toLocaleString()}</td>
+                          <td className="py-2 font-semibold text-foreground">RD$ {formatNumber(item.total)}</td>
                           <td className="py-2"><button className="p-1 text-danger hover:bg-danger-bg rounded"><Trash2 size={14} /></button></td>
                         </tr>
                       ))}
@@ -224,7 +225,7 @@ export default function SalesPage() {
                       <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{s.date}</td>
                       <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{s.agent}</td>
                       <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{s.payment}</td>
-                      <td className="px-4 py-3 font-bold text-foreground">RD$ {s.total.toLocaleString()}</td>
+                      <td className="px-4 py-3 font-bold text-foreground">RD$ {formatNumber(s.total)}</td>
                       <td className="px-4 py-3 hidden md:table-cell"><span className={saleStatusMap[s.status].cls}>{saleStatusMap[s.status].label}</span></td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
@@ -271,7 +272,7 @@ export default function SalesPage() {
                       <td className="px-4 py-3 font-medium text-foreground">{q.customer}</td>
                       <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{q.date}</td>
                       <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{q.validUntil}</td>
-                      <td className="px-4 py-3 font-bold text-foreground">RD$ {q.total.toLocaleString()}</td>
+                      <td className="px-4 py-3 font-bold text-foreground">RD$ {formatNumber(q.total)}</td>
                       <td className="px-4 py-3"><span className={saleStatusMap[q.status].cls}>{saleStatusMap[q.status].label}</span></td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
@@ -311,7 +312,7 @@ export default function SalesPage() {
                       <td className="px-4 py-3 font-mono text-primary">{r.saleCode}</td>
                       <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{r.customer}</td>
                       <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{r.date}</td>
-                      <td className="px-4 py-3 font-bold text-foreground">RD$ {r.total.toLocaleString()}</td>
+                      <td className="px-4 py-3 font-bold text-foreground">RD$ {formatNumber(r.total)}</td>
                       <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{r.reason}</td>
                       <td className="px-4 py-3"><span className={saleStatusMap[r.status].cls}>{saleStatusMap[r.status].label}</span></td>
                       <td className="px-4 py-3">

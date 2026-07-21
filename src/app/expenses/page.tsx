@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { usePathname } from 'next/navigation';
 import { DollarSign, Tag, Plus, Search, Filter, Download, Eye, Edit2, Trash2, Upload } from 'lucide-react';
+import { formatNumber } from '@/lib/formatNumber';
 
 interface Expense {
   id: number; code: string; category: string; description: string; amount: number;
@@ -67,7 +68,7 @@ export default function ExpensesPage() {
 
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="card p-4"><p className="text-xs text-muted-foreground">Gastos del mes</p><p className="text-2xl font-bold text-foreground mt-1">RD$ {totalSpent.toLocaleString()}</p></div>
+          <div className="card p-4"><p className="text-xs text-muted-foreground">Gastos del mes</p><p className="text-2xl font-bold text-foreground mt-1">RD$ {formatNumber(totalSpent)}</p></div>
           <div className="card p-4"><p className="text-xs text-muted-foreground">Registros</p><p className="text-2xl font-bold text-info mt-1">{mockExpenses.length}</p></div>
           <div className="card p-4"><p className="text-xs text-muted-foreground">Pendientes</p><p className="text-2xl font-bold text-warning mt-1">{mockExpenses.filter(e => e.status === 'pending').length}</p></div>
           <div className="card p-4"><p className="text-xs text-muted-foreground">Categorías</p><p className="text-2xl font-bold text-primary mt-1">{mockCategories.length}</p></div>
@@ -121,7 +122,7 @@ export default function ExpensesPage() {
                       <td className="px-4 py-3 hidden md:table-cell"><span className="badge-neutral">{e.category}</span></td>
                       <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{e.responsible}</td>
                       <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{e.date}</td>
-                      <td className="px-4 py-3 font-bold text-foreground">RD$ {e.amount.toLocaleString()}</td>
+                      <td className="px-4 py-3 font-bold text-foreground">RD$ {formatNumber(e.amount)}</td>
                       <td className="px-4 py-3 hidden lg:table-cell">
                         {e.receipt ? <span className="badge-success">Sí</span> : <span className="badge-danger">No</span>}
                       </td>
@@ -169,14 +170,14 @@ export default function ExpensesPage() {
                   <div className="space-y-1.5">
                     <div className="flex justify-between text-xs">
                       <span className="text-muted-foreground">Gastado</span>
-                      <span className="font-semibold text-foreground">RD$ {cat.spent.toLocaleString()} / {cat.budget.toLocaleString()}</span>
+                      <span className="font-semibold text-foreground">RD$ {formatNumber(cat.spent)} / {formatNumber(cat.budget)}</span>
                     </div>
                     <div className="h-2 bg-secondary rounded-full overflow-hidden">
                       <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
                     </div>
                     <div className="flex justify-between text-xs">
                       <span className={pct >= 90 ? 'text-danger font-medium' : 'text-muted-foreground'}>{pct}% utilizado</span>
-                      <span className="text-muted-foreground">Disponible: RD$ {(cat.budget - cat.spent).toLocaleString()}</span>
+                      <span className="text-muted-foreground">Disponible: RD$ {formatNumber(cat.budget - cat.spent)}</span>
                     </div>
                   </div>
                 </div>

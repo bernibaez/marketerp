@@ -4,6 +4,7 @@ import AppLayout from '@/components/AppLayout';
 import { usePathname } from 'next/navigation';
 import { BarChart2, TrendingUp, TrendingDown, Package, ShoppingCart, ShoppingBag, DollarSign, Users, FileText, Download, Printer, Filter } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { formatNumber } from '@/lib/formatNumber';
 
 const salesData = [
   { month: 'Ago', ventas: 145000, compras: 98000, ganancias: 47000 },
@@ -142,7 +143,7 @@ export default function ReportsPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                   <XAxis dataKey="month" tick={{ fontSize: 12, fill: 'var(--muted-foreground)' }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}K`} />
-                  <Tooltip formatter={(v: number) => `RD$ ${v.toLocaleString()}`} contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '12px' }} />
+                  <Tooltip formatter={(v: number) => `RD$ ${formatNumber(v)}`} contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '12px' }} />
                   <Bar dataKey="ventas" fill="var(--info)" radius={[4,4,0,0]} name="Ventas" />
                   <Bar dataKey="compras" fill="var(--warning)" radius={[4,4,0,0]} name="Compras" />
                   <Bar dataKey="ganancias" fill="var(--primary)" radius={[4,4,0,0]} name="Ganancias" />

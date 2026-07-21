@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { usePathname } from 'next/navigation';
 import { Users, UserCheck, Shield, Plus, Search, Filter, Edit2, Trash2, ToggleLeft, ToggleRight, Download, Eye } from 'lucide-react';
+import { formatNumber } from '@/lib/formatNumber';
 
 interface User {
   id: number; name: string; email: string; role: string; status: 'active' | 'inactive';
@@ -221,7 +222,7 @@ export default function UsersPage() {
                       </td>
                       <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{agent.phone}</td>
                       <td className="px-4 py-3 hidden md:table-cell"><span className="font-semibold text-foreground">{agent.sales}</span></td>
-                      <td className="px-4 py-3 hidden lg:table-cell text-success font-semibold">RD$ {agent.commission.toLocaleString()}</td>
+                      <td className="px-4 py-3 hidden lg:table-cell text-success font-semibold">RD$ {formatNumber(agent.commission)}</td>
                       <td className="px-4 py-3"><span className={agent.status === 'active' ? 'badge-success' : 'badge-danger'}>{agent.status === 'active' ? 'Activo' : 'Inactivo'}</span></td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">

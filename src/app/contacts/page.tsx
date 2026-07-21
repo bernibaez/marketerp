@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { usePathname } from 'next/navigation';
 import { Users, Truck, Tag, Plus, Search, Filter, Edit2, Trash2, Download, Eye, Phone, MapPin, CreditCard } from 'lucide-react';
+import { formatNumber } from '@/lib/formatNumber';
 
 interface Customer {
   id: number; name: string; phone: string; email: string; address: string;
@@ -144,12 +145,12 @@ export default function ContactsPage() {
                       </td>
                       <td className="px-4 py-3 hidden md:table-cell"><span className="badge-neutral">{c.group}</span></td>
                       <td className="px-4 py-3 hidden lg:table-cell">
-                        <div className="flex items-center gap-1 text-muted-foreground"><CreditCard size={12} />RD$ {c.credit.toLocaleString()}</div>
+                        <div className="flex items-center gap-1 text-muted-foreground"><CreditCard size={12} />RD$ {formatNumber(c.credit)}</div>
                       </td>
                       <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{c.purchases} compras</td>
                       <td className="px-4 py-3 hidden xl:table-cell">
                         <span className={c.balance > 0 ? 'text-warning font-semibold' : 'text-success font-semibold'}>
-                          {c.balance > 0 ? `RD$ ${c.balance.toLocaleString()}` : 'Al día'}
+                          {c.balance > 0 ? `RD$ ${formatNumber(c.balance)}` : 'Al día'}
                         </span>
                       </td>
                       <td className="px-4 py-3"><span className={c.status === 'active' ? 'badge-success' : 'badge-danger'}>{c.status === 'active' ? 'Activo' : 'Inactivo'}</span></td>
@@ -212,7 +213,7 @@ export default function ContactsPage() {
                       <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">{s.purchases} órdenes</td>
                       <td className="px-4 py-3 hidden lg:table-cell">
                         <span className={s.balance > 0 ? 'text-warning font-semibold' : 'text-success font-semibold'}>
-                          {s.balance > 0 ? `RD$ ${s.balance.toLocaleString()}` : 'Al día'}
+                          {s.balance > 0 ? `RD$ ${formatNumber(s.balance)}` : 'Al día'}
                         </span>
                       </td>
                       <td className="px-4 py-3"><span className={s.status === 'active' ? 'badge-success' : 'badge-danger'}>{s.status === 'active' ? 'Activo' : 'Inactivo'}</span></td>
