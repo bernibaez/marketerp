@@ -2,7 +2,7 @@
 import React from 'react';
 import Link from 'next/link';
 import AppLogo from './ui/AppLogo';
-import { LayoutDashboard, ShoppingCart, Package, Users, UserCheck, ShoppingBag, ArrowLeftRight, Sliders, BarChart2, Settings, ChevronRight, Store, FileText, DollarSign,  } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, UserCheck, ShoppingBag, ArrowLeftRight, Sliders, BarChart2, Settings, ChevronRight, Store, FileText, DollarSign, ClipboardList, Upload, Shield, TrendingUp } from 'lucide-react';
 
 interface NavItem {
   id: string;
@@ -17,16 +17,20 @@ const navItems: NavItem[] = [
   { id: 'nav-dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} />, href: '/', group: 'Principal' },
   { id: 'nav-pos', label: 'Punto de Venta', icon: <Store size={18} />, href: '/point-of-sale-pos', group: 'Principal' },
   { id: 'nav-sales', label: 'Ventas', icon: <ShoppingCart size={18} />, href: '/sales', group: 'Operaciones' },
+  { id: 'nav-preventas', label: 'Preventas', icon: <ClipboardList size={18} />, href: '/preventas', group: 'Operaciones' },
+  { id: 'nav-cotizaciones', label: 'Cotizaciones', icon: <FileText size={18} />, href: '/cotizaciones', group: 'Operaciones' },
   { id: 'nav-purchases', label: 'Compras', icon: <ShoppingBag size={18} />, href: '/purchases', group: 'Operaciones' },
   { id: 'nav-products', label: 'Productos', icon: <Package size={18} />, href: '/product-management', group: 'Inventario' },
+  { id: 'nav-importar', label: 'Importar Datos', icon: <Upload size={18} />, href: '/importar', group: 'Inventario' },
   { id: 'nav-stock-transfer', label: 'Transferencias', icon: <ArrowLeftRight size={18} />, href: '/stock-transfers', group: 'Inventario' },
   { id: 'nav-stock-adjust', label: 'Ajustes Stock', icon: <Sliders size={18} />, href: '/stock-adjustments', group: 'Inventario' },
   { id: 'nav-contacts', label: 'Contactos', icon: <Users size={18} />, href: '/contacts', group: 'CRM' },
   { id: 'nav-expenses', label: 'Gastos', icon: <DollarSign size={18} />, href: '/expenses', group: 'Finanzas' },
   { id: 'nav-reports', label: 'Informes', icon: <BarChart2 size={18} />, href: '/reports', group: 'Análisis' },
+  { id: 'nav-reports-advanced', label: 'Inf. Avanzados', icon: <TrendingUp size={18} />, href: '/informes-avanzados', group: 'Análisis' },
   { id: 'nav-users', label: 'Usuarios', icon: <UserCheck size={18} />, href: '/users', group: 'Configuración' },
   { id: 'nav-settings', label: 'Configuración', icon: <Settings size={18} />, href: '/settings', group: 'Configuración' },
-  { id: 'nav-docs', label: 'Documentos', icon: <FileText size={18} />, href: '/documents', group: 'Configuración' },
+  { id: 'nav-config-advanced', label: 'Config. Avanzada', icon: <Shield size={18} />, href: '/configuracion-avanzada', group: 'Configuración' },
 ];
 
 const groups = ['Principal', 'Operaciones', 'Inventario', 'CRM', 'Finanzas', 'Análisis', 'Configuración'];
