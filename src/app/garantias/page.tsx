@@ -1,69 +1,117 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { usePathname } from 'next/navigation';
-import { Shield, Plus, Search, Eye, Edit2, Trash2, CheckCircle, Clock, XCircle, AlertTriangle, Calendar } from 'lucide-react';
-
+import { Shield, Plus, Search, Trash2, CheckCircle, XCircle, AlertTriangle, Calendar } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 
 interface Warranty {
-  id: number; code: string; product: string; sku: string; customer: string;
-  saleCode: string; purchaseDate: string; expiryDate: string;
-  warrantyMonths: number; status: 'active' | 'expired' | 'claimed' | 'voided';
-  claimCount: number; notes: string;
+  id: string;
+  code: string;
+  product_id: string | null;
+  sale_id: string | null;
+  client_id: string | null;
+  serial_number: string | null;
+  warranty_months: number;
+  start_date: string;
+  end_date: string | null;
+  status: string;
+  notes: string | null;
+  created_at: string;
+  products?: { name: string; code: string } | null;
+  contacts?: { name: string } | null;
+  sales?: { code: string } | null;
 }
 
-interface WarrantyClaim {
-  id: number; warrantyCode: string; product: string; customer: string;
-  claimDate: string; description: string; resolution: string;
-  status: 'open' | 'in_progress' | 'resolved' | 'rejected';
-}
+interface Contact { id: string; name: string; }
+interface Product { id: string; name: string; code: string; }
+interface Sale { id: string; code: string; }
 
-const mockWarranties: Warranty[] = [
-  { id: 1, code: 'GAR-001', product: 'Nevera Samsung 400L', sku: 'ELE-001', customer: 'Juan Pérez', saleCode: 'FAC-001', purchaseDate: '2023-07-15', expiryDate: '2024-07-15', warrantyMonths: 12, status: 'active', claimCount: 0, notes: 'Garantía de fábrica' },
-  { id: 2, code: 'GAR-002', product: 'Televisor LG 55"', sku: 'ELE-002', customer: 'Empresa ABC S.R.L.', saleCode: 'FAC-002', purchaseDate: '2023-01-10', expiryDate: '2024-01-10', warrantyMonths: 12, status: 'expired', claimCount: 1, notes: '' },
-  { id: 3, code: 'GAR-003', product: 'Lavadora Whirlpool', sku: 'ELE-003', customer: 'Rosa Jiménez', saleCode: 'FAC-003', purchaseDate: '2023-10-20', expiryDate: '2025-10-20', warrantyMonths: 24, status: 'active', claimCount: 0, notes: 'Garantía extendida' },
-  { id: 4, code: 'GAR-004', product: 'Microondas Panasonic', sku: 'ELE-004', customer: 'Pedro Martínez', saleCode: 'FAC-006', purchaseDate: '2023-11-05', expiryDate: '2024-11-05', warrantyMonths: 12, status: 'claimed', claimCount: 2, notes: 'Reclamación activa' },
-  { id: 5, code: 'GAR-005', product: 'Aire Acondicionado 12000 BTU', sku: 'ELE-005', customer: 'Distribuidora XYZ', saleCode: 'FAC-004', purchaseDate: '2022-06-15', expiryDate: '2024-06-15', warrantyMonths: 24, status: 'active', claimCount: 0, notes: '' },
-];
+type Tab = 'warranties';
 
-const mockClaims: WarrantyClaim[] = [
-  { id: 1, warrantyCode: 'GAR-004', product: 'Microondas Panasonic', customer: 'Pedro Martínez', claimDate: '2024-01-10', description: 'No calienta correctamente', resolution: 'Revisión técnica programada', status: 'in_progress' },
-  { id: 2, warrantyCode: 'GAR-002', product: 'Televisor LG 55"', customer: 'Empresa ABC S.R.L.', claimDate: '2023-12-20', description: 'Pantalla con líneas horizontales', resolution: 'Reemplazo de pantalla realizado', status: 'resolved' },
-  { id: 3, warrantyCode: 'GAR-004', product: 'Microondas Panasonic', customer: 'Pedro Martínez', claimDate: '2024-01-15', description: 'Ruido extraño al operar', resolution: 'Pendiente de diagnóstico', status: 'open' },
-];
-
-type Tab = 'warranties' | 'claims';
-
-const warrantyStatusConfig = {
-  active: { label: 'Activa', cls: 'bg-success/10 text-success', icon: <CheckCircle size={13} /> },
-  expired: { label: 'Vencida', cls: 'bg-secondary text-muted-foreground', icon: <Calendar size={13} /> },
-  claimed: { label: 'Reclamada', cls: 'bg-warning/10 text-warning', icon: <AlertTriangle size={13} /> },
-  voided: { label: 'Anulada', cls: 'bg-danger/10 text-danger', icon: <XCircle size={13} /> },
-};
-
-const claimStatusConfig = {
-  open: { label: 'Abierto', cls: 'bg-info/10 text-info', icon: <Clock size={13} /> },
-  in_progress: { label: 'En Proceso', cls: 'bg-warning/10 text-warning', icon: <AlertTriangle size={13} /> },
-  resolved: { label: 'Resuelto', cls: 'bg-success/10 text-success', icon: <CheckCircle size={13} /> },
-  rejected: { label: 'Rechazado', cls: 'bg-danger/10 text-danger', icon: <XCircle size={13} /> },
+const warrantyStatusConfig: Record<string, { label: string; cls: string; icon: React.ReactNode }> = {
+  activa: { label: 'Activa', cls: 'bg-success/10 text-success', icon: <CheckCircle size={13} /> },
+  vencida: { label: 'Vencida', cls: 'bg-secondary text-muted-foreground', icon: <Calendar size={13} /> },
+  reclamada: { label: 'Reclamada', cls: 'bg-warning/10 text-warning', icon: <AlertTriangle size={13} /> },
+  anulada: { label: 'Anulada', cls: 'bg-danger/10 text-danger', icon: <XCircle size={13} /> },
 };
 
 export default function GarantiasPage() {
   const pathname = usePathname();
-  const [tab, setTab] = useState<Tab>('warranties');
+  const supabase = createClient();
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [warranties, setWarranties] = useState<Warranty[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [formData, setFormData] = useState({
+    product_id: '', sale_id: '', client_id: '', serial_number: '',
+    warranty_months: 12, start_date: new Date().toISOString().slice(0, 10), notes: '',
+  });
 
-  const filteredWarranties = mockWarranties.filter(w =>
+  const fetchData = async () => {
+    setLoading(true); setError(null);
+    const [warRes, contactRes, prodRes, saleRes] = await Promise.all([
+      supabase.from('warranties').select('*, products(name, code), contacts(name), sales(code)').order('created_at', { ascending: false }),
+      supabase.from('contacts').select('id, name').eq('is_active', true).order('name'),
+      supabase.from('products').select('id, name, code').eq('is_active', true).order('name'),
+      supabase.from('sales').select('id, code').order('created_at', { ascending: false }).limit(50),
+    ]);
+    if (warRes.error) setError(warRes.error.message);
+    else setWarranties(warRes.data || []);
+    if (contactRes.data) setContacts(contactRes.data);
+    if (prodRes.data) setProducts(prodRes.data);
+    if (saleRes.data) setSales(saleRes.data);
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  const filtered = warranties.filter(w =>
     w.code.toLowerCase().includes(search.toLowerCase()) ||
-    w.product.toLowerCase().includes(search.toLowerCase()) ||
-    w.customer.toLowerCase().includes(search.toLowerCase())
+    (w.products?.name || '').toLowerCase().includes(search.toLowerCase()) ||
+    (w.contacts?.name || '').toLowerCase().includes(search.toLowerCase())
   );
-  const filteredClaims = mockClaims.filter(c =>
-    c.warrantyCode.toLowerCase().includes(search.toLowerCase()) ||
-    c.product.toLowerCase().includes(search.toLowerCase()) ||
-    c.customer.toLowerCase().includes(search.toLowerCase())
-  );
+
+  const handleSave = async () => {
+    if (!formData.product_id) { setError('Selecciona un producto'); return; }
+    if (!formData.client_id) { setError('Selecciona un cliente'); return; }
+    setSaving(true); setError(null);
+    const code = `GAR-${Date.now().toString().slice(-5)}`;
+    const startDate = new Date(formData.start_date);
+    const endDate = new Date(startDate);
+    endDate.setMonth(endDate.getMonth() + formData.warranty_months);
+    const { error: err } = await supabase.from('warranties').insert({
+      code, product_id: formData.product_id || null,
+      sale_id: formData.sale_id || null, client_id: formData.client_id,
+      serial_number: formData.serial_number || null,
+      warranty_months: formData.warranty_months,
+      start_date: formData.start_date,
+      end_date: endDate.toISOString().slice(0, 10),
+      status: 'activa', notes: formData.notes || null,
+    });
+    if (err) { setError(err.message); setSaving(false); return; }
+    setSaving(false);
+    setShowForm(false);
+    setFormData({ product_id: '', sale_id: '', client_id: '', serial_number: '', warranty_months: 12, start_date: new Date().toISOString().slice(0, 10), notes: '' });
+    fetchData();
+  };
+
+  const handleDelete = async (id: string) => {
+    const { error } = await supabase.from('warranties').delete().eq('id', id);
+    if (error) setError(error.message);
+    else setWarranties(prev => prev.filter(w => w.id !== id));
+  };
+
+  const handleStatusChange = async (id: string, newStatus: string) => {
+    const { error } = await supabase.from('warranties').update({ status: newStatus }).eq('id', id);
+    if (error) setError(error.message);
+    else setWarranties(prev => prev.map(w => w.id === id ? { ...w, status: newStatus } : w));
+  };
 
   if (showForm) {
     return (
@@ -76,58 +124,68 @@ export default function GarantiasPage() {
             </div>
             <button onClick={() => setShowForm(false)} className="btn-secondary">← Volver</button>
           </div>
+          {error && <div className="p-3 bg-danger/10 text-danger rounded-lg text-sm">{error}</div>}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="card p-5 space-y-4">
               <h3 className="font-semibold text-foreground">Información de la Garantía</h3>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Factura de Venta *</label>
-                  <select className="input-field"><option>Seleccionar factura...</option><option>FAC-001 - Juan Pérez</option><option>FAC-002 - Empresa ABC</option></select>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Factura de Venta</label>
+                  <select className="input-field" value={formData.sale_id} onChange={e => setFormData(f => ({ ...f, sale_id: e.target.value }))}>
+                    <option value="">Seleccionar factura...</option>
+                    {sales.map(s => <option key={s.id} value={s.id}>{s.code}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Producto *</label>
-                  <select className="input-field"><option>Seleccionar producto...</option><option>Nevera Samsung 400L</option><option>Televisor LG 55"</option></select>
+                  <select className="input-field" value={formData.product_id} onChange={e => setFormData(f => ({ ...f, product_id: e.target.value }))}>
+                    <option value="">Seleccionar producto...</option>
+                    {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Cliente *</label>
+                  <select className="input-field" value={formData.client_id} onChange={e => setFormData(f => ({ ...f, client_id: e.target.value }))}>
+                    <option value="">Seleccionar cliente...</option>
+                    {contacts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Duración (meses) *</label>
-                  <select className="input-field"><option>6</option><option>12</option><option>18</option><option>24</option><option>36</option></select>
+                  <select className="input-field" value={formData.warranty_months} onChange={e => setFormData(f => ({ ...f, warranty_months: Number(e.target.value) }))}>
+                    {[6, 12, 18, 24, 36].map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Fecha de Inicio *</label>
-                  <input type="date" className="input-field" defaultValue="2024-01-17" />
+                  <input type="date" className="input-field" value={formData.start_date} onChange={e => setFormData(f => ({ ...f, start_date: e.target.value }))} />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">No. de Serie</label>
-                  <input className="input-field" placeholder="SN-XXXXXXXXXX" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Tipo de Garantía</label>
-                  <select className="input-field"><option>Garantía de fábrica</option><option>Garantía extendida</option><option>Garantía del proveedor</option></select>
+                  <input className="input-field" placeholder="SN-XXXXXXXXXX" value={formData.serial_number} onChange={e => setFormData(f => ({ ...f, serial_number: e.target.value }))} />
                 </div>
                 <div className="col-span-2">
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">Condiciones / Notas</label>
-                  <textarea className="input-field resize-none" rows={3} placeholder="Condiciones de la garantía, exclusiones, etc." />
+                  <textarea className="input-field resize-none" rows={3} value={formData.notes} onChange={e => setFormData(f => ({ ...f, notes: e.target.value }))} placeholder="Condiciones de la garantía, exclusiones, etc." />
                 </div>
               </div>
               <div className="flex gap-3 pt-2">
-                <button className="btn-primary flex-1">Registrar Garantía</button>
+                <button onClick={handleSave} disabled={saving} className="btn-primary flex-1">{saving ? 'Guardando...' : 'Registrar Garantía'}</button>
                 <button onClick={() => setShowForm(false)} className="btn-secondary flex-1">Cancelar</button>
               </div>
             </div>
             <div className="card p-5 space-y-4">
               <h3 className="font-semibold text-foreground">Garantías Recientes</h3>
               <div className="space-y-3">
-                {mockWarranties.slice(0, 4).map(w => (
+                {warranties.slice(0, 4).map(w => (
                   <div key={w.id} className="flex items-center gap-3 p-3 rounded-lg bg-secondary/30">
-                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                      <Shield size={16} className="text-primary" />
-                    </div>
+                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0"><Shield size={16} className="text-primary" /></div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{w.product}</p>
-                      <p className="text-xs text-muted-foreground">{w.customer} · {w.warrantyMonths} meses</p>
+                      <p className="text-sm font-medium text-foreground truncate">{w.products?.name || '—'}</p>
+                      <p className="text-xs text-muted-foreground">{w.contacts?.name || '—'} · {w.warranty_months} meses</p>
                     </div>
-                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium flex-shrink-0 ${warrantyStatusConfig[w.status].cls}`}>
-                      {warrantyStatusConfig[w.status].label}
+                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium flex-shrink-0 ${warrantyStatusConfig[w.status]?.cls || 'bg-secondary text-muted-foreground'}`}>
+                      {warrantyStatusConfig[w.status]?.label || w.status}
                     </span>
                   </div>
                 ))}
@@ -144,128 +202,72 @@ export default function GarantiasPage() {
       <div className="space-y-6 slide-up">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <Shield size={24} className="text-primary" />
-              Garantías
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">Gestión de garantías de productos y reclamaciones</p>
+            <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><Shield size={24} className="text-primary" />Garantías</h1>
+            <p className="text-sm text-muted-foreground mt-1">Gestión de garantías de productos</p>
           </div>
-          <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-2">
-            <Plus size={16} /> Nueva Garantía
-          </button>
+          <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-2"><Plus size={16} /> Nueva Garantía</button>
         </div>
 
-        {/* Stats */}
+        {error && <div className="p-3 bg-danger/10 text-danger rounded-lg text-sm">{error}</div>}
+
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { label: 'Garantías Activas', value: mockWarranties.filter(w => w.status === 'active').length, icon: <Shield size={18} />, color: 'text-success' },
-            { label: 'Vencidas', value: mockWarranties.filter(w => w.status === 'expired').length, icon: <Calendar size={18} />, color: 'text-muted-foreground' },
-            { label: 'Reclamaciones', value: mockClaims.length, icon: <AlertTriangle size={18} />, color: 'text-warning' },
-            { label: 'Resueltas', value: mockClaims.filter(c => c.status === 'resolved').length, icon: <CheckCircle size={18} />, color: 'text-primary' },
+            { label: 'Garantías Activas', value: warranties.filter(w => w.status === 'activa').length, icon: <Shield size={18} />, color: 'text-success' },
+            { label: 'Vencidas', value: warranties.filter(w => w.status === 'vencida').length, icon: <Calendar size={18} />, color: 'text-muted-foreground' },
+            { label: 'Reclamadas', value: warranties.filter(w => w.status === 'reclamada').length, icon: <AlertTriangle size={18} />, color: 'text-warning' },
+            { label: 'Total', value: warranties.length, icon: <CheckCircle size={18} />, color: 'text-primary' },
           ].map((s, i) => (
             <div key={i} className="card p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-muted-foreground">{s.label}</span>
-                <span className={s.color}>{s.icon}</span>
-              </div>
+              <div className="flex items-center justify-between mb-2"><span className="text-xs font-medium text-muted-foreground">{s.label}</span><span className={s.color}>{s.icon}</span></div>
               <p className="text-2xl font-bold text-foreground">{s.value}</p>
             </div>
           ))}
         </div>
 
-        {/* Tabs + Table */}
         <div className="card overflow-hidden">
-          <div className="flex border-b border-border">
-            {([
-              { key: 'warranties', label: 'Garantías', icon: <Shield size={15} /> },
-              { key: 'claims', label: 'Reclamaciones', icon: <AlertTriangle size={15} /> },
-            ] as { key: Tab; label: string; icon: React.ReactNode }[]).map(t => (
-              <button key={t.key} onClick={() => setTab(t.key)}
-                className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 transition-colors ${tab === t.key ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
-                {t.icon} {t.label}
-              </button>
-            ))}
-          </div>
           <div className="p-4 border-b border-border">
             <div className="relative">
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input className="input-field pl-9" placeholder="Buscar por código, producto o cliente..." value={search} onChange={e => setSearch(e.target.value)} />
             </div>
           </div>
-          <div className="overflow-x-auto">
-            {tab === 'warranties' ? (
+          {loading ? (
+            <div className="p-8 text-center text-muted-foreground">Cargando garantías...</div>
+          ) : (
+            <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-secondary/50">
-                  <tr>
-                    {['Código', 'Producto', 'Cliente', 'Factura', 'Inicio', 'Vencimiento', 'Duración', 'Reclamaciones', 'Estado', 'Acciones'].map(h => (
-                      <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
+                <thead className="bg-secondary/50"><tr>
+                  {['Código', 'Producto', 'Cliente', 'Factura', 'Inicio', 'Vencimiento', 'Duración', 'Estado', 'Acciones'].map(h => (
+                    <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">{h}</th>
+                  ))}
+                </tr></thead>
                 <tbody className="divide-y divide-border">
-                  {filteredWarranties.map(w => (
+                  {filtered.length === 0 ? (
+                    <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">No hay garantías</td></tr>
+                  ) : filtered.map(w => (
                     <tr key={w.id} className="hover:bg-secondary/30 transition-colors">
                       <td className="px-4 py-3 font-mono text-xs font-semibold text-primary">{w.code}</td>
-                      <td className="px-4 py-3 font-medium text-foreground whitespace-nowrap">{w.product}</td>
-                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{w.customer}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{w.saleCode}</td>
-                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{w.purchaseDate}</td>
-                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{w.expiryDate}</td>
-                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{w.warrantyMonths} meses</td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`font-semibold ${w.claimCount > 0 ? 'text-warning' : 'text-muted-foreground'}`}>{w.claimCount}</span>
+                      <td className="px-4 py-3 font-medium text-foreground whitespace-nowrap">{w.products?.name || '—'}</td>
+                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{w.contacts?.name || '—'}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{w.sales?.code || '—'}</td>
+                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{w.start_date}</td>
+                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{w.end_date || '—'}</td>
+                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{w.warranty_months} meses</td>
+                      <td className="px-4 py-3">
+                        <select value={w.status} onChange={e => handleStatusChange(w.id, e.target.value)}
+                          className={`text-xs px-2 py-1 rounded-full border-0 cursor-pointer ${warrantyStatusConfig[w.status]?.cls || 'bg-secondary text-muted-foreground'}`}>
+                          {Object.entries(warrantyStatusConfig).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                        </select>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${warrantyStatusConfig[w.status].cls}`}>
-                          {warrantyStatusConfig[w.status].icon} {warrantyStatusConfig[w.status].label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <button className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"><Eye size={14} /></button>
-                          <button className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"><Edit2 size={14} /></button>
-                          <button className="p-1.5 rounded-lg hover:bg-danger/10 text-muted-foreground hover:text-danger transition-colors"><Trash2 size={14} /></button>
-                        </div>
+                        <button onClick={() => handleDelete(w.id)} className="p-1.5 rounded-lg hover:bg-danger/10 text-muted-foreground hover:text-danger transition-colors"><Trash2 size={14} /></button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="bg-secondary/50">
-                  <tr>
-                    {['Garantía', 'Producto', 'Cliente', 'Fecha', 'Descripción', 'Resolución', 'Estado', 'Acciones'].map(h => (
-                      <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {filteredClaims.map(c => (
-                    <tr key={c.id} className="hover:bg-secondary/30 transition-colors">
-                      <td className="px-4 py-3 font-mono text-xs font-semibold text-primary">{c.warrantyCode}</td>
-                      <td className="px-4 py-3 font-medium text-foreground whitespace-nowrap">{c.product}</td>
-                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{c.customer}</td>
-                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{c.claimDate}</td>
-                      <td className="px-4 py-3 text-muted-foreground max-w-[160px] truncate">{c.description}</td>
-                      <td className="px-4 py-3 text-muted-foreground max-w-[160px] truncate">{c.resolution}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${claimStatusConfig[c.status].cls}`}>
-                          {claimStatusConfig[c.status].icon} {claimStatusConfig[c.status].label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <button className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"><Eye size={14} /></button>
-                          <button className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"><Edit2 size={14} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </AppLayout>
