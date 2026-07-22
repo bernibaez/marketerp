@@ -1,10 +1,7 @@
 import React from 'react';
 import AppLayout from '@/components/AppLayout';
-import DashboardBentoGrid from './components/DashboardBentoGrid';
-import DashboardCharts from './components/DashboardCharts';
-import RecentTransactions from './components/RecentTransactions';
-import InventoryAlerts from './components/InventoryAlerts';
 import DashboardHeader from './components/DashboardHeader';
+import { DashboardBentoGrid, DashboardCharts, RecentTransactions, InventoryAlerts } from './components/DashboardLazy';
 
 export default function DashboardPage() {
   return (

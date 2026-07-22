@@ -14,6 +14,11 @@ const nextConfig = {
     remotePatterns: imageHosts,
     minimumCacheTTL: 60,
     qualities: [75, 85, 100],
+    formats: ['image/avif', 'image/webp'],
+  },
+  // Reduce JS bundle size by excluding heavy server-only modules from client bundles
+  experimental: {
+    optimizePackageImports: ['lucide-react', 'recharts', '@heroicons/react'],
   },
   webpack(
     config,

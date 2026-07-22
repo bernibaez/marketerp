@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { usePathname } from 'next/navigation';
 import { ShoppingCart, FileText, RotateCcw, Plus, Search, Filter, Download, Eye, Trash2, Printer } from 'lucide-react';
@@ -71,36 +71,84 @@ export default function SalesPage() {
   const [returns, setReturns] = useState<Return[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // Track which tabs have been loaded to avoid re-fetching
+  const loadedTabs = useRef<Set<Tab>>(new Set());
 
-  const fetchData = useCallback(async () => {
+  const fetchSales = useCallback(async () => {
+    if (loadedTabs.current.has('sales')) return;
     setLoading(true);
     setError('');
     try {
       const supabase = createClient();
-      const [salesRes, quotesRes, returnsRes] = await Promise.all([
-        supabase.from('sales').select('*, contacts(name)').order('created_at', { ascending: false }),
-        supabase.from('quotations').select('*, contacts(name)').order('created_at', { ascending: false }),
-        supabase.from('returns').select('*, contacts(name)').order('created_at', { ascending: false }),
-      ]);
-      if (salesRes.error) throw salesRes.error;
-      if (quotesRes.error) throw quotesRes.error;
-      if (returnsRes.error) throw returnsRes.error;
-      setSales(salesRes.data || []);
-      setQuotations(quotesRes.data || []);
-      setReturns(returnsRes.data || []);
+      const res = await supabase
+        .from('sales')
+        .select('id, code, client_id, status, subtotal, tax_amount, discount_amount, total, payment_method, payment_status, sale_date, created_at, contacts(name)')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (res.error) throw res.error;
+      setSales(res.data || []);
+      loadedTabs.current.add('sales');
     } catch (e: any) {
-      setError(e.message || 'Error al cargar datos');
+      setError(e.message || 'Error al cargar ventas');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  const fetchQuotations = useCallback(async () => {
+    if (loadedTabs.current.has('quotes')) return;
+    setLoading(true);
+    setError('');
+    try {
+      const supabase = createClient();
+      const res = await supabase
+        .from('quotations')
+        .select('id, code, client_id, status, total, valid_until, created_at, contacts(name)')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (res.error) throw res.error;
+      setQuotations(res.data || []);
+      loadedTabs.current.add('quotes');
+    } catch (e: any) {
+      setError(e.message || 'Error al cargar cotizaciones');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchReturns = useCallback(async () => {
+    if (loadedTabs.current.has('returns')) return;
+    setLoading(true);
+    setError('');
+    try {
+      const supabase = createClient();
+      const res = await supabase
+        .from('returns')
+        .select('id, code, return_type, contact_id, status, total, reason, created_at, contacts(name)')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (res.error) throw res.error;
+      setReturns(res.data || []);
+      loadedTabs.current.add('returns');
+    } catch (e: any) {
+      setError(e.message || 'Error al cargar devoluciones');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Only fetch the active tab's data
+  useEffect(() => {
+    if (tab === 'sales') fetchSales();
+    else if (tab === 'quotes') fetchQuotations();
+    else if (tab === 'returns') fetchReturns();
+  }, [tab, fetchSales, fetchQuotations, fetchReturns]);
 
   const handleDeleteSale = async (id: string) => {
     const supabase = createClient();
     await supabase.from('sales').delete().eq('id', id);
-    fetchData();
+    loadedTabs.current.delete('sales');
+    fetchSales();
   };
 
   const filteredSales = sales.filter(s =>
@@ -185,7 +233,7 @@ export default function SalesPage() {
         {loading && (
           <div className="card p-12 text-center text-muted-foreground">
             <ShoppingCart size={40} className="mx-auto mb-3 opacity-30 animate-pulse" />
-            <p>Cargando ventas...</p>
+            <p>Cargando...</p>
           </div>
         )}
 

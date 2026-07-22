@@ -1,6 +1,6 @@
 'use client';
 import React, { useEffect, useState } from 'react';
-import { TrendingUp, ShoppingCart, Package, AlertTriangle, Clock, Users, Truck, DollarSign, BarChart2, Receipt, Layers,  } from 'lucide-react';
+import { TrendingUp, ShoppingCart, Package, AlertTriangle, Clock, Users, Truck, DollarSign, BarChart2, Receipt, Layers } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { formatNumber } from '@/lib/formatNumber';
 
@@ -25,7 +25,6 @@ interface DashboardStats {
 }
 
 export default function DashboardBentoGrid() {
-  const supabase = createClient();
   const [stats, setStats] = useState<DashboardStats>({
     salesToday: 0, salesMonth: 0, salesMonthTarget: 2000000, grossProfit: 0,
     purchasesMonth: 0, purchasesCount: 0, productsSoldToday: 0, transactionsToday: 0,
@@ -36,6 +35,7 @@ export default function DashboardBentoGrid() {
 
   useEffect(() => {
     const fetchStats = async () => {
+      const supabase = createClient();
       const today = new Date().toISOString().slice(0, 10);
       const monthStart = new Date();
       monthStart.setDate(1);
@@ -43,13 +43,13 @@ export default function DashboardBentoGrid() {
 
       try {
         const [salesTodayRes, salesMonthRes, purchasesMonthRes, productsRes, contactsRes, saleItemsTodayRes, pendingSalesRes, cashRes] = await Promise.all([
-          supabase.from('sales').select('total').gte('created_at', today).lte('created_at', today + 'T23:59:59'),
-          supabase.from('sales').select('total, subtotal').gte('created_at', monthStartStr),
-          supabase.from('purchases').select('total').gte('created_at', monthStartStr),
-          supabase.from('products').select('id, current_stock, min_stock, expiry_date').eq('is_active', true),
-          supabase.from('contacts').select('id, type').eq('is_active', true),
-          supabase.from('sale_items').select('quantity').gte('created_at', today),
-          supabase.from('sales').select('total').eq('payment_status', 'pendiente'),
+          supabase.from('sales').select('total').gte('created_at', today).lte('created_at', today + 'T23:59:59').limit(500),
+          supabase.from('sales').select('total, subtotal').gte('created_at', monthStartStr).limit(1000),
+          supabase.from('purchases').select('total').gte('created_at', monthStartStr).limit(500),
+          supabase.from('products').select('id, current_stock, min_stock, expiry_date').eq('is_active', true).limit(2000),
+          supabase.from('contacts').select('id, type').eq('is_active', true).limit(1000),
+          supabase.from('sale_items').select('quantity').gte('created_at', today).limit(500),
+          supabase.from('sales').select('total').eq('payment_status', 'pendiente').limit(500),
           supabase.from('cash_sessions').select('opening_amount').eq('status', 'abierta').limit(1),
         ]);
 

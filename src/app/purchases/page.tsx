@@ -66,8 +66,8 @@ export default function PurchasesPage() {
     try {
       const supabase = createClient();
       const [purchasesRes, returnsRes] = await Promise.all([
-        supabase.from('purchases').select('*, contacts(name)').order('created_at', { ascending: false }),
-        supabase.from('returns').select('*, contacts(name)').eq('return_type', 'compra').order('created_at', { ascending: false }),
+        supabase.from('purchases').select('id, code, supplier_id, status, subtotal, tax_amount, discount_amount, total, payment_method, payment_status, purchase_date, invoice_number, created_at, contacts(name)').order('created_at', { ascending: false }).limit(200),
+        supabase.from('returns').select('id, code, return_type, contact_id, status, total, reason, created_at, contacts(name)').eq('return_type', 'compra').order('created_at', { ascending: false }).limit(200),
       ]);
       if (purchasesRes.error) throw purchasesRes.error;
       if (returnsRes.error) throw returnsRes.error;
