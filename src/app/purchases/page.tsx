@@ -1,51 +1,104 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { usePathname } from 'next/navigation';
 import { ShoppingBag, RotateCcw, Plus, Search, Filter, Download, Eye, Edit2, Trash2 } from 'lucide-react';
 import { formatNumber } from '@/lib/formatNumber';
+import { createClient } from '@/lib/supabase/client';
 
 interface Purchase {
-  id: number; code: string; supplier: string; date: string; items: number;
-  subtotal: number; tax: number; total: number; status: 'received' | 'pending' | 'partial'; payment: string;
+  id: string;
+  code: string;
+  supplier_id: string | null;
+  status: string;
+  subtotal: number;
+  tax_amount: number;
+  discount_amount: number;
+  total: number;
+  payment_method: string | null;
+  payment_status: string | null;
+  purchase_date: string;
+  invoice_number: string | null;
+  created_at: string;
+  contacts?: { name: string } | null;
 }
+
 interface Return {
-  id: number; code: string; purchaseCode: string; supplier: string; date: string; total: number; reason: string; status: 'approved' | 'pending';
+  id: string;
+  code: string;
+  return_type: string;
+  contact_id: string | null;
+  status: string;
+  total: number;
+  reason: string | null;
+  created_at: string;
+  contacts?: { name: string } | null;
 }
-
-const mockPurchases: Purchase[] = [
-  { id: 1, code: 'OC-001', supplier: 'Distribuidora Nacional S.A.', date: '2024-01-15', items: 12, subtotal: 45000, tax: 8100, total: 53100, status: 'received', payment: 'Transferencia' },
-  { id: 2, code: 'OC-002', supplier: 'Importadora del Caribe', date: '2024-01-14', items: 5, subtotal: 18500, tax: 3330, total: 21830, status: 'pending', payment: 'Crédito' },
-  { id: 3, code: 'OC-003', supplier: 'Alimentos Frescos RD', date: '2024-01-13', items: 28, subtotal: 32000, tax: 5760, total: 37760, status: 'received', payment: 'Efectivo' },
-  { id: 4, code: 'OC-004', supplier: 'Bebidas y Más', date: '2024-01-12', items: 8, subtotal: 12000, tax: 2160, total: 14160, status: 'partial', payment: 'Cheque' },
-  { id: 5, code: 'OC-005', supplier: 'Distribuidora Nacional S.A.', date: '2024-01-10', items: 20, subtotal: 67000, tax: 12060, total: 79060, status: 'received', payment: 'Transferencia' },
-];
-
-const mockReturns: Return[] = [
-  { id: 1, code: 'DEV-001', purchaseCode: 'OC-001', supplier: 'Distribuidora Nacional S.A.', date: '2024-01-16', total: 3500, reason: 'Productos dañados', status: 'approved' },
-  { id: 2, code: 'DEV-002', purchaseCode: 'OC-003', supplier: 'Alimentos Frescos RD', date: '2024-01-14', total: 1200, reason: 'Fecha de vencimiento próxima', status: 'pending' },
-];
 
 type Tab = 'list' | 'returns';
 
-const statusMap = {
-  received: { label: 'Recibido', cls: 'badge-success' },
-  pending: { label: 'Pendiente', cls: 'badge-warning' },
-  partial: { label: 'Parcial', cls: 'badge-info' },
-  approved: { label: 'Aprobado', cls: 'badge-success' },
+const statusMap: Record<string, { label: string; cls: string }> = {
+  completado: { label: 'Recibido', cls: 'badge-success' },
+  pendiente: { label: 'Pendiente', cls: 'badge-warning' },
+  aprobado: { label: 'Aprobado', cls: 'badge-success' },
+  rechazado: { label: 'Rechazado', cls: 'badge-danger' },
+  cancelado: { label: 'Cancelado', cls: 'badge-danger' },
+  borrador: { label: 'Borrador', cls: 'badge-neutral' },
 };
+
+function getStatusBadge(status: string) {
+  return statusMap[status] ?? { label: status, cls: 'badge-neutral' };
+}
 
 export default function PurchasesPage() {
   const pathname = usePathname();
   const [tab, setTab] = useState<Tab>('list');
   const [search, setSearch] = useState('');
-  const [showModal, setShowModal] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [returns, setReturns] = useState<Return[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const filtered = mockPurchases.filter(p =>
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const supabase = createClient();
+      const [purchasesRes, returnsRes] = await Promise.all([
+        supabase.from('purchases').select('*, contacts(name)').order('created_at', { ascending: false }),
+        supabase.from('returns').select('*, contacts(name)').eq('return_type', 'compra').order('created_at', { ascending: false }),
+      ]);
+      if (purchasesRes.error) throw purchasesRes.error;
+      if (returnsRes.error) throw returnsRes.error;
+      setPurchases(purchasesRes.data || []);
+      setReturns(returnsRes.data || []);
+    } catch (e: any) {
+      setError(e.message || 'Error al cargar datos');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const handleDelete = async (id: string) => {
+    const supabase = createClient();
+    await supabase.from('purchases').delete().eq('id', id);
+    fetchData();
+  };
+
+  const filtered = purchases.filter(p =>
     p.code.toLowerCase().includes(search.toLowerCase()) ||
-    p.supplier.toLowerCase().includes(search.toLowerCase())
+    (p.contacts?.name ?? '').toLowerCase().includes(search.toLowerCase())
   );
+
+  const stats = {
+    totalMonth: purchases.reduce((s, p) => s + p.total, 0),
+    total: purchases.length,
+    pending: purchases.filter(p => p.status === 'pendiente').length,
+    totalReturns: returns.length,
+  };
 
   if (showAddForm) {
     return (
@@ -65,11 +118,11 @@ export default function PurchasesPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">Proveedor *</label>
-                    <select className="input-field"><option>Seleccionar proveedor...</option><option>Distribuidora Nacional S.A.</option><option>Importadora del Caribe</option></select>
+                    <select className="input-field"><option>Seleccionar proveedor...</option></select>
                   </div>
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">Fecha *</label>
-                    <input type="date" className="input-field" defaultValue="2024-01-15" />
+                    <input type="date" className="input-field" />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-muted-foreground mb-1 block">Método de Pago</label>
@@ -81,47 +134,8 @@ export default function PurchasesPage() {
                   </div>
                 </div>
               </div>
-              <div className="card p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-semibold text-foreground">Productos</h3>
-                  <button className="btn-primary flex items-center gap-2 text-xs py-1.5"><Plus size={14} />Agregar producto</button>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead><tr className="border-b border-border">
-                      <th className="text-left py-2 text-muted-foreground font-medium">Producto</th>
-                      <th className="text-left py-2 text-muted-foreground font-medium">Cantidad</th>
-                      <th className="text-left py-2 text-muted-foreground font-medium">Precio</th>
-                      <th className="text-left py-2 text-muted-foreground font-medium">Total</th>
-                      <th className="py-2"></th>
-                    </tr></thead>
-                    <tbody>
-                      {[
-                        { name: 'Arroz Selecto 5lb', qty: 50, price: 180, total: 9000 },
-                        { name: 'Aceite Vegetal 1L', qty: 24, price: 220, total: 5280 },
-                        { name: 'Azúcar Blanca 2lb', qty: 36, price: 95, total: 3420 },
-                      ].map((item, i) => (
-                        <tr key={i} className="border-b border-border">
-                          <td className="py-2 text-foreground">{item.name}</td>
-                          <td className="py-2"><input type="number" defaultValue={item.qty} className="input-field w-20 py-1" /></td>
-                          <td className="py-2"><input type="number" defaultValue={item.price} className="input-field w-24 py-1" /></td>
-                          <td className="py-2 font-semibold text-foreground">RD$ {formatNumber(item.total)}</td>
-                          <td className="py-2"><button className="p-1 text-danger hover:bg-danger-bg rounded"><Trash2 size={14} /></button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
             </div>
             <div className="space-y-4">
-              <div className="card p-5 space-y-3">
-                <h3 className="font-semibold text-foreground">Resumen</h3>
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Subtotal</span><span className="font-medium">RD$ 17,700</span></div>
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">ITBIS (18%)</span><span className="font-medium">RD$ 3,186</span></div>
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Descuento</span><span className="font-medium text-success">- RD$ 0</span></div>
-                <div className="border-t border-border pt-3 flex justify-between font-bold text-foreground"><span>Total</span><span>RD$ 20,886</span></div>
-              </div>
               <div className="card p-5 space-y-3">
                 <h3 className="font-semibold text-foreground">Notas</h3>
                 <textarea className="input-field" rows={4} placeholder="Observaciones..." />
@@ -147,12 +161,14 @@ export default function PurchasesPage() {
           </button>
         </div>
 
+        {error && <div className="p-3 rounded-lg bg-danger/10 text-danger text-sm">{error}</div>}
+
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="card p-4"><p className="text-xs text-muted-foreground">Compras del mes</p><p className="text-2xl font-bold text-foreground mt-1">RD$ 205.9K</p></div>
-          <div className="card p-4"><p className="text-xs text-muted-foreground">Órdenes totales</p><p className="text-2xl font-bold text-info mt-1">48</p></div>
-          <div className="card p-4"><p className="text-xs text-muted-foreground">Pendientes</p><p className="text-2xl font-bold text-warning mt-1">5</p></div>
-          <div className="card p-4"><p className="text-xs text-muted-foreground">Devoluciones</p><p className="text-2xl font-bold text-danger mt-1">2</p></div>
+          <div className="card p-4"><p className="text-xs text-muted-foreground">Compras totales</p><p className="text-2xl font-bold text-foreground mt-1">RD$ {formatNumber(stats.totalMonth)}</p></div>
+          <div className="card p-4"><p className="text-xs text-muted-foreground">Órdenes totales</p><p className="text-2xl font-bold text-info mt-1">{stats.total}</p></div>
+          <div className="card p-4"><p className="text-xs text-muted-foreground">Pendientes</p><p className="text-2xl font-bold text-warning mt-1">{stats.pending}</p></div>
+          <div className="card p-4"><p className="text-xs text-muted-foreground">Devoluciones</p><p className="text-2xl font-bold text-danger mt-1">{stats.totalReturns}</p></div>
         </div>
 
         <div className="flex gap-1 bg-secondary rounded-xl p-1 w-fit">
@@ -175,7 +191,14 @@ export default function PurchasesPage() {
           </div>
         </div>
 
-        {tab === 'list' && (
+        {loading && (
+          <div className="card p-12 text-center text-muted-foreground">
+            <ShoppingBag size={40} className="mx-auto mb-3 opacity-30 animate-pulse" />
+            <p>Cargando compras...</p>
+          </div>
+        )}
+
+        {!loading && tab === 'list' && (
           <div className="card overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -184,7 +207,6 @@ export default function PurchasesPage() {
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Código</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Proveedor</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden md:table-cell">Fecha</th>
-                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">Productos</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">ITBIS</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Total</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden md:table-cell">Estado</th>
@@ -192,48 +214,46 @@ export default function PurchasesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((p, i) => (
-                    <tr key={p.id} className={`border-b border-border hover:bg-secondary/30 transition-colors ${i % 2 === 0 ? '' : 'bg-secondary/10'}`}>
-                      <td className="px-4 py-3 font-mono text-primary font-medium">{p.code}</td>
-                      <td className="px-4 py-3 font-medium text-foreground">{p.supplier}</td>
-                      <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{p.date}</td>
-                      <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{p.items} items</td>
-                      <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">RD$ {formatNumber(p.tax)}</td>
-                      <td className="px-4 py-3 font-bold text-foreground">RD$ {formatNumber(p.total)}</td>
-                      <td className="px-4 py-3 hidden md:table-cell"><span className={statusMap[p.status].cls}>{statusMap[p.status].label}</span></td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          <button className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"><Eye size={14} /></button>
-                          <button className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"><Edit2 size={14} /></button>
-                          <button className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-danger transition-colors"><Trash2 size={14} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {filtered.map((p, i) => {
+                    const badge = getStatusBadge(p.status);
+                    return (
+                      <tr key={p.id} className={`border-b border-border hover:bg-secondary/30 transition-colors ${i % 2 === 0 ? '' : 'bg-secondary/10'}`}>
+                        <td className="px-4 py-3 font-mono text-primary font-medium">{p.code}</td>
+                        <td className="px-4 py-3 font-medium text-foreground">{p.contacts?.name ?? '—'}</td>
+                        <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{p.purchase_date}</td>
+                        <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">RD$ {formatNumber(p.tax_amount)}</td>
+                        <td className="px-4 py-3 font-bold text-foreground">RD$ {formatNumber(p.total)}</td>
+                        <td className="px-4 py-3 hidden md:table-cell"><span className={badge.cls}>{badge.label}</span></td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-1">
+                            <button className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"><Eye size={14} /></button>
+                            <button className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"><Edit2 size={14} /></button>
+                            <button onClick={() => handleDelete(p.id)} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-danger transition-colors"><Trash2 size={14} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filtered.length === 0 && (
+                    <tr><td colSpan={7} className="text-center py-8 text-muted-foreground">No se encontraron compras</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
-            <div className="px-4 py-3 border-t border-border flex items-center justify-between text-sm text-muted-foreground">
-              <span>Mostrando {filtered.length} de {mockPurchases.length} compras</span>
-              <div className="flex gap-1">
-                <button className="px-3 py-1 rounded-lg hover:bg-secondary transition-colors">Anterior</button>
-                <button className="px-3 py-1 rounded-lg bg-primary text-primary-foreground">1</button>
-                <button className="px-3 py-1 rounded-lg hover:bg-secondary transition-colors">Siguiente</button>
-              </div>
+            <div className="px-4 py-3 border-t border-border text-sm text-muted-foreground">
+              <span>Mostrando {filtered.length} de {purchases.length} compras</span>
             </div>
           </div>
         )}
 
-        {tab === 'returns' && (
+        {!loading && tab === 'returns' && (
           <div className="card overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-secondary/50">
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Código</th>
-                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Compra Ref.</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden md:table-cell">Proveedor</th>
-                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden md:table-cell">Fecha</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Total</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">Motivo</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Estado</th>
@@ -241,23 +261,27 @@ export default function PurchasesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {mockReturns.map((r, i) => (
-                    <tr key={r.id} className={`border-b border-border hover:bg-secondary/30 transition-colors ${i % 2 === 0 ? '' : 'bg-secondary/10'}`}>
-                      <td className="px-4 py-3 font-mono text-danger font-medium">{r.code}</td>
-                      <td className="px-4 py-3 font-mono text-primary">{r.purchaseCode}</td>
-                      <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{r.supplier}</td>
-                      <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{r.date}</td>
-                      <td className="px-4 py-3 font-bold text-foreground">RD$ {formatNumber(r.total)}</td>
-                      <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{r.reason}</td>
-                      <td className="px-4 py-3"><span className={statusMap[r.status].cls}>{statusMap[r.status].label}</span></td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          <button className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"><Eye size={14} /></button>
-                          <button className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-danger transition-colors"><Trash2 size={14} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {returns.map((r, i) => {
+                    const badge = getStatusBadge(r.status);
+                    return (
+                      <tr key={r.id} className={`border-b border-border hover:bg-secondary/30 transition-colors ${i % 2 === 0 ? '' : 'bg-secondary/10'}`}>
+                        <td className="px-4 py-3 font-mono text-danger font-medium">{r.code}</td>
+                        <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{r.contacts?.name ?? '—'}</td>
+                        <td className="px-4 py-3 font-bold text-foreground">RD$ {formatNumber(r.total)}</td>
+                        <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{r.reason ?? '—'}</td>
+                        <td className="px-4 py-3"><span className={badge.cls}>{badge.label}</span></td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-1">
+                            <button className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"><Eye size={14} /></button>
+                            <button className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-danger transition-colors"><Trash2 size={14} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {returns.length === 0 && (
+                    <tr><td colSpan={6} className="text-center py-8 text-muted-foreground">No se encontraron devoluciones de compras</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
