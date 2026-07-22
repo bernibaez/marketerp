@@ -41,49 +41,54 @@ export default function DashboardBentoGrid() {
       monthStart.setDate(1);
       const monthStartStr = monthStart.toISOString().slice(0, 10);
 
-      const [salesTodayRes, salesMonthRes, purchasesMonthRes, productsRes, contactsRes, saleItemsTodayRes, pendingSalesRes, cashRes] = await Promise.all([
-        supabase.from('sales').select('total').gte('created_at', today).lte('created_at', today + 'T23:59:59'),
-        supabase.from('sales').select('total, subtotal').gte('created_at', monthStartStr),
-        supabase.from('purchases').select('total').gte('created_at', monthStartStr),
-        supabase.from('products').select('id, current_stock, min_stock, expiry_date').eq('is_active', true),
-        supabase.from('contacts').select('id, type').eq('is_active', true),
-        supabase.from('sale_items').select('quantity, sale_id, sales!inner(created_at)').gte('sales.created_at', today),
-        supabase.from('sales').select('total').eq('payment_status', 'pendiente'),
-        supabase.from('cash_sessions').select('opening_amount').eq('status', 'abierta').limit(1),
-      ]);
+      try {
+        const [salesTodayRes, salesMonthRes, purchasesMonthRes, productsRes, contactsRes, saleItemsTodayRes, pendingSalesRes, cashRes] = await Promise.all([
+          supabase.from('sales').select('total').gte('created_at', today).lte('created_at', today + 'T23:59:59'),
+          supabase.from('sales').select('total, subtotal').gte('created_at', monthStartStr),
+          supabase.from('purchases').select('total').gte('created_at', monthStartStr),
+          supabase.from('products').select('id, current_stock, min_stock, expiry_date').eq('is_active', true),
+          supabase.from('contacts').select('id, type').eq('is_active', true),
+          supabase.from('sale_items').select('quantity').gte('created_at', today),
+          supabase.from('sales').select('total').eq('payment_status', 'pendiente'),
+          supabase.from('cash_sessions').select('opening_amount').eq('status', 'abierta').limit(1),
+        ]);
 
-      const salesToday = (salesTodayRes.data || []).reduce((s, r) => s + Number(r.total), 0);
-      const salesMonth = (salesMonthRes.data || []).reduce((s, r) => s + Number(r.total), 0);
-      const purchasesMonth = (purchasesMonthRes.data || []).reduce((s, r) => s + Number(r.total), 0);
-      const grossProfit = salesMonth - purchasesMonth;
+        const salesToday = (salesTodayRes.data || []).reduce((s, r) => s + Number(r.total), 0);
+        const salesMonth = (salesMonthRes.data || []).reduce((s, r) => s + Number(r.total), 0);
+        const purchasesMonth = (purchasesMonthRes.data || []).reduce((s, r) => s + Number(r.total), 0);
+        const grossProfit = salesMonth - purchasesMonth;
 
-      const products = productsRes.data || [];
-      const lowStockCount = products.filter(p => Number(p.current_stock) <= Number(p.min_stock) && Number(p.current_stock) > 0).length;
-      const criticalStockCount = products.filter(p => Number(p.current_stock) === 0).length;
-      const totalStock = products.reduce((s, p) => s + Number(p.current_stock), 0);
-      const nextWeek = new Date(); nextWeek.setDate(nextWeek.getDate() + 7);
-      const expiringCount = products.filter(p => p.expiry_date && new Date(p.expiry_date) <= nextWeek).length;
+        const products = productsRes.data || [];
+        const lowStockCount = products.filter(p => Number(p.current_stock) <= Number(p.min_stock) && Number(p.current_stock) > 0).length;
+        const criticalStockCount = products.filter(p => Number(p.current_stock) === 0).length;
+        const totalStock = products.reduce((s, p) => s + Number(p.current_stock), 0);
+        const nextWeek = new Date(); nextWeek.setDate(nextWeek.getDate() + 7);
+        const expiringCount = products.filter(p => p.expiry_date && new Date(p.expiry_date) <= nextWeek).length;
 
-      const contacts = contactsRes.data || [];
-      const clientsCount = contacts.filter(c => c.type === 'cliente' || c.type === 'ambos').length;
-      const suppliersCount = contacts.filter(c => c.type === 'proveedor' || c.type === 'ambos').length;
+        const contacts = contactsRes.data || [];
+        const clientsCount = contacts.filter(c => c.type === 'cliente' || c.type === 'ambos').length;
+        const suppliersCount = contacts.filter(c => c.type === 'proveedor' || c.type === 'ambos').length;
 
-      const productsSoldToday = (saleItemsTodayRes.data || []).reduce((s: number, r: any) => s + Number(r.quantity), 0);
-      const transactionsToday = salesTodayRes.data?.length || 0;
+        const productsSoldToday = (saleItemsTodayRes.data || []).reduce((s: number, r: any) => s + Number(r.quantity), 0);
+        const transactionsToday = salesTodayRes.data?.length || 0;
 
-      const pendingInvoices = pendingSalesRes.data?.length || 0;
-      const pendingAmount = (pendingSalesRes.data || []).reduce((s, r) => s + Number(r.total), 0);
-      const cashInRegister = cashRes.data?.[0]?.opening_amount || 0;
+        const pendingInvoices = pendingSalesRes.data?.length || 0;
+        const pendingAmount = (pendingSalesRes.data || []).reduce((s, r) => s + Number(r.total), 0);
+        const cashInRegister = cashRes.data?.[0]?.opening_amount || 0;
 
-      setStats({
-        salesToday, salesMonth, salesMonthTarget: 2000000, grossProfit,
-        purchasesMonth, purchasesCount: purchasesMonthRes.data?.length || 0,
-        productsSoldToday, transactionsToday,
-        lowStockCount, criticalStockCount, expiringCount,
-        clientsCount, suppliersCount, totalStock,
-        pendingInvoices, pendingAmount, cashInRegister,
-      });
-      setLoading(false);
+        setStats({
+          salesToday, salesMonth, salesMonthTarget: 2000000, grossProfit,
+          purchasesMonth, purchasesCount: purchasesMonthRes.data?.length || 0,
+          productsSoldToday, transactionsToday,
+          lowStockCount, criticalStockCount, expiringCount,
+          clientsCount, suppliersCount, totalStock,
+          pendingInvoices, pendingAmount, cashInRegister,
+        });
+      } catch {
+        // silently fail — stats remain at defaults
+      } finally {
+        setLoading(false);
+      }
     };
     fetchStats();
   }, []);

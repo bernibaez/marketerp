@@ -40,14 +40,19 @@ export default function UsersPage() {
 
   const fetchData = async () => {
     setLoading(true); setError(null);
-    const [usersRes, rolesRes] = await Promise.all([
-      supabase.from('user_profiles').select('*').order('created_at', { ascending: false }),
-      supabase.from('roles').select('*').order('name'),
-    ]);
-    if (usersRes.error) setError(usersRes.error.message);
-    else setUsers(usersRes.data || []);
-    if (rolesRes.data) setRoles(rolesRes.data);
-    setLoading(false);
+    try {
+      const [usersRes, rolesRes] = await Promise.all([
+        supabase.from('user_profiles').select('*').order('created_at', { ascending: false }),
+        supabase.from('roles').select('*').order('name'),
+      ]);
+      if (usersRes.error) setError(usersRes.error.message);
+      else setUsers(usersRes.data || []);
+      if (rolesRes.data) setRoles(rolesRes.data);
+    } catch (e: any) {
+      setError(e.message || 'Error al cargar datos');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { fetchData(); }, []);

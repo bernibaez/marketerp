@@ -50,32 +50,37 @@ export default function ProductPanel({ onAddToCart }: ProductPanelProps) {
 
   useEffect(() => {
     const fetchProducts = async () => {
-      const { data, error } = await supabase
-        .from('products')
-        .select('id, code, barcode, name, sale_price, cost_price, current_stock, min_stock, categories(name), units(name), tax_rates(rate)')
-        .eq('is_active', true)
-        .order('name');
-      if (error || !data) { setLoading(false); return; }
+      try {
+        const { data, error } = await supabase
+          .from('products')
+          .select('id, code, barcode, name, sale_price, cost_price, current_stock, min_stock, categories(name), units(name), tax_rates(rate)')
+          .eq('is_active', true)
+          .order('name');
+        if (error || !data) return;
 
-      const mapped: Product[] = (data as DBProduct[]).map(p => ({
-        id: p.id,
-        sku: p.code,
-        barcode: p.barcode || '',
-        name: p.name,
-        category: p.categories?.name || 'Sin categoría',
-        price: Number(p.sale_price),
-        cost: Number(p.cost_price),
-        stock: Number(p.current_stock),
-        unit: p.units?.name || 'Unidad',
-        tax: Number(p.tax_rates?.rate || 0),
-        lowStock: Number(p.current_stock) <= Number(p.min_stock) && Number(p.current_stock) > 0,
-        outOfStock: Number(p.current_stock) === 0,
-      }));
-      setProducts(mapped);
+        const mapped: Product[] = (data as DBProduct[]).map(p => ({
+          id: p.id,
+          sku: p.code,
+          barcode: p.barcode || '',
+          name: p.name,
+          category: p.categories?.name || 'Sin categoría',
+          price: Number(p.sale_price),
+          cost: Number(p.cost_price),
+          stock: Number(p.current_stock),
+          unit: p.units?.name || 'Unidad',
+          tax: Number(p.tax_rates?.rate || 0),
+          lowStock: Number(p.current_stock) <= Number(p.min_stock) && Number(p.current_stock) > 0,
+          outOfStock: Number(p.current_stock) === 0,
+        }));
+        setProducts(mapped);
 
-      const uniqueCats = Array.from(new Set(mapped.map(p => p.category)));
-      setCategories([{ id: 'all', label: 'Todos' }, ...uniqueCats.map(c => ({ id: c, label: c }))]);
-      setLoading(false);
+        const uniqueCats = Array.from(new Set(mapped.map(p => p.category)));
+        setCategories([{ id: 'all', label: 'Todos' }, ...uniqueCats.map(c => ({ id: c, label: c }))]);
+      } catch {
+        // silently fail
+      } finally {
+        setLoading(false);
+      }
     };
     fetchProducts();
   }, []);

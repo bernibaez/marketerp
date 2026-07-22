@@ -62,68 +62,73 @@ export default function ReportsPage() {
 
   const fetchReportData = async () => {
     setLoading(true);
-    const [salesRes, purchasesRes, expensesRes, productsRes, contactsRes, saleItemsRes] = await Promise.all([
-      supabase.from('sales').select('total, created_at').gte('created_at', dateFrom).lte('created_at', dateTo + 'T23:59:59'),
-      supabase.from('purchases').select('total, created_at').gte('created_at', dateFrom).lte('created_at', dateTo + 'T23:59:59'),
-      supabase.from('expenses').select('amount, created_at').gte('created_at', dateFrom).lte('created_at', dateTo + 'T23:59:59'),
-      supabase.from('products').select('id, name, current_stock, min_stock, categories(name)').eq('is_active', true),
-      supabase.from('contacts').select('id').eq('is_active', true).eq('type', 'cliente'),
-      supabase.from('sale_items').select('quantity, unit_price, subtotal, products(name)').limit(200),
-    ]);
+    try {
+      const [salesRes, purchasesRes, expensesRes, productsRes, contactsRes, saleItemsRes] = await Promise.all([
+        supabase.from('sales').select('total, created_at').gte('created_at', dateFrom).lte('created_at', dateTo + 'T23:59:59'),
+        supabase.from('purchases').select('total, created_at').gte('created_at', dateFrom).lte('created_at', dateTo + 'T23:59:59'),
+        supabase.from('expenses').select('amount, created_at').gte('created_at', dateFrom).lte('created_at', dateTo + 'T23:59:59'),
+        supabase.from('products').select('id, name, current_stock, min_stock, categories(name)').eq('is_active', true),
+        supabase.from('contacts').select('id').eq('is_active', true).eq('type', 'cliente'),
+        supabase.from('sale_items').select('quantity, unit_price, subtotal, products(name)').limit(200),
+      ]);
 
-    const totalSales = (salesRes.data || []).reduce((s, r) => s + Number(r.total), 0);
-    const totalPurchases = (purchasesRes.data || []).reduce((s, r) => s + Number(r.total), 0);
-    const totalExpenses = (expensesRes.data || []).reduce((s, r) => s + Number(r.amount), 0);
-    const lowStockCount = (productsRes.data || []).filter(p => Number(p.current_stock) <= Number(p.min_stock)).length;
+      const totalSales = (salesRes.data || []).reduce((s, r) => s + Number(r.total), 0);
+      const totalPurchases = (purchasesRes.data || []).reduce((s, r) => s + Number(r.total), 0);
+      const totalExpenses = (expensesRes.data || []).reduce((s, r) => s + Number(r.amount), 0);
+      const lowStockCount = (productsRes.data || []).filter(p => Number(p.current_stock) <= Number(p.min_stock)).length;
 
-    setStats({
-      totalSales, totalPurchases, totalExpenses,
-      netProfit: totalSales - totalPurchases - totalExpenses,
-      salesCount: salesRes.data?.length || 0,
-      purchasesCount: purchasesRes.data?.length || 0,
-      lowStockCount,
-      clientsCount: contactsRes.data?.length || 0,
-    });
+      setStats({
+        totalSales, totalPurchases, totalExpenses,
+        netProfit: totalSales - totalPurchases - totalExpenses,
+        salesCount: salesRes.data?.length || 0,
+        purchasesCount: purchasesRes.data?.length || 0,
+        lowStockCount,
+        clientsCount: contactsRes.data?.length || 0,
+      });
 
-    // Build monthly data from sales
-    const monthMap: Record<string, { ventas: number; compras: number }> = {};
-    const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-    (salesRes.data || []).forEach(s => {
-      const m = months[new Date(s.created_at).getMonth()];
-      if (!monthMap[m]) monthMap[m] = { ventas: 0, compras: 0 };
-      monthMap[m].ventas += Number(s.total);
-    });
-    (purchasesRes.data || []).forEach(p => {
-      const m = months[new Date(p.created_at).getMonth()];
-      if (!monthMap[m]) monthMap[m] = { ventas: 0, compras: 0 };
-      monthMap[m].compras += Number(p.total);
-    });
-    const mData = Object.entries(monthMap).map(([month, d]) => ({ month, ventas: d.ventas, compras: d.compras, ganancias: d.ventas - d.compras }));
-    setMonthlyData(mData.length > 0 ? mData : [{ month: 'Sin datos', ventas: 0, compras: 0, ganancias: 0 }]);
+      // Build monthly data from sales
+      const monthMap: Record<string, { ventas: number; compras: number }> = {};
+      const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+      (salesRes.data || []).forEach(s => {
+        const m = months[new Date(s.created_at).getMonth()];
+        if (!monthMap[m]) monthMap[m] = { ventas: 0, compras: 0 };
+        monthMap[m].ventas += Number(s.total);
+      });
+      (purchasesRes.data || []).forEach(p => {
+        const m = months[new Date(p.created_at).getMonth()];
+        if (!monthMap[m]) monthMap[m] = { ventas: 0, compras: 0 };
+        monthMap[m].compras += Number(p.total);
+      });
+      const mData = Object.entries(monthMap).map(([month, d]) => ({ month, ventas: d.ventas, compras: d.compras, ganancias: d.ventas - d.compras }));
+      setMonthlyData(mData.length > 0 ? mData : [{ month: 'Sin datos', ventas: 0, compras: 0, ganancias: 0 }]);
 
-    // Top products from sale items
-    const prodMap: Record<string, { sold: number; revenue: number }> = {};
-    (saleItemsRes.data || []).forEach((item: any) => {
-      const name = item.products?.name || 'Desconocido';
-      if (!prodMap[name]) prodMap[name] = { sold: 0, revenue: 0 };
-      prodMap[name].sold += Number(item.quantity);
-      prodMap[name].revenue += Number(item.subtotal);
-    });
-    const top = Object.entries(prodMap).sort((a, b) => b[1].sold - a[1].sold).slice(0, 5).map(([name, d]) => ({ name, ...d }));
-    setTopProducts(top);
+      // Top products from sale items
+      const prodMap: Record<string, { sold: number; revenue: number }> = {};
+      (saleItemsRes.data || []).forEach((item: any) => {
+        const name = item.products?.name || 'Desconocido';
+        if (!prodMap[name]) prodMap[name] = { sold: 0, revenue: 0 };
+        prodMap[name].sold += Number(item.quantity);
+        prodMap[name].revenue += Number(item.subtotal);
+      });
+      const top = Object.entries(prodMap).sort((a, b) => b[1].sold - a[1].sold).slice(0, 5).map(([name, d]) => ({ name, ...d }));
+      setTopProducts(top);
 
-    // Category distribution
-    const catMap: Record<string, number> = {};
-    (productsRes.data || []).forEach((p: any) => {
-      const cat = p.categories?.name || 'Sin categoría';
-      catMap[cat] = (catMap[cat] || 0) + 1;
-    });
-    const total = Object.values(catMap).reduce((s, v) => s + v, 0);
-    const catData = Object.entries(catMap).slice(0, 5).map(([name, count], i) => ({
-      name, value: total > 0 ? Math.round((count / total) * 100) : 0, color: categoryColors[i % categoryColors.length],
-    }));
-    setCategoryData(catData);
-    setLoading(false);
+      // Category distribution
+      const catMap: Record<string, number> = {};
+      (productsRes.data || []).forEach((p: any) => {
+        const cat = p.categories?.name || 'Sin categoría';
+        catMap[cat] = (catMap[cat] || 0) + 1;
+      });
+      const total = Object.values(catMap).reduce((s, v) => s + v, 0);
+      const catData = Object.entries(catMap).slice(0, 5).map(([name, count], i) => ({
+        name, value: total > 0 ? Math.round((count / total) * 100) : 0, color: categoryColors[i % categoryColors.length],
+      }));
+      setCategoryData(catData);
+    } catch {
+      // silently fail — stats remain at defaults
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { fetchReportData(); }, []);
