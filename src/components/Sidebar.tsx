@@ -2,7 +2,7 @@
 import React from 'react';
 import Link from 'next/link';
 import AppLogo from './ui/AppLogo';
-import { LayoutDashboard, ShoppingCart, Package, Users, UserCheck, ShoppingBag, ArrowLeftRight, Sliders, BarChart2, Settings, ChevronRight, Store, FileText, DollarSign, ClipboardList, Upload, Shield, TrendingUp, RotateCcw, Truck, Tag, Layers, BookOpen } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, Package, Users, UserCheck, ShoppingBag, ArrowLeftRight, Sliders, BarChart2, Settings, ChevronRight, Store, FileText, DollarSign, ClipboardList, Upload, Shield, TrendingUp, RotateCcw, Truck, Tag, Layers, BookOpen, RefreshCw } from 'lucide-react';
 
 interface NavItem {
   id: string;
@@ -37,6 +37,7 @@ const navItems: NavItem[] = [
   { id: 'nav-users', label: 'Usuarios', icon: <UserCheck size={18} />, href: '/users', group: 'Configuración' },
   { id: 'nav-settings', label: 'Configuración', icon: <Settings size={18} />, href: '/settings', group: 'Configuración' },
   { id: 'nav-config-advanced', label: 'Config. Avanzada', icon: <Shield size={18} />, href: '/configuracion-avanzada', group: 'Configuración' },
+  { id: 'nav-sync', label: 'Sincronización', icon: <RefreshCw size={18} />, href: '/sincronizacion', group: 'Configuración' },
 ];
 
 const groups = ['Principal', 'Operaciones', 'Inventario', 'CRM', 'Finanzas', 'Análisis', 'Configuración'];
