@@ -2,7 +2,15 @@
 import React, { useState } from 'react';
 import { Minus, Plus, Trash2, User, Tag, ChevronDown } from 'lucide-react';
 import type { CartItem, Customer } from './POSTerminal';
-import AppImage from '@/components/ui/AppImage';
+function InitialAvatar({ name }: { name: string }) {
+  const initials = name.split(' ').slice(0, 2).map((w) => w[0] ?? '').join('').toUpperCase();
+  const colors = ['bg-primary/20 text-primary', 'bg-info/20 text-info', 'bg-success/20 text-success', 'bg-warning/20 text-warning', 'bg-danger/20 text-danger'];
+  return (
+    <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-xs flex-shrink-0 ${colors[name.charCodeAt(0) % colors.length]}`}>
+      {initials}
+    </div>
+  );
+}
 
 const mockCustomers: Customer[] = [
   { id: 'cust-001', name: 'Rosa Martínez', phone: '809-555-0142', credit: 5000 },
@@ -181,15 +189,7 @@ export default function CartPanel({
             {cart.map((item) => (
               <div key={item.id} className="px-3 py-2.5 hover:bg-muted/30 transition-colors group">
                 <div className="flex items-start gap-2">
-                  <div className="w-10 h-10 rounded-lg overflow-hidden bg-secondary flex-shrink-0">
-                    <AppImage
-                      src={item.image}
-                      alt={`Imagen de ${item.name} en carrito`}
-                      width={40}
-                      height={40}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
+                  <InitialAvatar name={item.name} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-1">
                       <p className="text-xs font-semibold text-foreground leading-tight line-clamp-2 flex-1">{item.name}</p>

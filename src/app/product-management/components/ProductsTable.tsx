@@ -3,7 +3,6 @@ import React, { useState } from 'react';
 import { ArrowUpDown, ArrowUp, ArrowDown, Edit, Trash2, Eye, Printer, ToggleLeft, ToggleRight } from 'lucide-react';
 import type { Product } from './ProductManagementScreen';
 import StatusBadge from '@/components/ui/StatusBadge';
-import AppImage from '@/components/ui/AppImage';
 
 interface ProductsTableProps {
   products: Product[];
@@ -48,6 +47,28 @@ const columns: { key: keyof Product; label: string; sortable?: boolean; align?: 
   { key: 'expiryDate', label: 'Vencimiento', sortable: true },
   { key: 'status', label: 'Estado', sortable: true },
 ];
+
+function InitialAvatar({ name }: { name: string }) {
+  const initials = name
+    .split(' ')
+    .slice(0, 2)
+    .map((w) => w[0] ?? '')
+    .join('')
+    .toUpperCase();
+  const colors = [
+    'bg-primary/20 text-primary',
+    'bg-info/20 text-info',
+    'bg-success/20 text-success',
+    'bg-warning/20 text-warning',
+    'bg-danger/20 text-danger',
+  ];
+  const colorIdx = name.charCodeAt(0) % colors.length;
+  return (
+    <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm flex-shrink-0 ${colors[colorIdx]}`}>
+      {initials}
+    </div>
+  );
+}
 
 export default function ProductsTable({
   products, selectedIds, onToggleSelect, onSelectAll,
@@ -158,17 +179,9 @@ export default function ProductsTable({
                     />
                   </td>
 
-                  {/* Image */}
+                  {/* Avatar */}
                   <td className="px-3 py-2">
-                    <div className="w-10 h-10 rounded-lg overflow-hidden bg-secondary flex-shrink-0">
-                      <AppImage
-                        src={product.image}
-                        alt={`Fotografía del producto ${product.name}`}
-                        width={40}
-                        height={40}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
+                    <InitialAvatar name={product.name} />
                   </td>
 
                   {/* Name */}

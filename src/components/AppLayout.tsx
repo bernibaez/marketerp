@@ -45,7 +45,7 @@ export default function AppLayout({ children, currentPath }: AppLayoutProps) {
 
       {/* Main content area */}
       <div
-        className="flex flex-col flex-1 overflow-hidden transition-all duration-300"
+        className="flex flex-col flex-1 overflow-hidden"
         style={{
           marginLeft: 0,
         }}
