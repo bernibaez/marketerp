@@ -10,17 +10,19 @@ import {
   authenticateByCode as localAuthenticateByCode,
 } from '@/lib/auth';
 
-export const ROL_DB_A_UI: Record<RolDb, UserRole> = {
+export const ROL_DB_A_UI: Record<string, string> = {
   admin: 'Administrador',
   super_admin: 'Administrador',
+  superadmin: 'Super Administrador',
   cajero: 'Cajero',
   vendedor: 'Vendedor',
   almacen: 'Almacenista',
   contable: 'Contador',
 };
 
-export const ROL_UI_A_DB: Record<UserRole, RolDb> = {
+export const ROL_UI_A_DB: Record<string, string> = {
   Administrador: 'admin',
+  'Super Administrador': 'superadmin',
   Cajero: 'cajero',
   Vendedor: 'vendedor',
   Almacenista: 'almacen',
@@ -40,7 +42,7 @@ export function perfilToAuthUser(perfil: Perfil): AuthUser {
     username: perfil.correo.split('@')[0],
     name: perfil.nombre_completo,
     email: perfil.correo,
-    role: ROL_DB_A_UI[perfil.rol] ?? 'Cajero',
+    role: (ROL_DB_A_UI[perfil.rol] ?? perfil.rol) as UserRole,
     status: perfil.activo ? 'active' : 'inactive',
     phone: perfil.telefono ?? '',
     initials: initialsFromName(perfil.nombre_completo),

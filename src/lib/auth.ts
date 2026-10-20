@@ -117,15 +117,33 @@ export const ROLE_ROUTES: Record<UserRole, string[] | typeof ALL_ROUTES> = {
   ],
 };
 
-export const ROLE_HOME: Record<UserRole, string> = {
+export const ROLE_HOME: Record<string, string> = {
   Administrador: '/',
+  admin: '/',
+  'Super Administrador': '/',
+  superadmin: '/',
   Cajero: '/point-of-sale-pos',
+  cajero: '/point-of-sale-pos',
   Vendedor: '/sales',
+  vendedor: '/sales',
   Almacenista: '/product-management',
+  almacen: '/product-management',
   Contador: '/reports',
+  contable: '/reports',
 };
 
+export function getRoleHome(role: UserRole): string {
+  if (ROLE_HOME[role]) return ROLE_HOME[role];
+  const norm = String(role).toLowerCase();
+  if (ROLE_HOME[norm]) return ROLE_HOME[norm];
+  const routes = routesFromPermissions(role);
+  if (routes === '*' || (Array.isArray(routes) && routes.includes('/'))) return '/';
+  if (Array.isArray(routes) && routes.length > 0) return routes[0];
+  return '/';
+}
+
 const STORAGE_KEY = 'mercato_auth_user';
+
 
 function toPublicUser(account: AuthAccount): AuthUser {
   const { password: _, ...user } = account;
@@ -180,6 +198,10 @@ export function authenticateByCode(
 }
 
 export function canAccessRoute(role: UserRole, pathname: string): boolean {
+  const norm = String(role).trim().toLowerCase();
+  if (norm === 'superadmin' || norm === 'super_admin' || norm === 'super administrador') {
+    return true;
+  }
   const fromMatrix = routesFromPermissions(role);
   if (fromMatrix === '*') return true;
   if (pathname === '/') return fromMatrix.includes('/');

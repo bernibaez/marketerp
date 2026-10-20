@@ -1,7 +1,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { canAccessRoute, ROLE_HOME } from '@/lib/auth';
+import { canAccessRoute, getRoleHome } from '@/lib/auth';
 import { PageLoader } from '@/components/ui/LoadingSkeleton';
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -17,7 +17,7 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
   }
 
   if (!canAccessRoute(user.role, location.pathname)) {
-    return <Navigate to={ROLE_HOME[user.role]} replace />;
+    return <Navigate to={getRoleHome(user.role)} replace />;
   }
 
   return <>{children}</>;

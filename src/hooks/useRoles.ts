@@ -21,12 +21,22 @@ export function useRoles(busqueda = '') {
     setError(null);
     try {
       const data = await obtenerRoles({ busqueda, signal: ac.signal });
-      if (!ac.signal.aborted) setRoles(data);
+      if (!ac.signal.aborted) {
+        setRoles(data);
+      }
     } catch (e) {
-      if ((e as Error)?.name === 'AbortError') return;
+      if (
+        ac.signal.aborted ||
+        (e as Error)?.name === 'AbortError' ||
+        (e as Error)?.message?.toLowerCase().includes('abort')
+      ) {
+        return;
+      }
       setError(e instanceof Error ? e.message : 'Error al cargar roles');
     } finally {
-      if (!ac.signal.aborted) setLoading(false);
+      if (!ac.signal.aborted) {
+        setLoading(false);
+      }
     }
   }, [busqueda]);
 

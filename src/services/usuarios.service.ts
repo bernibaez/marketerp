@@ -1,7 +1,8 @@
-import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupabase';
+import { tryGetSupabase } from './clienteSupabase';
 import { PERFIL_COLUMNS, type Perfil, type RolDb } from '@/types/database';
 import { AUTH_ACCOUNTS } from '@/lib/auth';
 import { ROL_DB_A_UI } from './auth.service';
+import { isUuid } from './roles.service';
 
 export type CrearUsuarioPayload = {
   correo: string;
@@ -12,6 +13,8 @@ export type CrearUsuarioPayload = {
   telefono?: string | null;
   codigo_acceso?: string | null;
 };
+
+const LOCAL_PERFILES_KEY = 'mercato_local_perfiles';
 
 function mockPerfiles(): Perfil[] {
   return AUTH_ACCOUNTS.map((a) => ({
@@ -26,13 +29,48 @@ function mockPerfiles(): Perfil[] {
   }));
 }
 
+function getLocalPerfiles(): Perfil[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_PERFILES_KEY);
+    if (raw) return JSON.parse(raw);
+    const initial = mockPerfiles();
+    localStorage.setItem(LOCAL_PERFILES_KEY, JSON.stringify(initial));
+    return initial;
+  } catch {
+    return mockPerfiles();
+  }
+}
+
+function saveLocalPerfiles(perfiles: Perfil[]): void {
+  localStorage.setItem(LOCAL_PERFILES_KEY, JSON.stringify(perfiles));
+}
+
+function errorSupabaseUsuario(error: unknown): Error {
+  if (error && typeof error === 'object') {
+    const e = error as { message?: string; code?: string; details?: string; hint?: string };
+    if (
+      e.message?.includes('perfiles_rol_check') ||
+      e.message?.includes('check constraint') ||
+      e.message?.includes('Rol inválido') ||
+      e.details?.includes('perfiles_rol_check')
+    ) {
+      return new Error(
+        'El rol seleccionado requiere habilitar roles dinámicos en Supabase. Ejecuta el script "supabase/migrations/014_permitir_roles_personalizados.sql" en el SQL Editor de tu panel de Supabase.'
+      );
+    }
+    const parts = [e.message, e.details, e.hint].filter(Boolean);
+    return new Error(parts.join(' — ') || 'Error al procesar usuario en Supabase');
+  }
+  return error instanceof Error ? error : new Error('Error de Supabase');
+}
+
 export async function obtenerUsuarios(opts?: {
   busqueda?: string;
   signal?: AbortSignal;
 }): Promise<Perfil[]> {
   const sb = tryGetSupabase();
   if (!sb) {
-    let list = mockPerfiles();
+    let list = getLocalPerfiles();
     const q = opts?.busqueda?.trim().toLowerCase();
     if (q) {
       list = list.filter(
@@ -52,45 +90,93 @@ export async function obtenerUsuarios(opts?: {
     query = query.abortSignal(opts.signal);
   }
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) throw errorSupabaseUsuario(error);
   return (data ?? []) as Perfil[];
 }
 
-/** Alta de usuario vía RPC (inserta auth.users + perfiles). Sin auth.signUp. */
+/** Alta de usuario vía RPC (inserta auth.users + perfiles) o fallback local. */
 export async function crearUsuario(payload: CrearUsuarioPayload): Promise<string> {
-  if (!isSupabaseConfigured()) {
-    throw new Error('Configura Supabase para crear usuarios reales');
+  const sb = tryGetSupabase();
+  if (!sb) {
+    const list = getLocalPerfiles();
+    const newId = `local-user-${Date.now()}`;
+    const nuevo: Perfil = {
+      id: newId,
+      nombre_completo: payload.nombre_completo,
+      correo: payload.correo,
+      telefono: payload.telefono ?? null,
+      rol: payload.rol,
+      sucursal_id: payload.sucursal_id ?? null,
+      codigo_acceso: payload.codigo_acceso ?? null,
+      activo: true,
+      creado_en: new Date().toISOString(),
+      actualizado_en: new Date().toISOString(),
+    };
+    saveLocalPerfiles([...list, nuevo]);
+    return newId;
   }
-  const sb = getSupabase();
-  const { data, error } = await sb.rpc('crear_usuario_sistema', {
-    p_correo: payload.correo,
-    p_password: payload.password,
-    p_nombre_completo: payload.nombre_completo,
-    p_rol: payload.rol,
-    p_sucursal_id: payload.sucursal_id ?? null,
-    p_telefono: payload.telefono ?? null,
-    p_codigo_acceso: payload.codigo_acceso ?? null,
-  });
-  if (error) throw error;
-  return data as string;
+
+  try {
+    const { data, error } = await sb.rpc('crear_usuario_sistema', {
+      p_correo: payload.correo,
+      p_password: payload.password,
+      p_nombre_completo: payload.nombre_completo,
+      p_rol: payload.rol,
+      p_sucursal_id: payload.sucursal_id ?? null,
+      p_telefono: payload.telefono ?? null,
+      p_codigo_acceso: payload.codigo_acceso ?? null,
+    });
+    if (error) throw errorSupabaseUsuario(error);
+    return data as string;
+  } catch (err) {
+    throw errorSupabaseUsuario(err);
+  }
 }
 
 export async function actualizarPerfil(
   id: string,
   datos: Partial<Pick<Perfil, 'nombre_completo' | 'telefono' | 'rol' | 'sucursal_id' | 'activo' | 'codigo_acceso'>>
 ): Promise<Perfil> {
-  if (!isSupabaseConfigured()) {
-    throw new Error('Configura Supabase para actualizar usuarios');
+  const sb = tryGetSupabase();
+  const updateLocal = (): Perfil => {
+    const list = getLocalPerfiles();
+    const idx = list.findIndex((p) => p.id === id);
+    if (idx === -1) throw new Error('Usuario no encontrado');
+    const updated: Perfil = {
+      ...list[idx],
+      ...datos,
+      actualizado_en: new Date().toISOString(),
+    };
+    list[idx] = updated;
+    saveLocalPerfiles(list);
+    return updated;
+  };
+
+  if (!sb || !isUuid(id)) {
+    return updateLocal();
   }
-  const sb = getSupabase();
-  const { data, error } = await sb
-    .from('perfiles')
-    .update({ ...datos, actualizado_en: new Date().toISOString() })
-    .eq('id', id)
-    .select(PERFIL_COLUMNS)
-    .single();
-  if (error) throw error;
-  return data as Perfil;
+
+  try {
+    const updatePayload: Record<string, unknown> = {
+      ...datos,
+      actualizado_en: new Date().toISOString(),
+    };
+    Object.keys(updatePayload).forEach((k) => {
+      if (updatePayload[k] === undefined) delete updatePayload[k];
+    });
+
+    const { data, error } = await sb
+      .from('perfiles')
+      .update(updatePayload)
+      .eq('id', id)
+      .select(PERFIL_COLUMNS)
+      .single();
+
+    if (error) throw errorSupabaseUsuario(error);
+    return data as Perfil;
+  } catch (err) {
+    throw errorSupabaseUsuario(err);
+  }
 }
 
 export async function alternarActivoUsuario(id: string, activo: boolean): Promise<void> {

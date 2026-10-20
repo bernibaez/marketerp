@@ -195,20 +195,28 @@ export const PERMISSION_GROUPS = [
 
 export type RolePermissionMap = Record<string, Partial<Record<PermissionAction, boolean>>>;
 
-export type PermissionsMatrix = Record<UserRole, RolePermissionMap>;
+export type PermissionsMatrix = Record<string, RolePermissionMap>;
 
 const ALL_TRUE = (actions: PermissionAction[]): Partial<Record<PermissionAction, boolean>> =>
   Object.fromEntries(actions.map((a) => [a, true]));
 
+export function getEmptyRolePermissions(): RolePermissionMap {
+  return Object.fromEntries(
+    PERMISSION_MODULES.map((m) => [m.id, Object.fromEntries(m.actions.map((a) => [a, false]))])
+  );
+}
+
+export function getFullRolePermissions(): RolePermissionMap {
+  return Object.fromEntries(
+    PERMISSION_MODULES.map((m) => [m.id, Object.fromEntries(m.actions.map((a) => [a, true]))])
+  );
+}
+
 /** Valores por defecto alineados con ROLE_ROUTES actuales */
 export function buildDefaultMatrix(): PermissionsMatrix {
-  const empty = (): RolePermissionMap =>
-    Object.fromEntries(PERMISSION_MODULES.map((m) => [m.id, Object.fromEntries(m.actions.map((a) => [a, false]))]));
+  const empty = (): RolePermissionMap => getEmptyRolePermissions();
 
-  const admin = empty();
-  for (const m of PERMISSION_MODULES) {
-    admin[m.id] = ALL_TRUE(m.actions);
-  }
+  const admin = getFullRolePermissions();
 
   const cajero = empty();
   for (const id of ['pos', 'cierre_caja', 'ventas']) {
@@ -217,7 +225,6 @@ export function buildDefaultMatrix(): PermissionsMatrix {
     cajero[id] = {
       ...Object.fromEntries(mod.actions.map((a) => [a, false])),
       ver: true,
-      // Cajero vende en POS; en Ventas solo consulta su historial (sin editar/anular).
       crear: id === 'pos' || id === 'cierre_caja',
       editar: id === 'pos',
       exportar: id === 'ventas',
@@ -233,7 +240,6 @@ export function buildDefaultMatrix(): PermissionsMatrix {
       ...Object.fromEntries(mod.actions.map((a) => [a, false])),
       ver: true,
       crear: ['ventas', 'pos', 'contactos', 'cxc'].includes(id),
-      // Editar/anular facturas solo con permiso de Administrador (matriz o rol admin).
       editar: ['contactos', 'cxc'].includes(id),
       exportar: ['ventas', 'cxc'].includes(id),
     };
@@ -290,15 +296,33 @@ export function buildDefaultMatrix(): PermissionsMatrix {
 
   return {
     Administrador: admin,
+    admin: admin,
+    'Super Administrador': admin,
+    superadmin: admin,
     Cajero: cajero,
+    cajero: cajero,
     Vendedor: vendedor,
+    vendedor: vendedor,
     Almacenista: almacen,
+    almacen: almacen,
     Contador: contador,
+    contable: contador,
   };
 }
 
+export function getDefaultRolePermissions(roleCodeOrName: string): RolePermissionMap {
+  const norm = roleCodeOrName.trim().toLowerCase();
+  const matrix = buildDefaultMatrix();
+  if (norm.includes('admin') || norm === 'administrador') return matrix.Administrador;
+  if (norm.includes('cajer')) return matrix.Cajero;
+  if (norm.includes('vended')) return matrix.Vendedor;
+  if (norm.includes('almacen')) return matrix.Almacenista;
+  if (norm.includes('conta') || norm.includes('finan')) return matrix.Contador;
+  return getEmptyRolePermissions();
+}
+
 export const ROLE_META: Record<
-  UserRole,
+  string,
   { description: string; color: string; accent: string }
 > = {
   Administrador: {
@@ -306,8 +330,28 @@ export const ROLE_META: Record<
     color: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
     accent: 'border-emerald-500/40',
   },
+  admin: {
+    description: 'Acceso total al sistema y configuración',
+    color: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
+    accent: 'border-emerald-500/40',
+  },
+  'Super Administrador': {
+    description: 'Acceso maestro total a todos los módulos',
+    color: 'bg-emerald-600/15 text-emerald-800 dark:text-emerald-300',
+    accent: 'border-emerald-600/40',
+  },
+  superadmin: {
+    description: 'Acceso maestro total a todos los módulos',
+    color: 'bg-emerald-600/15 text-emerald-800 dark:text-emerald-300',
+    accent: 'border-emerald-600/40',
+  },
   Cajero: {
     description: 'POS, consulta de sus ventas y cierre de caja (sin editar/anular facturas)',
+    color: 'bg-sky-500/15 text-sky-700 dark:text-sky-400',
+    accent: 'border-sky-500/40',
+  },
+  cajero: {
+    description: 'POS, consulta de sus ventas y cierre de caja',
     color: 'bg-sky-500/15 text-sky-700 dark:text-sky-400',
     accent: 'border-sky-500/40',
   },
@@ -316,7 +360,17 @@ export const ROLE_META: Record<
     color: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
     accent: 'border-amber-500/40',
   },
+  vendedor: {
+    description: 'Ventas propias, clientes y CxC',
+    color: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+    accent: 'border-amber-500/40',
+  },
   Almacenista: {
+    description: 'Inventario, compras y transferencias',
+    color: 'bg-violet-500/15 text-violet-700 dark:text-violet-400',
+    accent: 'border-violet-500/40',
+  },
+  almacen: {
     description: 'Inventario, compras y transferencias',
     color: 'bg-violet-500/15 text-violet-700 dark:text-violet-400',
     accent: 'border-violet-500/40',
@@ -326,4 +380,38 @@ export const ROLE_META: Record<
     color: 'bg-rose-500/15 text-rose-700 dark:text-rose-400',
     accent: 'border-rose-500/40',
   },
+  contable: {
+    description: 'Finanzas, informes y auditoría',
+    color: 'bg-rose-500/15 text-rose-700 dark:text-rose-400',
+    accent: 'border-rose-500/40',
+  },
 };
+
+const DYNAMIC_PALETTES = [
+  { color: 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-400', accent: 'border-indigo-500/40' },
+  { color: 'bg-teal-500/15 text-teal-700 dark:text-teal-400', accent: 'border-teal-500/40' },
+  { color: 'bg-purple-500/15 text-purple-700 dark:text-purple-400', accent: 'border-purple-500/40' },
+  { color: 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-400', accent: 'border-cyan-500/40' },
+  { color: 'bg-orange-500/15 text-orange-700 dark:text-orange-400', accent: 'border-orange-500/40' },
+  { color: 'bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-400', accent: 'border-fuchsia-500/40' },
+];
+
+export function getRoleMeta(roleNameOrCode: string, description?: string | null): { description: string; color: string; accent: string } {
+  if (ROLE_META[roleNameOrCode]) {
+    return {
+      ...ROLE_META[roleNameOrCode],
+      description: description || ROLE_META[roleNameOrCode].description,
+    };
+  }
+  // Deterministic palette based on string hash
+  let hash = 0;
+  for (let i = 0; i < roleNameOrCode.length; i++) {
+    hash = (hash << 5) - hash + roleNameOrCode.charCodeAt(i);
+    hash |= 0;
+  }
+  const palette = DYNAMIC_PALETTES[Math.abs(hash) % DYNAMIC_PALETTES.length];
+  return {
+    description: description || 'Rol personalizado con accesos a la medida',
+    ...palette,
+  };
+}

@@ -32,6 +32,7 @@ import { isSupabaseConfigured } from '@/services/clienteSupabase';
 import { isMissingRolesTableError } from '@/services/roles.service';
 import { InlineLoader, TableRowSkeleton } from '@/components/ui/LoadingSkeleton';
 import ModalShell from '@/components/ui/ModalShell';
+import { getDefaultRolePermissions } from '@/lib/permissionsCatalog';
 
 type Tab = 'users' | 'roles' | 'agents';
 
@@ -49,9 +50,10 @@ export default function UsersPage() {
   const [formTelefono, setFormTelefono] = useState('');
   const [formPassword, setFormPassword] = useState('');
   const [formComision, setFormComision] = useState('5');
-  const [formRol, setFormRol] = useState<UserRole>('Cajero');
+  const [formRol, setFormRol] = useState<string>('cajero');
   const [formDescRol, setFormDescRol] = useState('');
   const [formCodigoRol, setFormCodigoRol] = useState('');
+  const [formTemplateRol, setFormTemplateRol] = useState('');
   const [saving, setSaving] = useState(false);
 
   const { usuarios, loading, crear, actualizar, alternarActivo, eliminar } = useUsuarios(search);
@@ -92,7 +94,8 @@ export default function UsersPage() {
     setFormComision('5');
     setFormDescRol('');
     setFormCodigoRol('');
-    setFormRol('Cajero');
+    setFormTemplateRol('');
+    setFormRol('cajero');
     setEditingUser(null);
     setEditingAgent(null);
     setEditingRole(null);
@@ -109,7 +112,7 @@ export default function UsersPage() {
     setFormCorreo(user.correo);
     setFormTelefono(user.telefono ?? '');
     setFormPassword('');
-    setFormRol((ROL_DB_A_UI[user.rol] as UserRole) || 'Cajero');
+    setFormRol(user.rol || 'cajero');
     setShowForm(true);
   };
 
@@ -127,6 +130,7 @@ export default function UsersPage() {
     setFormNombre(role.nombre);
     setFormDescRol(role.descripcion ?? '');
     setFormCodigoRol(role.codigo);
+    setFormTemplateRol('');
     setShowForm(true);
   };
 
@@ -145,15 +149,20 @@ export default function UsersPage() {
         toast.success(`Rol "${formNombre.trim()}" actualizado correctamente`);
       } else {
         const codigo = formCodigoRol.trim()
-          ? formCodigoRol.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_')
-          : formNombre.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+          ? formCodigoRol.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_')
+          : formNombre.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+
+        const basePermissions = formTemplateRol
+          ? (roles.find((r) => r.codigo === formTemplateRol)?.permisos || getDefaultRolePermissions(formTemplateRol))
+          : {};
+
         await crearRol({
           codigo,
           nombre: formNombre.trim(),
           descripcion: formDescRol.trim() || null,
-          permisos: {},
+          permisos: basePermissions,
         });
-        toast.success(`Rol "${formNombre.trim()}" creado exitosamente`);
+        toast.success(`Rol "${formNombre.trim()}" creado exitosamente.`);
       }
       setShowForm(false);
       resetForm();
@@ -234,13 +243,15 @@ export default function UsersPage() {
       toast.error('Ingresa el nombre completo');
       return;
     }
+    const finalRolCode = (ROL_UI_A_DB[formRol] || formRol || 'cajero') as RolDb;
+
     if (editingUser) {
       setSaving(true);
       try {
         await actualizar(editingUser.id, {
           nombre_completo: formNombre.trim(),
           telefono: formTelefono.trim() || null,
-          rol: ROL_UI_A_DB[formRol] as RolDb,
+          rol: finalRolCode,
         });
         toast.success('Usuario actualizado');
         setShowForm(false);
@@ -262,7 +273,7 @@ export default function UsersPage() {
         correo: formCorreo.trim(),
         password: formPassword,
         nombre_completo: formNombre.trim(),
-        rol: ROL_UI_A_DB[formRol] as RolDb,
+        rol: finalRolCode,
         telefono: formTelefono.trim() || null,
       });
       toast.success('Usuario creado');
@@ -429,7 +440,13 @@ export default function UsersPage() {
                   className="input-field w-full"
                   placeholder={tab === 'roles' ? 'Ej: Cajero Nocturno' : 'Ej: Juan Pérez'}
                   value={formNombre}
-                  onChange={(e) => setFormNombre(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFormNombre(val);
+                    if (tab === 'roles' && !editingRole) {
+                      setFormCodigoRol(val.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_'));
+                    }
+                  }}
                 />
               </div>
 
@@ -480,24 +497,27 @@ export default function UsersPage() {
                   <select
                     className="input-field w-full"
                     value={formRol}
-                    onChange={(e) => setFormRol(e.target.value as UserRole)}
+                    onChange={(e) => setFormRol(e.target.value)}
                   >
-                    {roles.length > 0
-                      ? roles.map((r) => (
-                          <option
-                            key={r.id}
-                            value={(ROL_DB_A_UI[r.codigo as RolDb] || r.nombre) as UserRole}
-                          >
-                            {r.nombre} ({r.codigo})
-                          </option>
-                        ))
-                      : (
-                          ['Administrador', 'Cajero', 'Vendedor', 'Almacenista', 'Contador'] as UserRole[]
-                        ).map((r) => (
-                          <option key={r} value={r}>
-                            {r}
-                          </option>
-                        ))}
+                    {roles.length > 0 ? (
+                      roles.map((r) => (
+                        <option key={r.id || r.codigo} value={r.codigo}>
+                          {r.nombre} ({r.codigo})
+                        </option>
+                      ))
+                    ) : (
+                      [
+                        { codigo: 'admin', nombre: 'Administrador' },
+                        { codigo: 'cajero', nombre: 'Cajero' },
+                        { codigo: 'vendedor', nombre: 'Vendedor' },
+                        { codigo: 'almacen', nombre: 'Almacenista' },
+                        { codigo: 'contable', nombre: 'Contador' },
+                      ].map((r) => (
+                        <option key={r.codigo} value={r.codigo}>
+                          {r.nombre} ({r.codigo})
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
               )}
@@ -521,13 +541,37 @@ export default function UsersPage() {
                     <label className="block font-bold mb-1 text-foreground">Código Identificador</label>
                     <input
                       className="input-field font-mono text-xs w-full"
-                      placeholder="ej: cajero_nocturno (opcional)"
+                      placeholder="ej: cajero_nocturno (auto si se deja vacío)"
                       disabled={!!editingRole}
                       value={formCodigoRol}
                       onChange={(e) => setFormCodigoRol(e.target.value)}
                     />
                   </div>
-                  <div className="sm:col-span-2">
+                  {!editingRole && (
+                    <div>
+                      <label className="block font-bold mb-1 text-foreground">Plantilla de Permisos Inicial</label>
+                      <select
+                        className="input-field w-full text-xs"
+                        value={formTemplateRol}
+                        onChange={(e) => setFormTemplateRol(e.target.value)}
+                      >
+                        <option value="">Vacío (sin permisos iniciales)</option>
+                        <option value="admin">Administrador (acceso total a todo)</option>
+                        <option value="cajero">Cajero (POS y cierre de caja)</option>
+                        <option value="vendedor">Vendedor (ventas, clientes y CxC)</option>
+                        <option value="almacen">Almacenista (inventario y compras)</option>
+                        <option value="contable">Contador (finanzas, gastos e informes)</option>
+                        {roles
+                          .filter((r) => !['admin', 'cajero', 'vendedor', 'almacen', 'contable'].includes(r.codigo))
+                          .map((r) => (
+                            <option key={r.id || r.codigo} value={r.codigo}>
+                              Copiar de: {r.nombre}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  )}
+                  <div className={editingRole ? 'sm:col-span-2' : 'sm:col-span-3'}>
                     <label className="block font-bold mb-1 text-foreground">Descripción del Rol</label>
                     <textarea
                       className="input-field w-full"
@@ -612,7 +656,21 @@ export default function UsersPage() {
                           </div>
                         </td>
                         <td className="px-4 py-3 hidden md:table-cell">
-                          <span className="badge-info">{ROL_DB_A_UI[user.rol] ?? user.rol}</span>
+                          {(() => {
+                            const roleObj = roles.find((r) => r.codigo === user.rol || r.nombre === user.rol);
+                            const roleLabel = roleObj?.nombre || ROL_DB_A_UI[user.rol] || user.rol;
+                            const isCustom = roleObj && !['admin', 'cajero', 'vendedor', 'almacen', 'contable'].includes(roleObj.codigo);
+                            return (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="badge-info font-medium">{roleLabel}</span>
+                                {isCustom && (
+                                  <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+                                    Personalizado
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">
                           {user.telefono ?? '—'}
@@ -757,6 +815,7 @@ export default function UsersPage() {
                     roles.map((role, i) => {
                     const activeUsersCount = usuarios.filter((u) => u.rol === role.codigo).length;
                     const permissionsCount = countPermissions(role.permisos);
+                    const isCustom = !['admin', 'cajero', 'vendedor', 'almacen', 'contable'].includes(role.codigo);
                     return (
                       <tr
                         key={role.id}
@@ -765,16 +824,42 @@ export default function UsersPage() {
                         }`}
                       >
                         <td className="px-4 py-3 font-medium text-foreground">
-                          {role.nombre}
-                          <span className="block text-[11px] text-muted-foreground font-normal">{role.codigo}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold">{role.nombre}</span>
+                            {isCustom ? (
+                              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+                                Personalizado
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">
+                                Sistema
+                              </span>
+                            )}
+                          </div>
+                          <span className="block text-[11px] text-muted-foreground font-mono">{role.codigo}</span>
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">{role.descripcion || '—'}</td>
                         <td className="px-4 py-3 hidden md:table-cell">
-                          <span className="badge-info">{permissionsCount} permisos</span>
+                          <Link
+                            to={`/settings?section=permissions&role=${encodeURIComponent(role.nombre)}`}
+                            className="badge-info hover:bg-primary/20 transition-colors inline-flex items-center gap-1 font-semibold"
+                            title="Configurar permisos de este rol"
+                          >
+                            <Shield size={12} />
+                            <span>{permissionsCount} permisos</span>
+                          </Link>
                         </td>
                         <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">{activeUsersCount} usuarios</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-1">
+                            <Link
+                              to={`/settings?section=permissions&role=${encodeURIComponent(role.nombre)}`}
+                              className="p-1.5 rounded-lg hover:bg-primary/15 text-primary transition-colors flex items-center gap-1 text-xs font-semibold"
+                              title="Configurar matriz de permisos de este rol"
+                            >
+                              <Sliders size={14} />
+                              <span className="hidden sm:inline">Permisos</span>
+                            </Link>
                             <button
                               type="button"
                               onClick={() => openEditRole(role)}
@@ -949,7 +1034,11 @@ export default function UsersPage() {
                 </div>
                 <div>
                   <span className="text-muted-foreground block">Rol</span>
-                  <span className="badge-info">{ROL_DB_A_UI[viewingUser.rol] ?? viewingUser.rol}</span>
+                  <span className="badge-info">
+                    {roles.find((r) => r.codigo === viewingUser.rol || r.nombre === viewingUser.rol)?.nombre ||
+                      ROL_DB_A_UI[viewingUser.rol] ||
+                      viewingUser.rol}
+                  </span>
                 </div>
                 <div>
                   <span className="text-muted-foreground block">Estado</span>

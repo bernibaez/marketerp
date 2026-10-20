@@ -1,6 +1,7 @@
 /** Tipos de base de datos Mercato (columnas en español) */
 
-export type RolDb = 'admin' | 'super_admin' | 'cajero' | 'almacen' | 'contable' | 'vendedor';
+export type RolDb = 'admin' | 'super_admin' | 'cajero' | 'almacen' | 'contable' | 'vendedor' | (string & {});
+
 export type EstadoProducto = 'activo' | 'inactivo' | 'descontinuado';
 export type MetodoPago = 'efectivo' | 'tarjeta' | 'transferencia' | 'credito' | 'mixto';
 export type EstadoVenta = 'completada' | 'reembolsada' | 'anulada';

@@ -25,7 +25,13 @@ export function useAgentes(busqueda = '') {
       const data = await obtenerAgentes({ busqueda, signal: ac.signal });
       if (!ac.signal.aborted) setAgentes(data);
     } catch (e) {
-      if ((e as Error)?.name === 'AbortError') return;
+      if (
+        ac.signal.aborted ||
+        (e as Error)?.name === 'AbortError' ||
+        (e as Error)?.message?.toLowerCase().includes('abort')
+      ) {
+        return;
+      }
       setError(e instanceof Error ? e.message : 'Error al cargar agentes');
     } finally {
       if (!ac.signal.aborted) setLoading(false);

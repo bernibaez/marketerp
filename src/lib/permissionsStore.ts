@@ -91,26 +91,54 @@ export function countModuleEnabled(map: RolePermissionMap, moduleId: string): nu
   return Object.values(mod).filter(Boolean).length;
 }
 
+function findRolePermissions(matrix: PermissionsMatrix, role: UserRole): RolePermissionMap | undefined {
+  if (matrix[role]) return matrix[role];
+  const norm = String(role).trim().toLowerCase();
+  if (matrix[norm]) return matrix[norm];
+  const foundKey = Object.keys(matrix).find((k) => k.trim().toLowerCase() === norm);
+  if (foundKey) return matrix[foundKey];
+  return undefined;
+}
+
 export function hasPermission(
   role: UserRole,
   moduleId: string,
   action: PermissionAction = 'ver'
 ): boolean {
-  if (role === 'Administrador') return true;
+  const norm = String(role).trim().toLowerCase();
+  // Super Administrador tiene acceso maestro irrestricto por seguridad
+  if (norm === 'superadmin' || norm === 'super_admin' || norm === 'super administrador') {
+    return true;
+  }
   const matrix = getPermissionsMatrix();
-  return !!matrix[role]?.[moduleId]?.[action];
+  const perms = findRolePermissions(matrix, role);
+  // Fallback seguro: si es admin y aún no tiene permisos guardados, acceso total
+  if (!perms && (norm === 'admin' || norm === 'administrador')) {
+    return true;
+  }
+  return !!perms?.[moduleId]?.[action];
 }
 
 export function routesFromPermissions(role: UserRole): string[] | '*' {
-  if (role === 'Administrador') return '*';
+  const norm = String(role).trim().toLowerCase();
+  // Super Administrador tiene acceso maestro irrestricto por seguridad
+  if (norm === 'superadmin' || norm === 'super_admin' || norm === 'super administrador') {
+    return '*';
+  }
   const matrix = getPermissionsMatrix();
+  const rolePerms = findRolePermissions(matrix, role);
+  // Fallback seguro: si es admin y aún no tiene permisos guardados, acceso total
+  if (!rolePerms && (norm === 'admin' || norm === 'administrador')) {
+    return '*';
+  }
+  if (!rolePerms) return [];
   const routes: string[] = [];
   for (const mod of PERMISSION_MODULES) {
-    if (mod.href && matrix[role]?.[mod.id]?.ver) {
+    if (mod.href && rolePerms[mod.id]?.ver) {
       routes.push(mod.href);
     }
   }
-  if (!routes.includes('/settings') && matrix[role]?.configuracion?.ver) {
+  if (!routes.includes('/settings') && rolePerms.configuracion?.ver) {
     routes.push('/settings');
   }
   return routes;
