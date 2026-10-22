@@ -54,6 +54,7 @@ export interface NCFRange {
 
 export interface FiscalInvoiceRecord {
   id: string;
+  numero_factura?: string;
   ncf: string;
   ncfType: NCFType;
   rncClient?: string;

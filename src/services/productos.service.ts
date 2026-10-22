@@ -1,7 +1,7 @@
 import { tryGetSupabase, isSupabaseConfigured, getSupabase } from './clienteSupabase';
 import { type EstadoProducto, type Producto } from '@/types/database';
 import { getStoredProducts, saveStoredProducts } from '@/lib/productStore';
-import type { Product } from '@/pages/product-management/components/ProductManagementScreen';
+import { initialProducts, type Product } from '@/lib/initialProducts';
 import {
   decodeVariableWeightBarcode,
   extractPluFromCode,
@@ -9,6 +9,7 @@ import {
   pluSearchVariants,
   productMatchesScanCode,
 } from '@/lib/scaleBarcode';
+import { isAbortError } from '@/lib/isAbortError';
 
 export type ProductosFiltro = {
   pagina?: number;
@@ -275,6 +276,42 @@ export function uiAProductoInsert(p: Omit<Product, 'id' | 'stockStatus'> & { id?
   };
 }
 
+function demoAsProductos(): Producto[] {
+  return initialProducts.map((p) => {
+    const isWeight = p.saleType === 'weight' || p.saleType === 'both' || !!p.isWeightProduct;
+    return {
+      id: p.id,
+      codigo_barras: p.barcode,
+      sku: p.sku,
+      plu: normalizePlu(p.plu) || p.plu || null,
+      nombre: p.name,
+      categoria: p.category,
+      marca: p.brand || null,
+      unidad: p.unit || 'Unidad',
+      proveedor_id: null,
+      precio_costo: Number(p.costPrice ?? 0),
+      precio_venta: Number(p.salePrice ?? 0),
+      precio_mayorista: Number(p.wholesalePrice ?? 0),
+      porcentaje_impuesto: Number(p.tax ?? 0),
+      stock_minimo: p.minStock ?? 10,
+      stock_actual: Number(p.currentStock ?? 0),
+      es_pesado: isWeight,
+      sale_type: p.saleType ?? (isWeight ? 'weight' : 'unit'),
+      weight_unit: p.weightUnit ?? 'lb',
+      price_per_weight: p.pricePerWeight ? Number(p.pricePerWeight) : Number(p.salePrice ?? 0),
+      allow_decimal: p.allowDecimal ?? true,
+      min_weight: p.minWeight ?? 0.01,
+      max_weight: p.maxWeight ?? 999.99,
+      generate_scale_barcode: p.generateScaleBarcode ?? false,
+      is_weight_product: isWeight,
+      fecha_vencimiento: p.expiryDate ?? null,
+      garantia: p.warranty || null,
+      imagen_url: p.image || null,
+      estado: (p.status === 'active' ? 'activo' : p.status === 'inactive' ? 'inactivo' : 'descontinuado') as EstadoProducto,
+    };
+  });
+}
+
 function localAsProductos(): Producto[] {
   return getStoredProducts().map((p) => {
     const isWeight = p.saleType === 'weight' || p.saleType === 'both' || !!p.isWeightProduct;
@@ -285,27 +322,27 @@ function localAsProductos(): Producto[] {
       plu: normalizePlu(p.plu) || p.plu || null,
       nombre: p.name,
       categoria: p.category,
-      marca: p.brand,
-      unidad: p.unit,
+      marca: p.brand || null,
+      unidad: p.unit || 'Unidad',
       proveedor_id: null,
-      precio_costo: p.costPrice,
-      precio_venta: p.salePrice,
-      precio_mayorista: p.wholesalePrice,
-      porcentaje_impuesto: p.tax,
-      stock_minimo: p.minStock,
-      stock_actual: p.currentStock,
+      precio_costo: Number(p.costPrice ?? 0),
+      precio_venta: Number(p.salePrice ?? 0),
+      precio_mayorista: Number(p.wholesalePrice ?? 0),
+      porcentaje_impuesto: Number(p.tax ?? 0),
+      stock_minimo: p.minStock ?? 10,
+      stock_actual: Number(p.currentStock ?? 0),
       es_pesado: isWeight,
       sale_type: p.saleType ?? (isWeight ? 'weight' : 'unit'),
       weight_unit: p.weightUnit ?? 'lb',
-      price_per_weight: p.pricePerWeight ?? p.salePrice,
+      price_per_weight: p.pricePerWeight ? Number(p.pricePerWeight) : Number(p.salePrice ?? 0),
       allow_decimal: p.allowDecimal ?? true,
       min_weight: p.minWeight ?? 0.01,
       max_weight: p.maxWeight ?? 999.99,
       generate_scale_barcode: p.generateScaleBarcode ?? false,
       is_weight_product: isWeight,
-      fecha_vencimiento: p.expiryDate,
-      garantia: p.warranty,
-      imagen_url: p.image,
+      fecha_vencimiento: p.expiryDate ?? null,
+      garantia: p.warranty || null,
+      imagen_url: p.image || null,
       estado: (p.status === 'active' ? 'activo' : p.status === 'inactive' ? 'inactivo' : 'descontinuado') as EstadoProducto,
     };
   });
@@ -318,70 +355,117 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
   const hasta = desde + limite - 1;
 
   const sb = tryGetSupabase();
-  if (!sb) {
-    let list = localAsProductos();
-    if (params.busqueda?.trim()) {
-      const q = params.busqueda.trim().toLowerCase();
-      list = list.filter(
-        (p) =>
-          p.nombre.toLowerCase().includes(q) ||
-          p.sku.toLowerCase().includes(q) ||
-          p.codigo_barras.toLowerCase().includes(q) ||
-          (p.plu && p.plu.toLowerCase().includes(q))
-      );
+  let dbProducts: Producto[] = [];
+  let dbCount = 0;
+  let supabaseFailed = false;
+
+  if (sb) {
+    try {
+      let query = sb
+        .from('productos')
+        .select('*', { count: 'exact' })
+        .order('nombre');
+
+      const q = params.busqueda?.trim() ? sanitizarBusquedaPostgrest(params.busqueda) : '';
+      if (q) {
+        query = query.or(
+          `nombre.ilike."%${q}%",sku.ilike."%${q}%",codigo_barras.ilike."%${q}%",plu.ilike."%${q}%",categoria.ilike."%${q}%",marca.ilike."%${q}%"`
+        );
+      }
+      if (params.categoria && params.categoria !== 'Todas') {
+        query = query.eq('categoria', params.categoria);
+      }
+      if (params.estado && params.estado !== 'todos') {
+        query = query.eq('estado', params.estado);
+      }
+      if (params.signal) query = query.abortSignal(params.signal);
+
+      let { data, error, count } = await query.range(desde, hasta);
+      if (error && q && isSchemaColumnError(error)) {
+        let fallbackQuery = sb
+          .from('productos')
+          .select('*', { count: 'exact' })
+          .order('nombre')
+          .range(desde, hasta);
+        fallbackQuery = fallbackQuery.or(`nombre.ilike."%${q}%",sku.ilike."%${q}%",codigo_barras.ilike."%${q}%"`);
+        if (params.categoria && params.categoria !== 'Todas') {
+          fallbackQuery = fallbackQuery.eq('categoria', params.categoria);
+        }
+        if (params.estado && params.estado !== 'todos') {
+          fallbackQuery = fallbackQuery.eq('estado', params.estado);
+        }
+        if (params.signal) fallbackQuery = fallbackQuery.abortSignal(params.signal);
+
+        const retry = await fallbackQuery;
+        data = retry.data;
+        error = retry.error;
+        count = retry.count;
+      }
+
+      if (!error && data) {
+        dbProducts = data as Producto[];
+        dbCount = count ?? dbProducts.length;
+      } else if (error) {
+        console.warn('Error al consultar productos de Supabase:', error);
+        supabaseFailed = true;
+      }
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+      console.warn('Fallo de conexión o consulta Supabase productos:', err);
+      supabaseFailed = true;
     }
-    if (params.categoria && params.categoria !== 'Todas') {
-      list = list.filter((p) => p.categoria === params.categoria);
-    }
-    if (params.estado && params.estado !== 'todos') {
-      list = list.filter((p) => p.estado === params.estado);
-    }
-    const total = list.length;
-    return { datos: list.slice(desde, hasta + 1), total, pagina, limite };
   }
 
-  let query = sb
-    .from('productos')
-    .select('*', { count: 'exact' })
-    .order('nombre')
-    .range(desde, hasta);
+  // Obtenemos los productos de demostración/catálogo base
+  let fallbackList = demoAsProductos();
+  // Si no hay Supabase o falló, unimos también los productos locales
+  if (!sb || supabaseFailed) {
+    const local = localAsProductos();
+    const localSkus = new Set(local.map((p) => (p.sku || '').toLowerCase()));
+    const extras = fallbackList.filter((f) => !localSkus.has((f.sku || '').toLowerCase()));
+    fallbackList = [...local, ...extras];
+  }
 
-  const q = params.busqueda?.trim() ? sanitizarBusquedaPostgrest(params.busqueda) : '';
-  if (q) {
-    query = query.or(`nombre.ilike."%${q}%",sku.ilike."%${q}%",codigo_barras.ilike."%${q}%",plu.ilike."%${q}%"`);
+  // Filtrar catálogo base según los parámetros solicitados
+  if (params.busqueda?.trim()) {
+    const q = params.busqueda.trim().toLowerCase();
+    fallbackList = fallbackList.filter(
+      (p) =>
+        (p.nombre && p.nombre.toLowerCase().includes(q)) ||
+        (p.sku && p.sku.toLowerCase().includes(q)) ||
+        (p.codigo_barras && p.codigo_barras.toLowerCase().includes(q)) ||
+        (p.categoria && p.categoria.toLowerCase().includes(q)) ||
+        (p.marca && p.marca.toLowerCase().includes(q)) ||
+        (p.plu && p.plu.toLowerCase().includes(q))
+    );
   }
   if (params.categoria && params.categoria !== 'Todas') {
-    query = query.eq('categoria', params.categoria);
+    fallbackList = fallbackList.filter((p) => p.categoria === params.categoria);
   }
   if (params.estado && params.estado !== 'todos') {
-    query = query.eq('estado', params.estado);
+    fallbackList = fallbackList.filter((p) => p.estado === params.estado);
   }
-  if (params.signal) query = query.abortSignal(params.signal);
 
-  let { data, error, count } = await query;
-  if (error && q && isSchemaColumnError(error)) {
-    let fallbackQuery = sb
-      .from('productos')
-      .select('*', { count: 'exact' })
-      .order('nombre')
-      .range(desde, hasta);
-    fallbackQuery = fallbackQuery.or(`nombre.ilike."%${q}%",sku.ilike."%${q}%",codigo_barras.ilike."%${q}%"`);
-    if (params.categoria && params.categoria !== 'Todas') {
-      fallbackQuery = fallbackQuery.eq('categoria', params.categoria);
-    }
-    if (params.estado && params.estado !== 'todos') {
-      fallbackQuery = fallbackQuery.eq('estado', params.estado);
-    }
-    if (params.signal) fallbackQuery = fallbackQuery.abortSignal(params.signal);
+  // Excluir productos del catálogo base que ya existan en Supabase (por SKU o código de barras)
+  const dbSkus = new Set(dbProducts.map((p) => (p.sku || '').toLowerCase()));
+  const dbBarcodes = new Set(dbProducts.map((p) => (p.codigo_barras || '').toLowerCase()));
+  const missingFromDb = fallbackList.filter(
+    (p) =>
+      !dbSkus.has((p.sku || '').toLowerCase()) &&
+      (!p.codigo_barras || !dbBarcodes.has(p.codigo_barras.toLowerCase()))
+  );
 
-    const retry = await fallbackQuery;
-    data = retry.data;
-    error = retry.error;
-    count = retry.count;
-  }
-  if (error) throw errorSupabase(error);
-  return { datos: (data ?? []) as Producto[], total: count ?? 0, pagina, limite };
+  const combined = [...dbProducts, ...missingFromDb];
+  const total = dbCount + missingFromDb.length;
+
+  return {
+    datos: combined.slice(0, limite),
+    total,
+    pagina,
+    limite,
+  };
 }
+
 
 export async function crearProducto(datos: Partial<Producto>): Promise<Producto> {
   if (!isSupabaseConfigured()) {

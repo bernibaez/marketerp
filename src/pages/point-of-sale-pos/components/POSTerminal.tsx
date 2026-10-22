@@ -25,7 +25,7 @@ import {
   type HeldSale,
   type PaymentSplit,
 } from '@/lib/posStore';
-import type { FiscalInvoiceRecord } from '@/lib/ncfStore';
+import type { FiscalInvoiceRecord, NCFType } from '@/lib/ncfStore';
 import { isSupabaseConfigured } from '@/services/clienteSupabase';
 import { getCombos, recordComboSale, checkComboStockAvailability } from '@/lib/comboStore';
 import { procesarVenta } from '@/services/ventas.service';
@@ -101,6 +101,10 @@ export interface Customer {
   name: string;
   phone: string;
   credit: number;
+  rnc_cedula?: string | null;
+  direccion?: string | null;
+  tipo_cliente?: string | null;
+  tipo_ncf?: string | null;
 }
 
 export default function POSTerminal() {
@@ -122,7 +126,9 @@ export default function POSTerminal() {
   const [returnOpen, setReturnOpen] = useState(false);
   const [registerDetailsOpen, setRegisterDetailsOpen] = useState(false);
   const [lastFiscalInvoice, setLastFiscalInvoice] = useState<FiscalInvoiceRecord | null>(null);
-  const [fiscalEnabled, setFiscalEnabled] = useState(false);
+  const [fiscalEnabled, setFiscalEnabled] = useState(true);
+  const [selectedNcfType, setSelectedNcfType] = useState<NCFType>('B02');
+  const [lastSaleResult, setLastSaleResult] = useState<{ venta_id: string; numero_factura: string; ncf?: string | null } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   const handleOpenScale = (productId?: string, weight?: number) => {
@@ -367,11 +373,8 @@ export default function POSTerminal() {
   }, []);
 
   const updateQty = useCallback((cartId: string, qty: number) => {
-    if (qty <= 0) {
-      setCart((prev) => prev.filter((item) => item.id !== cartId));
-    } else {
-      setCart((prev) => prev.map((item) => (item.id === cartId ? { ...item, qty } : item)));
-    }
+    const safeQty = Math.max(0, isNaN(qty) ? 0 : qty);
+    setCart((prev) => prev.map((item) => (item.id === cartId ? { ...item, qty: safeQty } : item)));
   }, []);
 
   const updateDiscount = useCallback((cartId: string, discount: number) => {
@@ -1116,12 +1119,21 @@ export default function POSTerminal() {
     orderCompleted,
     fiscalEnabled,
     initialMethod: preferredPayMethod,
+    initialNcfType: selectedNcfType,
     onToggleFiscal: (val: boolean) => setFiscalEnabled(val),
+    onSelectNcfType: (t: NCFType) => setSelectedNcfType(t),
     onComplete: async (_payments: PaymentSplit, fiscalInvoice?: FiscalInvoiceRecord) => {
       if (!cashIsOpen) {
         toast.error('Inicia la caja antes de realizar ventas');
         return;
       }
+
+      const activeItems = cart.filter((i) => i.qty > 0);
+      if (activeItems.length === 0) {
+        toast.error('Agrega productos con cantidad mayor a 0 antes de procesar el pago');
+        return;
+      }
+
       const metodo: MetodoPago =
         [_payments.cash, _payments.card, _payments.transfer, _payments.credit].filter((v) => v > 0)
           .length > 1
@@ -1136,11 +1148,12 @@ export default function POSTerminal() {
                   ? 'credito'
                   : 'efectivo';
 
-      const costoTotal = cart.reduce((s, i) => s + i.cost * i.qty, 0);
+      const costoTotal = activeItems.reduce((s, i) => s + i.cost * i.qty, 0);
       const montoPagado =
         _payments.cash + _payments.card + _payments.transfer + _payments.credit;
 
       try {
+        const effectiveNcfType = fiscalInvoice?.ncfType ?? (fiscalEnabled ? selectedNcfType : null);
         const resultado = await procesarVenta({
           cajero_id: user?.id ?? null,
           cliente_id: selectedCustomer?.id ?? null,
@@ -1159,8 +1172,8 @@ export default function POSTerminal() {
           devuelta_entregada: Math.max(0, montoPagado - total),
           // Con Supabase el RPC asigna NCF si hay tipo_ncf; no pasar NCF previo.
           ncf: isSupabaseConfigured() ? null : (fiscalInvoice?.ncf ?? null),
-          tipo_ncf: fiscalInvoice?.ncfType ?? null,
-          items: cart.map((item) => ({
+          tipo_ncf: effectiveNcfType,
+          items: activeItems.map((item) => ({
             producto_id: item.isCombo ? null : item.productId,
             combo_id: item.comboId ?? null,
             tipo_item: item.isCombo ? 'combo' : 'producto',
@@ -1175,7 +1188,7 @@ export default function POSTerminal() {
 
         // Contador local de ventas de combo solo en modo offline
         if (!isSupabaseConfigured()) {
-          cart.forEach((cartItem) => {
+          activeItems.forEach((cartItem) => {
             if (cartItem.isCombo && cartItem.comboId) {
               const combo = getCombos().find((c) => c.id === cartItem.comboId);
               if (combo) {
@@ -1186,11 +1199,34 @@ export default function POSTerminal() {
         }
 
         setLastPayments(_payments);
-        if (fiscalInvoice) {
+        setLastSaleResult(resultado);
+
+        if (fiscalInvoice || fiscalEnabled) {
           const finalInvoice: FiscalInvoiceRecord = {
-            ...fiscalInvoice,
-            ncf: resultado.ncf || fiscalInvoice.ncf,
+            id: fiscalInvoice?.id || `inv-${Date.now()}`,
+            numero_factura: resultado.numero_factura,
+            ncf: resultado.ncf || fiscalInvoice?.ncf || '',
+            ncfType: fiscalInvoice?.ncfType || selectedNcfType,
+            rncClient: fiscalInvoice?.rncClient || selectedCustomer?.rnc_cedula || undefined,
+            companyName: fiscalInvoice?.companyName || selectedCustomer?.name || 'Consumidor Final',
+            issueDate: fiscalInvoice?.issueDate || new Date().toLocaleDateString('es-DO'),
+            issueTime: fiscalInvoice?.issueTime || new Date().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' }),
+            subtotal,
+            itbis: taxTotal,
+            total,
+            paymentMethod: metodo,
+            cashier: user?.name || 'Cajero POS',
+            expirationDate: fiscalInvoice?.expirationDate || '2027-12-31',
+            items: activeItems.map((item) => ({
+              sku: item.sku,
+              name: item.name,
+              qty: item.qty,
+              price: item.price,
+              itbis: Math.round((item.price - item.price / 1.18) * item.qty * 100) / 100,
+              subtotal: item.price * item.qty,
+            })),
           };
+
           try {
             if (finalInvoice.ncf) {
               await registrarFacturaFiscal({
@@ -1202,9 +1238,13 @@ export default function POSTerminal() {
             /* no bloquear venta si falla el registro fiscal auxiliar */
           }
           setLastFiscalInvoice(finalInvoice);
-          toast.success(`Venta completada — NCF: ${finalInvoice.ncf || '—'}`);
+          toast.success(`Venta completada — Factura: ${resultado.numero_factura} ${finalInvoice.ncf ? `(NCF: ${finalInvoice.ncf})` : ''}`);
+        } else {
+          toast.success(`Venta completada — Factura: ${resultado.numero_factura}`);
         }
+
         setOrderCompleted(true);
+        return resultado;
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Error al registrar la venta');
         return;
@@ -1258,7 +1298,21 @@ export default function POSTerminal() {
           <CartPanel
             cart={cart}
             customer={selectedCustomer}
-            onSetCustomer={setSelectedCustomer}
+            onSetCustomer={(c) => {
+              setSelectedCustomer(c);
+              if (c?.tipo_ncf) {
+                setSelectedNcfType(c.tipo_ncf as NCFType);
+                setFiscalEnabled(true);
+              } else if (c?.rnc_cedula) {
+                setSelectedNcfType('B01');
+                setFiscalEnabled(true);
+              }
+            }}
+            selectedNcfType={selectedNcfType}
+            onSelectNcfType={(t) => {
+              setSelectedNcfType(t);
+              setFiscalEnabled(true);
+            }}
             onUpdateQty={updateQty}
             onUpdateDiscount={updateDiscount}
             onRemove={removeFromCart}

@@ -133,12 +133,18 @@
       radial-gradient(ellipse 60% 40% at 50% 40%, color-mix(in srgb, var(--primary) 8%, transparent), transparent);
   }
 
-  /* —— Diálogos inline (en el flujo de la página, no flotantes) —— */
+  /* —— Diálogos y modales overlay (centrados en pantalla completa con backdrop, no abajo en el flujo) —— */
   .dialog-inline-host {
-    width: 100%;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background-color: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(2px);
     display: flex;
     justify-content: center;
-    align-items: flex-start;
+    align-items: center;
+    padding: 1rem;
+    overflow-y: auto;
   }
 
   .modal-panel {

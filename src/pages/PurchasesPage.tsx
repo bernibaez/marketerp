@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import AppLayout from '@/components/AppLayout';
-import { ShoppingBag, RotateCcw, Plus, Search, Filter, Download, Eye, Edit2, Trash2, X, PackagePlus, Check, CheckCircle2, ShoppingCart, Minus, Package } from 'lucide-react';
+import { ShoppingBag, RotateCcw, Plus, Search, Filter, Download, Eye, Edit2, Trash2, X, PackagePlus, Check, CheckCircle2, ShoppingCart, Minus, Package, Loader2 } from 'lucide-react';
 import { exportTableToPdf, formatMoneyPdf } from '@/lib/exportPdf';
 import type { ProductItem } from '@/lib/productStore';
-import { useProductos } from '@/hooks/useProductos';
 import { useProveedores } from '@/hooks/useProveedores';
-import { crearProducto, uiAProductoInsert } from '@/services/productos.service';
+import { crearProducto, uiAProductoInsert, obtenerProductos, productoAUi } from '@/services/productos.service';
+import { isAbortError } from '@/lib/isAbortError';
 import { crearCompra, obtenerCompras, obtenerDetalleCompra, anularCompra, type CompraDetalle } from '@/services/compras.service';
 import { toast } from '@/lib/toast';
 import ModalShell from '@/components/ui/ModalShell';
@@ -87,6 +87,14 @@ export default function PurchasesPage() {
   const [showProductModal, setShowProductModal] = useState(false);
   const [modalTab, setModalTab] = useState<'catalog' | 'new'>('catalog');
   const [modalSearch, setModalSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [catalogProducts, setCatalogProducts] = useState<ProductItem[]>([]);
+  const [catalogTotal, setCatalogTotal] = useState(0);
+  const [catalogPage, setCatalogPage] = useState(1);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const abortControllerRef = React.useRef<AbortController | null>(null);
+
   const [selectedProduct, setSelectedProduct] = useState<ProductItem | null>(null);
   const [modalQty, setModalQty] = useState<number>(1);
   const [modalPrice, setModalPrice] = useState<number>(0);
@@ -104,17 +112,154 @@ export default function PurchasesPage() {
   const [newUnit, setNewUnit] = useState('Unidad');
   const [newTax, setNewTax] = useState(18);
 
-  const { productosUi, refetch: refetchProductos } = useProductos({
-    pagina: 1,
-    limite: 500,
-    busqueda: modalSearch,
-    estado: 'activo',
-  });
-  const systemProducts = productosUi as ProductItem[];
-  const categories = useMemo(
-    () => Array.from(new Set(systemProducts.map((p) => p.category).filter(Boolean))).sort(),
-    [systemProducts]
-  );
+  // Quick Inline Search for Products directly in Purchase Table
+  const [inlineSearch, setInlineSearch] = useState('');
+  const [inlineResults, setInlineResults] = useState<ProductItem[]>([]);
+  const [inlineLoading, setInlineLoading] = useState(false);
+  const [inlineOpen, setInlineOpen] = useState(false);
+  const [inlineHighlightIndex, setInlineHighlightIndex] = useState(0);
+  const inlineSearchRef = React.useRef<HTMLInputElement | null>(null);
+  const inlineAbortRef = React.useRef<AbortController | null>(null);
+  const inlineDropdownRef = React.useRef<HTMLDivElement | null>(null);
+
+  // Debounce search input by 300ms to avoid unnecessary DB requests
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(modalSearch.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [modalSearch]);
+
+  // Búsqueda inline rápida bajo demanda (200ms debounce)
+  useEffect(() => {
+    const q = inlineSearch.trim();
+    if (!q) {
+      setInlineResults([]);
+      setInlineOpen(false);
+      setInlineLoading(false);
+      return;
+    }
+
+    if (inlineAbortRef.current) {
+      inlineAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    inlineAbortRef.current = controller;
+    setInlineLoading(true);
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await obtenerProductos({
+          pagina: 1,
+          limite: 50,
+          busqueda: q,
+          estado: 'todos',
+          signal: controller.signal,
+        });
+        const items = (res.datos || []).map(productoAUi) as ProductItem[];
+        setInlineResults(items);
+        setInlineHighlightIndex(0);
+        setInlineOpen(true);
+      } catch (err) {
+        if (!isAbortError(err)) {
+          console.error('Error buscando productos inline:', err);
+        }
+      } finally {
+        setInlineLoading(false);
+      }
+    }, 200);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [inlineSearch]);
+
+  // Cerrar dropdown inline al hacer clic fuera
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (
+        inlineDropdownRef.current &&
+        !inlineDropdownRef.current.contains(e.target as Node) &&
+        inlineSearchRef.current &&
+        !inlineSearchRef.current.contains(e.target as Node)
+      ) {
+        setInlineOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
+  // Consulta bajo demanda a la base de datos (PostgreSQL/Supabase)
+  const fetchCatalog = React.useCallback(async (query: string, page = 1, append = false) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setCatalogLoading(true);
+    }
+
+    try {
+      const res = await obtenerProductos({
+        pagina: page,
+        limite: query ? 50 : 20,
+        busqueda: query,
+        estado: 'todos',
+        signal: controller.signal,
+      });
+
+      const uiItems = (res.datos || []).map(productoAUi) as ProductItem[];
+      setCatalogTotal(res.total ?? 0);
+      setCatalogPage(page);
+
+      if (append) {
+        setCatalogProducts((prev) => {
+          const existingIds = new Set(prev.map((p) => p.id));
+          const newItems = uiItems.filter((p) => !existingIds.has(p.id));
+          return [...prev, ...newItems];
+        });
+      } else {
+        setCatalogProducts(uiItems);
+      }
+    } catch (err) {
+      if (!isAbortError(err)) {
+        console.error('Error al consultar productos en BD:', err);
+      }
+    } finally {
+      setCatalogLoading(false);
+      setLoadingMore(false);
+    }
+  }, []);
+
+  // Solo consulta la base de datos cuando el modal está abierto
+  useEffect(() => {
+    if (!showProductModal || modalTab !== 'catalog') return;
+    void fetchCatalog(debouncedSearch, 1, false);
+  }, [showProductModal, modalTab, debouncedSearch, fetchCatalog]);
+
+  const categories = useMemo(() => {
+    const defaultCategories = [
+      'General',
+      'Abarrotes',
+      'Bebidas',
+      'Lácteos',
+      'Carnes y Embutidos',
+      'Frutas y Verduras',
+      'Panadería y Repostería',
+      'Snacks y Dulces',
+      'Limpieza y Hogar',
+      'Cuidado Personal',
+      'Congelados',
+    ];
+    const fromLoaded = catalogProducts.map((p) => p.category).filter(Boolean);
+    return Array.from(new Set([...defaultCategories, ...fromLoaded])).sort();
+  }, [catalogProducts]);
 
   const reloadPurchases = async () => {
     setLoadingList(true);
@@ -210,12 +355,6 @@ export default function PurchasesPage() {
     p.supplier.toLowerCase().includes(search.toLowerCase())
   );
 
-  const filteredSystemProducts = systemProducts.filter(p =>
-    p.name.toLowerCase().includes(modalSearch.toLowerCase()) ||
-    p.sku.toLowerCase().includes(modalSearch.toLowerCase()) ||
-    p.barcode.includes(modalSearch)
-  );
-
   // Calculations for current Purchase Form
   const subtotal = purchaseItems.reduce((sum, item) => sum + item.qty * item.price, 0);
   const taxTotal = purchaseItems.reduce((sum, item) => {
@@ -250,6 +389,7 @@ export default function PurchasesPage() {
     setModalPrice(0);
     setModalSalePrice(0);
     setModalSearch('');
+    setDebouncedSearch('');
     setNewName('');
     setNewSku('');
     setNewBarcode('');
@@ -266,6 +406,80 @@ export default function PurchasesPage() {
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
   }, [showProductModal]);
+
+  const addProductDirectlyToPurchase = (
+    product: ProductItem,
+    qty = 1,
+    customPrice?: number,
+    customSalePrice?: number,
+    customTax?: number
+  ) => {
+    const costPrice = customPrice !== undefined && customPrice > 0 ? customPrice : (product.costPrice || 0);
+    const salePrice = customSalePrice !== undefined && customSalePrice > 0 ? customSalePrice : (product.salePrice || 0);
+    const taxPercent = customTax !== undefined ? customTax : (product.tax ?? 18);
+
+    setPurchaseItems((prev) => {
+      const existingIdx = prev.findIndex((i) => i.productId === product.id || (product.sku && i.sku === product.sku));
+      if (existingIdx >= 0) {
+        const copy = [...prev];
+        const newQty = copy[existingIdx].qty + qty;
+        copy[existingIdx] = {
+          ...copy[existingIdx],
+          qty: newQty,
+          price: costPrice > 0 ? costPrice : copy[existingIdx].price,
+          salePrice: salePrice > 0 ? salePrice : copy[existingIdx].salePrice,
+          taxPercent,
+        };
+        toast.success(`+${qty} "${product.name}" (Total en orden: ${newQty})`);
+        return copy;
+      }
+
+      const newItem: PurchaseLineItem = {
+        id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        productId: product.id,
+        name: product.name,
+        sku: product.sku,
+        qty,
+        price: costPrice,
+        salePrice: salePrice,
+        taxPercent,
+      };
+      toast.success(`"${product.name}" agregado a la compra`);
+      return [...prev, newItem];
+    });
+  };
+
+  const handleSelectInlineProduct = (p: ProductItem) => {
+    addProductDirectlyToPurchase(p, 1);
+    setInlineSearch('');
+    setInlineResults([]);
+    setInlineOpen(false);
+    inlineSearchRef.current?.focus();
+  };
+
+  const handleInlineKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (inlineResults.length > 0) {
+        setInlineOpen(true);
+        setInlineHighlightIndex((prev) => (prev + 1) % inlineResults.length);
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (inlineResults.length > 0) {
+        setInlineOpen(true);
+        setInlineHighlightIndex((prev) => (prev - 1 + inlineResults.length) % inlineResults.length);
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (inlineResults.length > 0) {
+        const target = inlineResults[inlineHighlightIndex] || inlineResults[0];
+        handleSelectInlineProduct(target);
+      }
+    } else if (e.key === 'Escape') {
+      setInlineOpen(false);
+    }
+  };
 
   const handleAddProductToPurchase = async (shouldCloseModal = false) => {
     if (modalQty <= 0) {
@@ -293,11 +507,11 @@ export default function PurchasesPage() {
         toast.error('Ingresa el precio de venta');
         return;
       }
-      const skuExists = systemProducts.some(
+      const skuExists = catalogProducts.some(
         (p) => p.sku.toLowerCase() === newSku.trim().toLowerCase()
       );
       if (skuExists) {
-        toast.error('Ya existe un producto con ese SKU');
+        toast.error('Ya existe un producto con ese SKU en el listado cargado');
         return;
       }
 
@@ -324,29 +538,12 @@ export default function PurchasesPage() {
             status: 'active',
           })
         );
-        product = {
-          id: created.id,
-          barcode: created.codigo_barras,
-          sku: created.sku,
-          name: created.nombre,
-          category: created.categoria,
-          brand: created.marca ?? '',
-          unit: created.unidad,
-          supplier: supplierName,
-          costPrice: Number(created.precio_costo),
-          salePrice: Number(created.precio_venta),
-          wholesalePrice: Number(created.precio_mayorista),
-          tax: Number(created.porcentaje_impuesto),
-          minStock: created.stock_minimo,
-          currentStock: created.stock_actual,
-          image: created.imagen_url ?? '',
-          expiryDate: created.fecha_vencimiento,
-          warranty: created.garantia ?? 'N/A',
-          status: 'active',
-          stockStatus: 'out',
-        };
+        const createdUi = productoAUi(created) as ProductItem;
+        product = createdUi;
         createdNew = true;
-        await refetchProductos();
+        setCatalogProducts((prev) => [createdUi, ...prev]);
+        setCatalogTotal((t) => t + 1);
+        setSelectedProduct(createdUi);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'No se pudo crear el producto');
         return;
@@ -441,7 +638,6 @@ export default function PurchasesPage() {
         },
         ...prev,
       ]);
-      await refetchProductos();
       toast.success('Compra guardada en Supabase. Stock y precios actualizados.');
       setShowAddForm(false);
       setPurchaseItems([]);
@@ -744,10 +940,10 @@ export default function PurchasesPage() {
 
               {/* Products Table Card */}
               <div className="card p-5 space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
-                    <h3 className="font-semibold text-foreground">Productos en la Compra</h3>
-                    <p className="text-xs text-muted-foreground">Agrega los ítems recibidos para incrementar inventario</p>
+                    <h3 className="font-semibold text-foreground text-base">Productos en la Compra</h3>
+                    <p className="text-xs text-muted-foreground">Escribe o escanea para agregar directamente a la lista sin abrir modales</p>
                   </div>
                   <button
                     type="button"
@@ -757,11 +953,138 @@ export default function PurchasesPage() {
                       setModalTab('catalog');
                       setShowProductModal(true);
                     }}
-                    className="btn-primary flex items-center gap-2 text-xs py-2 px-3.5 shadow-md"
+                    className="btn-primary flex items-center gap-2 text-xs py-2 px-3.5 shadow-md self-start sm:self-auto bg-[#007052] hover:bg-[#005c43] text-white font-bold cursor-pointer transition"
                   >
                     <Plus size={16} />
                     Agregar producto
                   </button>
+                </div>
+
+                {/* Buscador Rápido Inline con sugerencias flotantes */}
+                <div className="relative" ref={inlineDropdownRef}>
+                  <div className="relative flex items-center">
+                    <Search
+                      size={18}
+                      className={`absolute left-3.5 transition-colors ${
+                        inlineLoading ? 'text-[#007052] animate-pulse' : 'text-slate-400'
+                      }`}
+                    />
+                    <input
+                      ref={inlineSearchRef}
+                      type="text"
+                      value={inlineSearch}
+                      onChange={(e) => setInlineSearch(e.target.value)}
+                      onFocus={() => {
+                        if (inlineResults.length > 0) setInlineOpen(true);
+                      }}
+                      onKeyDown={handleInlineKeyDown}
+                      placeholder="Escribe el nombre, código de barras o SKU para agregar directamente... (Enter para añadir)"
+                      className="input-field !pl-10 !pr-10 h-11 text-sm bg-slate-50/70 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 focus:bg-white dark:focus:bg-slate-900 transition-all font-medium rounded-xl w-full shadow-2xs"
+                    />
+                    {inlineLoading ? (
+                      <Loader2 size={16} className="absolute right-3.5 text-[#007052] animate-spin" />
+                    ) : inlineSearch ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInlineSearch('');
+                          setInlineResults([]);
+                          setInlineOpen(false);
+                          inlineSearchRef.current?.focus();
+                        }}
+                        className="absolute right-3 p-1 text-slate-400 hover:text-slate-600 rounded-md transition cursor-pointer"
+                        title="Limpiar"
+                      >
+                        <X size={15} />
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {/* Sugerencias flotantes */}
+                  {inlineOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl z-40 max-h-72 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 animate-in fade-in zoom-in-95 duration-150">
+                      {inlineResults.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-muted-foreground space-y-2">
+                          <p>
+                            No se encontraron productos en la base de datos para &quot;{inlineSearch}&quot;
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInlineOpen(false);
+                              setModalSearch('');
+                              setNewName(inlineSearch.trim());
+                              setModalTab('new');
+                              setShowProductModal(true);
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-[#007052] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs hover:bg-[#005c43] transition cursor-pointer"
+                          >
+                            <Plus size={13} />
+                            Crear &quot;{inlineSearch}&quot; como nuevo producto
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="px-3.5 py-1.5 bg-slate-50 dark:bg-slate-800/60 text-[11px] font-semibold text-slate-500 flex justify-between items-center border-b border-slate-100 dark:border-slate-800">
+                            <span>Sugerencias ({inlineResults.length}) · Haz clic o presiona Enter para agregar</span>
+                            <span className="text-[10px] text-muted-foreground">↑↓ para seleccionar</span>
+                          </div>
+                          {inlineResults.map((p, idx) => {
+                            const isHighlighted = idx === inlineHighlightIndex;
+                            const alreadyInCart = purchaseItems.some((i) => i.productId === p.id);
+
+                            return (
+                              <div
+                                key={p.id}
+                                onClick={() => handleSelectInlineProduct(p)}
+                                onMouseEnter={() => setInlineHighlightIndex(idx)}
+                                className={`px-4 py-2.5 flex items-center justify-between cursor-pointer transition-colors gap-3 ${
+                                  isHighlighted
+                                    ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-l-4 border-[#007052]'
+                                    : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                                }`}
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+                                      {p.name}
+                                    </p>
+                                    {alreadyInCart && (
+                                      <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-300 dark:border-emerald-800">
+                                        En la orden
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] font-mono text-slate-500 mt-0.5">
+                                    SKU: <strong className="text-slate-700 dark:text-slate-300">{p.sku}</strong>
+                                    {p.barcode && <span> · Barra: {p.barcode}</span>}
+                                    <span> · Stock: {p.currentStock} {p.unit}</span>
+                                  </p>
+                                </div>
+                                <div className="text-right flex-shrink-0 flex items-center gap-3">
+                                  <div className="text-right">
+                                    <p className="text-xs font-bold font-mono text-slate-900 dark:text-white">
+                                      Costo: RD$ {(p.costPrice || 0).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                                    </p>
+                                    <p className="text-[10px] text-emerald-600 font-semibold font-mono">
+                                      Venta: RD$ {(p.salePrice || 0).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-[#007052] dark:text-emerald-300 hover:bg-[#007052] hover:text-white transition shadow-2xs"
+                                    title="Agregar a la compra"
+                                  >
+                                    <Plus size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="overflow-x-auto">
@@ -787,7 +1110,7 @@ export default function PurchasesPage() {
                       {purchaseItems.length === 0 ? (
                         <tr>
                           <td colSpan={7} className="text-center py-8 text-muted-foreground">
-                            No has agregado ningún producto a esta compra. Haz clic en <strong>Agregar producto</strong> arriba.
+                            No has agregado ningún producto a esta compra. Escribe en el buscador superior o haz clic en <strong>Agregar producto</strong>.
                           </td>
                         </tr>
                       ) : (
@@ -997,85 +1320,171 @@ export default function PurchasesPage() {
                 {modalTab === 'catalog' && (
                   <>
                     <div>
-                      <label className="block text-sm font-bold text-muted-foreground mb-2">
-                        Buscar en catálogo
-                      </label>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-sm font-bold text-muted-foreground">
+                          Buscar en base de datos
+                        </label>
+                        {catalogLoading && (
+                          <span className="text-xs text-primary font-semibold flex items-center gap-1.5 animate-pulse">
+                            <Loader2 size={13} className="animate-spin" /> Buscando en base de datos…
+                          </span>
+                        )}
+                      </div>
                       <div className="relative">
-                        <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-primary" />
+                        {catalogLoading ? (
+                          <Loader2 size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-primary animate-spin" />
+                        ) : (
+                          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-primary" />
+                        )}
                         <input
                           type="text"
-                          placeholder="Nombre, SKU o código de barras…"
+                          placeholder="Escribe el nombre, SKU, código de barras o PLU…"
                           value={modalSearch}
                           onChange={(e) => setModalSearch(e.target.value)}
-                          className="input-field !pl-11 h-12 text-base font-medium"
+                          className="input-field !pl-11 !pr-10 h-12 text-base font-medium"
                           autoFocus
                         />
+                        {modalSearch && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setModalSearch('');
+                              setDebouncedSearch('');
+                            }}
+                            className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-1 rounded-md hover:bg-secondary transition"
+                            title="Limpiar búsqueda"
+                          >
+                            <X size={16} />
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground mt-1.5 px-0.5">
+                        <span>
+                          {debouncedSearch
+                            ? `Coincidencias en base de datos para "${debouncedSearch}"`
+                            : 'Catálogo de productos (carga optimizada bajo demanda)'}
+                        </span>
+                        {catalogTotal > 0 && (
+                          <span className="font-mono font-bold text-foreground">
+                            {catalogProducts.length} de {catalogTotal} productos
+                          </span>
+                        )}
                       </div>
                     </div>
 
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                          Productos ({filteredSystemProducts.length})
+                          {debouncedSearch ? 'Resultados' : 'Productos'} ({catalogTotal})
                         </p>
                         <button
                           type="button"
-                          onClick={() => setModalTab('new')}
-                          className="text-sm font-bold text-primary hover:underline"
+                          onClick={() => {
+                            setModalTab('new');
+                            if (modalSearch.trim()) setNewName(modalSearch.trim());
+                          }}
+                          className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
                         >
-                          + Crear producto nuevo
+                          <Plus size={13} /> + Crear producto nuevo
                         </button>
                       </div>
-                      <div className="max-h-52 overflow-y-auto border border-border rounded-xl divide-y divide-border/60 bg-secondary/10 scrollbar-thin">
-                        {filteredSystemProducts.length === 0 ? (
-                          <div className="p-5 text-center text-sm text-muted-foreground space-y-2">
-                            <p>No se encontraron productos.</p>
+
+                      <div className="max-h-60 overflow-y-auto border border-border rounded-xl divide-y divide-border/60 bg-secondary/10 scrollbar-thin">
+                        {catalogLoading && catalogProducts.length === 0 ? (
+                          <div className="p-8 text-center text-sm text-muted-foreground space-y-2">
+                            <Loader2 size={24} className="animate-spin text-primary mx-auto" />
+                            <p className="font-medium">Consultando productos en la base de datos…</p>
+                          </div>
+                        ) : catalogProducts.length === 0 ? (
+                          <div className="p-6 text-center text-sm text-muted-foreground space-y-3">
+                            <p className="text-foreground font-semibold">
+                              {debouncedSearch
+                                ? `No se encontró ningún producto con "${debouncedSearch}"`
+                                : 'No hay productos disponibles en la base de datos'}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Puedes registrarlo de inmediato para añadirlo a esta compra
+                            </p>
                             <button
                               type="button"
                               onClick={() => {
                                 setModalTab('new');
                                 if (modalSearch.trim()) setNewName(modalSearch.trim());
                               }}
-                              className="text-primary font-bold hover:underline"
+                              className="px-4 py-2 bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer"
                             >
-                              Crear “{modalSearch || 'nuevo producto'}”
+                              <Plus size={14} />
+                              Crear “{modalSearch.trim() || 'nuevo producto'}”
                             </button>
                           </div>
                         ) : (
-                          filteredSystemProducts.map((p) => {
-                            const isSelected = selectedProduct?.id === p.id;
-                            return (
-                              <div
-                                key={p.id}
-                                onClick={() => {
-                                  setSelectedProduct(p);
-                                  setModalPrice(p.costPrice || 0);
-                                  setModalSalePrice(p.salePrice || 0);
-                                }}
-                                className={`px-4 py-3.5 flex items-center justify-between cursor-pointer transition-all gap-3 ${
-                                  isSelected
-                                    ? 'bg-primary/15 border-l-4 border-primary text-foreground'
-                                    : 'hover:bg-secondary/60'
-                                }`}
-                              >
-                                <div className="min-w-0 flex-1 pr-2">
-                                  <p className="text-sm sm:text-base font-extrabold truncate">{p.name}</p>
-                                  <p className="text-xs font-mono text-muted-foreground mt-0.5">
-                                    {p.sku} · Stock:{' '}
-                                    <strong className="text-foreground">{p.currentStock}</strong> {p.unit}
-                                  </p>
+                          <>
+                            {catalogProducts.map((p) => {
+                              const isSelected = selectedProduct?.id === p.id;
+                              return (
+                                <div
+                                  key={p.id}
+                                  onClick={() => {
+                                    setSelectedProduct(p);
+                                    setModalPrice(p.costPrice || 0);
+                                    setModalSalePrice(p.salePrice || 0);
+                                  }}
+                                  className={`px-4 py-3 flex items-center justify-between cursor-pointer transition-all gap-3 ${
+                                    isSelected
+                                      ? 'bg-primary/15 border-l-4 border-primary text-foreground'
+                                      : 'hover:bg-secondary/60'
+                                  }`}
+                                >
+                                  <div className="min-w-0 flex-1 pr-2">
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-sm font-extrabold truncate">{p.name}</p>
+                                      {isSelected && (
+                                        <span className="text-[10px] font-black uppercase bg-primary text-white px-1.5 py-0.5 rounded">
+                                          Seleccionado
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs font-mono text-muted-foreground mt-0.5">
+                                      SKU: <strong className="text-foreground">{p.sku}</strong>
+                                      {p.barcode && <span> · Barra: {p.barcode}</span>}
+                                      <span> · Stock: <strong>{p.currentStock}</strong> {p.unit}</span>
+                                    </p>
+                                  </div>
+                                  <div className="text-right flex-shrink-0 space-y-0.5">
+                                    <p className="text-xs font-black tabular-nums text-foreground">
+                                      Costo: RD$ {(p.costPrice || 0).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                                    </p>
+                                    <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold tabular-nums">
+                                      Venta: RD$ {(p.salePrice || 0).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                                    </p>
+                                  </div>
                                 </div>
-                                <div className="text-right flex-shrink-0 space-y-0.5">
-                                  <p className="text-sm font-black tabular-nums text-foreground">
-                                    Compra: RD$ {(p.costPrice || 0).toLocaleString('es-DO')}
-                                  </p>
-                                  <p className="text-xs text-emerald-600 dark:text-emerald-400 font-bold tabular-nums">
-                                    Venta: RD$ {(p.salePrice || 0).toLocaleString('es-DO')}
-                                  </p>
-                                </div>
+                              );
+                            })}
+
+                            {/* Paginación bajo demanda: Cargar más productos */}
+                            {catalogProducts.length < catalogTotal && (
+                              <div className="p-3 bg-secondary/30 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => fetchCatalog(debouncedSearch, catalogPage + 1, true)}
+                                  disabled={loadingMore}
+                                  className="text-xs font-bold text-primary hover:text-primary/80 py-2 px-4 rounded-xl bg-card border border-border shadow-2xs hover:bg-secondary transition flex items-center justify-center gap-2 mx-auto disabled:opacity-50 cursor-pointer"
+                                >
+                                  {loadingMore ? (
+                                    <>
+                                      <Loader2 size={13} className="animate-spin" /> Cargando más productos…
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Plus size={13} />
+                                      Cargar más productos ({catalogProducts.length} de {catalogTotal})
+                                    </>
+                                  )}
+                                </button>
                               </div>
-                            );
-                          })
+                            )}
+                          </>
                         )}
                       </div>
                     </div>

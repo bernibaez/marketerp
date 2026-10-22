@@ -128,7 +128,7 @@ export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceMo
         <div className="p-6 sm:p-8 overflow-y-auto print:p-0 print:text-black">
           <PrintableInvoice
             invoiceData={{
-              invoiceNumber: invoice.ncf || invoice.id,
+              invoiceNumber: invoice.numero_factura || invoice.ncf || invoice.id,
               isFiscal: true,
               ncf: invoice.ncf,
               ncfType: invoice.ncfType,

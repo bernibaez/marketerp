@@ -20,11 +20,14 @@ import { useProductos } from '@/hooks/useProductos';
 import { initialProducts } from '@/pages/product-management/components/ProductManagementScreen';
 import PosAddCustomerModal from './PosAddCustomerModal';
 import { toast } from '@/lib/toast';
+import type { NCFType } from '@/lib/ncfStore';
 
 interface CartPanelProps {
   cart: CartItem[];
   customer: Customer | null;
   onSetCustomer: (c: Customer | null) => void;
+  selectedNcfType?: NCFType;
+  onSelectNcfType?: (t: NCFType) => void;
   onUpdateQty: (id: string, qty: number) => void;
   onUpdateDiscount: (id: string, discount: number) => void;
   onRemove: (id: string) => void;
@@ -54,6 +57,8 @@ export default function CartPanel({
   cart,
   customer,
   onSetCustomer,
+  selectedNcfType = 'B02',
+  onSelectNcfType,
   onUpdateQty,
   onRemove,
   onEditWeight,
@@ -76,7 +81,6 @@ export default function CartPanel({
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [addCustomerOpen, setAddCustomerOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [docType, setDocType] = useState<'Factura' | 'Ticket'>('Factura');
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
   const { productosUi } = useProductos({ pagina: 1, limite: 200, estado: 'todos' });
@@ -112,6 +116,10 @@ export default function CartPanel({
         name: c.nombre,
         phone: c.telefono ?? '',
         credit: Number(c.limite_credito ?? 0),
+        rnc_cedula: c.rnc_cedula ?? null,
+        direccion: c.direccion ?? null,
+        tipo_cliente: c.tipo_cliente ?? null,
+        tipo_ncf: c.tipo_ncf ?? (c.tipo_cliente === 'fiscal' ? 'B01' : (c.rnc_cedula ? 'B01' : 'B02')),
       }))
     );
   }, [clientes]);
@@ -203,14 +211,21 @@ export default function CartPanel({
                   return;
                 }
                 const found = customers.find((c) => c.id === val);
-                if (found) onSetCustomer(found);
+                if (found) {
+                  onSetCustomer(found);
+                  if (found.tipo_ncf && onSelectNcfType) {
+                    onSelectNcfType(found.tipo_ncf as NCFType);
+                  } else if (found.rnc_cedula && onSelectNcfType) {
+                    onSelectNcfType('B01');
+                  }
+                }
               }}
               className="w-full bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl pl-8 pr-7 h-10 text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer truncate"
             >
-              <option value="">Cliente Contado</option>
+              <option value="">Cliente Contado (Consumidor Final)</option>
               {customers.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name} {c.phone ? `(${c.phone})` : ''}
+                  {c.name} {c.rnc_cedula ? `· RNC/Céd: ${c.rnc_cedula}` : c.phone ? `· ${c.phone}` : ''}
                 </option>
               ))}
             </select>
@@ -322,21 +337,68 @@ export default function CartPanel({
         </div>
       </div>
 
-      {/* Row 2: Factura Selector */}
-      <div className="flex items-center gap-2 mb-2 flex-shrink-0">
-        <div className="relative w-48">
-          <select
-            value={docType}
-            onChange={(e) => setDocType(e.target.value as any)}
-            className="w-full bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3 pr-7 h-8 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer"
-          >
-            <option value="Factura">Factura</option>
-            <option value="Ticket">Ticket de caja</option>
-          </select>
-          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-[10px]">
-            ▼
-          </span>
+      {/* Row 2: Factura Selector / Tipo de Comprobante Fiscal (DGII) */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2 flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <FileText size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+            <select
+              value={fiscalEnabled ? (selectedNcfType || 'B02') : 'TICKET'}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === 'TICKET') {
+                  if (onToggleFiscal && fiscalEnabled) onToggleFiscal();
+                } else {
+                  if (onToggleFiscal && !fiscalEnabled) onToggleFiscal();
+                  if (onSelectNcfType) onSelectNcfType(val as NCFType);
+                }
+              }}
+              className="bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl pl-8 pr-7 h-8 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer"
+            >
+              <option value="B02">Factura Consumidor Final (B02)</option>
+              <option value="B01">Factura Crédito Fiscal (B01)</option>
+              <option value="B14">Régimen Especial (B14)</option>
+              <option value="B15">Comprobante Gubernamental (B15)</option>
+              <option value="TICKET">Ticket Simple (Sin NCF)</option>
+            </select>
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-[10px]">
+              ▼
+            </span>
+          </div>
+
+          {/* Badge informativo de Crédito Fiscal */}
+          {fiscalEnabled && selectedNcfType === 'B01' && (
+            customer?.rnc_cedula ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                <span>✓ RNC: {customer.rnc_cedula}</span>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setAddCustomerOpen(true)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-300 dark:border-amber-800 hover:bg-amber-200 transition-colors cursor-pointer"
+                title="B01 requiere RNC/Cédula. Clic para registrar o seleccionar cliente"
+              >
+                <span>⚠ B01 Requiere RNC (Clic para asignar)</span>
+              </button>
+            )
+          )}
         </div>
+
+        {customer && (
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
+            <span className="text-slate-400">Cliente:</span>
+            <span className="font-bold text-slate-900 dark:text-white truncate max-w-[200px]">{customer.name}</span>
+            <button
+              type="button"
+              onClick={() => onSetCustomer(null)}
+              className="text-slate-400 hover:text-rose-500 transition-colors ml-0.5 cursor-pointer"
+              title="Quitar cliente asignado"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Row 3: Product Table Header */}
@@ -426,7 +488,7 @@ export default function CartPanel({
                     <>
                       <button
                         type="button"
-                        onClick={() => onUpdateQty(item.id, item.qty - 1)}
+                        onClick={() => onUpdateQty(item.id, Math.max(0, item.qty - 1))}
                         className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center cursor-pointer transition-all active:scale-95 shadow-2xs"
                         title="Restar 1"
                       >
@@ -435,9 +497,23 @@ export default function CartPanel({
                       <input
                         type="number"
                         min={0}
-                        value={item.qty}
-                        onChange={(e) => onUpdateQty(item.id, Number(e.target.value))}
-                        className="w-12 sm:w-14 h-9 sm:h-10 text-center text-sm sm:text-base font-black border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-850 text-slate-900 dark:text-white tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={item.qty === 0 ? '' : item.qty}
+                        placeholder="0"
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => {
+                          const val = e.target.value.trim();
+                          if (val === '') {
+                            onUpdateQty(item.id, 0);
+                          } else {
+                            const n = parseFloat(val);
+                            onUpdateQty(item.id, isNaN(n) ? 0 : Math.max(0, n));
+                          }
+                        }}
+                        className={`w-12 sm:w-14 h-9 sm:h-10 text-center text-sm sm:text-base font-black border rounded-xl tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+                          item.qty === 0
+                            ? 'border-amber-400 bg-amber-50/60 dark:bg-amber-950/30 text-amber-900 dark:text-amber-200'
+                            : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-850 text-slate-900 dark:text-white'
+                        }`}
                       />
                       <button
                         type="button"
@@ -525,8 +601,12 @@ export default function CartPanel({
         <PosAddCustomerModal
           onClose={() => setAddCustomerOpen(false)}
           onCreated={async (c) => {
-            await refetch();
+            setCustomers((prev) => [c, ...prev.filter((x) => x.id !== c.id)]);
             onSetCustomer(c);
+            if (c.tipo_ncf && onSelectNcfType) {
+              onSelectNcfType(c.tipo_ncf as NCFType);
+            }
+            await refetch();
           }}
         />
       )}

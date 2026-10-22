@@ -33,10 +33,12 @@ interface PaymentPanelProps {
   total: number;
   cart: CartItem[];
   customer: Customer | null;
-  onComplete: (payments: PaymentSplit, fiscalInvoice?: FiscalInvoiceRecord) => void | Promise<void>;
+  onComplete: (payments: PaymentSplit, fiscalInvoice?: FiscalInvoiceRecord) => any;
   orderCompleted: boolean;
   fiscalEnabled?: boolean;
   onToggleFiscal?: (enabled: boolean) => void;
+  initialNcfType?: NCFType;
+  onSelectNcfType?: (t: NCFType) => void;
   onClose?: () => void;
   onNewSale?: () => void;
   initialMethod?: PaymentMethod;
@@ -60,6 +62,8 @@ export default function PaymentPanel({
   orderCompleted,
   fiscalEnabled = false,
   onToggleFiscal,
+  initialNcfType,
+  onSelectNcfType,
   onClose,
   onNewSale,
   initialMethod,
@@ -70,9 +74,15 @@ export default function PaymentPanel({
   const [processing, setProcessing] = useState(false);
   const [split, setSplit] = useState({ cash: '', card: '', transfer: '', credit: '' });
   const [lastChange, setLastChange] = useState(0);
+  const [completedSaleResult, setCompletedSaleResult] = useState<{
+    numero_factura: string;
+    ncf?: string | null;
+  } | null>(null);
 
   // Fiscal Invoice (NCF) State
-  const [ncfType, setNcfType] = useState<NCFType>('B02');
+  const [ncfType, setNcfType] = useState<NCFType>(
+    initialNcfType || (customer?.tipo_ncf as NCFType) || (customer?.rnc_cedula ? 'B01' : 'B02')
+  );
   const [rncClient, setRncClient] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [showFiscalDetails, setShowFiscalDetails] = useState(false);
@@ -82,9 +92,22 @@ export default function PaymentPanel({
   }, [initialMethod]);
 
   React.useEffect(() => {
+    if (initialNcfType) {
+      setNcfType(initialNcfType);
+    }
+  }, [initialNcfType]);
+
+  React.useEffect(() => {
     if (customer) {
-      if (customer.phone && !rncClient) setRncClient(customer.phone);
-      if (customer.name && !companyName) setCompanyName(customer.name);
+      if (customer.rnc_cedula) {
+        setRncClient(customer.rnc_cedula);
+        setNcfType((customer.tipo_ncf as NCFType) || 'B01');
+      } else if (customer.phone && !rncClient) {
+        setRncClient(customer.phone);
+      }
+      if (customer.name && !companyName) {
+        setCompanyName(customer.name);
+      }
     }
   }, [customer]);
 
@@ -242,7 +265,10 @@ export default function PaymentPanel({
         after: { total, payments, ncfType: fiscalInvoice?.ncfType, change: computedChange, cartCount: cart.length },
       });
 
-      await Promise.resolve(onComplete(payments, fiscalInvoice));
+      const res = await Promise.resolve(onComplete(payments, fiscalInvoice));
+      if (res && typeof res === 'object' && (res as any).numero_factura) {
+        setCompletedSaleResult(res as any);
+      }
       if (!fiscalEnabled) {
         toast.success(`Venta completada — ${fmt(total)} (Sin Comprobante Fiscal)`);
       }
@@ -261,26 +287,36 @@ export default function PaymentPanel({
     const subtotalNet = total / 1.18;
     const totalItbis = total - subtotalNet;
 
+    const actualInvoiceNumber =
+      completedSaleResult?.numero_factura ||
+      `FAC-${Date.now().toString().slice(-6)}`;
+
+    const actualNcf =
+      completedSaleResult?.ncf ||
+      (fiscalEnabled ? (ncfType === 'B01' ? 'B0100000001' : 'B0200000001') : null);
+
     const completedInvoiceData = {
-      invoiceNumber: `FAC-${Date.now().toString().slice(-6)}`,
-      isFiscal: fiscalEnabled,
-      ncf: fiscalEnabled ? 'B0200000001' : null,
+      invoiceNumber: actualInvoiceNumber,
+      isFiscal: fiscalEnabled || Boolean(actualNcf),
+      ncf: actualNcf,
       ncfType: fiscalEnabled ? ncfType : null,
-      ncfTypeName: fiscalEnabled ? NCF_TYPES[ncfType].name : null,
+      ncfTypeName: fiscalEnabled && ncfType ? NCF_TYPES[ncfType]?.name : null,
       expirationDate: '31/12/2027',
       issueDate: now.toLocaleDateString('es-DO'),
       issueTime: now.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' }),
       cashier: user?.name || user?.username || 'Caja POS',
       customerName: customer?.name || (companyName.trim() || undefined),
-      customerRnc: rncClient.trim() || customer?.phone || undefined,
-      items: cart.map((item) => ({
-        sku: item.sku,
-        name: item.name,
-        qty: item.qty,
-        price: item.price,
-        subtotal: item.price * item.qty,
-        itbis: (item.price - item.price / 1.18) * item.qty,
-      })),
+      customerRnc: customer?.rnc_cedula || rncClient.trim() || undefined,
+      items: cart
+        .filter((item) => item.qty > 0)
+        .map((item) => ({
+          sku: item.sku,
+          name: item.name,
+          qty: item.qty,
+          price: item.price,
+          subtotal: item.price * item.qty,
+          itbis: (item.price - item.price / 1.18) * item.qty,
+        })),
       subtotal: Math.round(subtotalNet * 100) / 100,
       itbis: Math.round(totalItbis * 100) / 100,
       total,

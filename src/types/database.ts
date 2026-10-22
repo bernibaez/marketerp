@@ -112,6 +112,7 @@ export interface Cliente {
   correo: string | null;
   direccion: string | null;
   tipo_cliente: TipoCliente;
+  tipo_ncf?: string | null;
   grupo_id?: string | null;
   limite_credito: number;
   balance_actual: number;

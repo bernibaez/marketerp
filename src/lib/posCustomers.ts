@@ -30,15 +30,23 @@ export function savePosCustomers(customers: Customer[]) {
 
 export function addPosCustomer(input: {
   name: string;
-  phone: string;
+  phone?: string;
   credit?: number;
+  rnc_cedula?: string | null;
+  direccion?: string | null;
+  tipo_cliente?: string | null;
+  tipo_ncf?: string | null;
 }): Customer {
   const customers = getPosCustomers();
   const customer: Customer = {
     id: `cust-${Date.now()}`,
     name: input.name.trim(),
-    phone: input.phone.trim(),
+    phone: (input.phone ?? '').trim(),
     credit: Math.max(0, Number(input.credit) || 0),
+    rnc_cedula: input.rnc_cedula?.trim() || null,
+    direccion: input.direccion?.trim() || null,
+    tipo_cliente: input.tipo_cliente || 'final',
+    tipo_ncf: input.tipo_ncf || null,
   };
   const next = [customer, ...customers];
   savePosCustomers(next);

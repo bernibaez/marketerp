@@ -336,25 +336,84 @@ export async function obtenerVentasTurno(params: {
 export async function obtenerVentaPorNumeroFactura(
   numeroFactura: string
 ): Promise<VentaConDetalle | null> {
-  const codigo = numeroFactura.trim();
-  if (!codigo) return null;
+  const raw = (numeroFactura || '').trim();
+  if (!raw) return null;
+
+  // Normalizar: remover prefijos como "No.", "#", espacios
+  const codigo = raw.replace(/^[#\s]+/, '').replace(/^No\.?\s*/i, '');
+  const codigoUpper = codigo.toUpperCase();
+  const cleanCode = codigoUpper.replace(/^FAC-?/i, '');
 
   const sb = tryGetSupabase();
-  if (!sb) {
-    const list = getLocalVentas();
-    return list.find((v) => v.numero_factura.toUpperCase() === codigo.toUpperCase()) ?? null;
+  if (sb) {
+    try {
+      // 1. Búsqueda directa o flexible en Supabase (por numero_factura exacto, NCF exacto, o coincidencias parciales)
+      const { data: ventas, error } = await sb
+        .from('ventas')
+        .select('id, numero_factura, ncf, creado_en')
+        .or(`numero_factura.ilike.${codigo},ncf.ilike.${codigo},numero_factura.ilike.%${cleanCode}%,ncf.ilike.%${codigo}%`)
+        .order('creado_en', { ascending: false })
+        .limit(5);
+
+      if (!error && ventas && ventas.length > 0) {
+        // Priorizar coincidencia exacta
+        const exact =
+          ventas.find(
+            (v) =>
+              (v.numero_factura && v.numero_factura.toUpperCase() === codigoUpper) ||
+              (v.ncf && v.ncf.toUpperCase() === codigoUpper)
+          ) || ventas[0];
+
+        const full = await obtenerVentaPorId(String(exact.id));
+        if (full) return full;
+      }
+    } catch {
+      // Continuar con fallback local
+    }
   }
 
-  const { data: venta, error } = await sb
-    .from('ventas')
-    .select('id')
-    .ilike('numero_factura', codigo)
-    .order('creado_en', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  if (!venta?.id) return null;
-  return obtenerVentaPorId(String(venta.id));
+  // 2. Fallback a ventas locales (offline o guardadas localmente)
+  const list = getLocalVentas();
+  const found = list.find((v) => {
+    const num = (v.numero_factura || '').toUpperCase();
+    const ncf = (v.ncf || '').toUpperCase();
+    return (
+      num === codigoUpper ||
+      ncf === codigoUpper ||
+      (cleanCode && num.includes(cleanCode)) ||
+      (codigoUpper && ncf.includes(codigoUpper)) ||
+      (v.id && v.id.toLowerCase() === codigo.toLowerCase())
+    );
+  });
+
+  return found ?? null;
+}
+
+export async function obtenerUltimasVentasParaDevolucion(limite = 8): Promise<VentaConDetalle[]> {
+  const sb = tryGetSupabase();
+  if (!sb) {
+    return getLocalVentas()
+      .filter((v) => v.estado !== 'anulada')
+      .slice(0, limite);
+  }
+
+  try {
+    const { data, error } = await sb
+      .from('ventas')
+      .select('id')
+      .neq('estado', 'anulada')
+      .order('creado_en', { ascending: false })
+      .limit(limite);
+
+    if (error || !data) return getLocalVentas().slice(0, limite);
+
+    const ventas = await Promise.all(
+      data.map((row) => obtenerVentaPorId(String(row.id)))
+    );
+    return ventas.filter(Boolean) as VentaConDetalle[];
+  } catch {
+    return getLocalVentas().slice(0, limite);
+  }
 }
 
 export async function obtenerVentaPorId(ventaId: string): Promise<VentaConDetalle | null> {
