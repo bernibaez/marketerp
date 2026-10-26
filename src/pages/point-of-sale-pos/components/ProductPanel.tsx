@@ -7,7 +7,7 @@ import ComboStockAlertModal from '@/pages/combos/components/ComboStockAlertModal
 import { toast } from '@/lib/toast';
 import { useProductos } from '@/hooks/useProductos';
 import { useCombos } from '@/hooks/useCombos';
-import { initialProducts } from '@/pages/product-management/components/ProductManagementScreen';
+import { initialProducts } from '@/lib/initialProducts';
 import { extractPluFromCode, isVariableWeightBarcode, productMatchesScanCode } from '@/lib/scaleBarcode';
 import type { SaleType, WeightUnit } from '@/types/database';
 

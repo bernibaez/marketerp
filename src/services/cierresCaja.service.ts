@@ -2,6 +2,8 @@ import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupa
 import { CIERRE_COLUMNS, type CierreCaja } from '@/types/database';
 import { getCashClosures, saveCashClosure, type CashClosure } from '@/lib/cashClosureStore';
 import { obtenerCajas } from './cajas.service';
+import { obtenerVentasTurno } from './ventas.service';
+import { obtenerMovimientosCaja } from './movimientosCaja.service';
 
 function esUuid(value: string | undefined | null): boolean {
   return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -385,7 +387,6 @@ export async function calcularResumenCajaAbierta(cajaId: string, cajeroId?: stri
   let totalOtros = 0;
 
   try {
-    const { obtenerVentasTurno } = await import('./ventas.service');
     const searchCajaIds = Array.from(ids);
     const ventas = await obtenerVentasTurno({
       cajaId: searchCajaIds.length > 0 ? searchCajaIds : cajaId,
@@ -409,7 +410,6 @@ export async function calcularResumenCajaAbierta(cajaId: string, cajeroId?: stri
   let totalEntradas = 0;
   let totalRetiros = 0;
   try {
-    const { obtenerMovimientosCaja } = await import('./movimientosCaja.service');
     const movimientos = await obtenerMovimientosCaja(abierta?.id, abierta?.caja_id || cajaId);
     const desdeTime = desde ? new Date(desde).getTime() : 0;
     for (const m of movimientos) {

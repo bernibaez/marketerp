@@ -1,4 +1,5 @@
 import { isSupabaseConfigured } from '@/services/clienteSupabase';
+import { guardarLogoEmpresa, obtenerLogoEmpresa } from '@/services/empresa.service';
 
 const LOGO_STORAGE_KEY = 'mercato_company_logo';
 const LOGO_CHANGE_EVENT = 'mercato-logo-change';
@@ -19,11 +20,9 @@ export function setCompanyLogo(dataUrl: string) {
   window.dispatchEvent(new Event(LOGO_CHANGE_EVENT));
 
   if (isSupabaseConfigured()) {
-    void import('@/services/empresa.service')
-      .then(({ guardarLogoEmpresa }) => guardarLogoEmpresa(dataUrl))
-      .catch(() => {
-        /* cache local ya guardado */
-      });
+    void guardarLogoEmpresa(dataUrl).catch(() => {
+      /* cache local ya guardado */
+    });
   }
 }
 
@@ -32,11 +31,9 @@ export function clearCompanyLogo() {
   window.dispatchEvent(new Event(LOGO_CHANGE_EVENT));
 
   if (isSupabaseConfigured()) {
-    void import('@/services/empresa.service')
-      .then(({ guardarLogoEmpresa }) => guardarLogoEmpresa(null))
-      .catch(() => {
-        /* ignore */
-      });
+    void guardarLogoEmpresa(null).catch(() => {
+      /* ignore */
+    });
   }
 }
 
@@ -44,7 +41,6 @@ export function clearCompanyLogo() {
 export async function syncCompanyLogoFromDb(): Promise<string | null> {
   if (!isSupabaseConfigured()) return getCompanyLogo();
   try {
-    const { obtenerLogoEmpresa } = await import('@/services/empresa.service');
     const url = await obtenerLogoEmpresa();
     if (url) {
       localStorage.setItem(LOGO_STORAGE_KEY, url);

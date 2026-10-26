@@ -22,7 +22,7 @@ import type { ProductItem } from '@/lib/productStore';
 import type { StockAdjustmentItem } from '@/lib/stockAdjustmentStore';
 import { obtenerHistorialAjustes, procesarAjusteStockBloque } from '@/services/inventario.service';
 import { useProductos } from '@/hooks/useProductos';
-import { initialProducts } from '@/pages/product-management/components/ProductManagementScreen';
+import { initialProducts } from '@/lib/initialProducts';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/context/AuthContext';
 

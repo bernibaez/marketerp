@@ -1,5 +1,6 @@
 import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupabase';
 import type { Devolucion, EstadoDevolucion } from '@/types/database';
+import { updateProductStockInStore } from '@/lib/productStore';
 
 export interface ItemDevolucionPayload {
   producto_id?: string | null;
@@ -260,7 +261,6 @@ export async function cambiarEstadoDevolucion(
     if (nuevoEstado === 'aprobada') {
       const target = getLocalDevoluciones().find((d) => d.id === devolucionId);
       if (target?.items) {
-        const { updateProductStockInStore } = await import('@/lib/productStore');
         for (const item of target.items) {
           if (item.producto_id) {
             updateProductStockInStore(item.producto_id, Math.ceil(item.cantidad));

@@ -1,5 +1,7 @@
 import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupabase';
 import { VENTA_COLUMNS, type MetodoPago, type Venta, type DetalleVenta } from '@/types/database';
+import { updateProductStockInStore } from '@/lib/productStore';
+import { crearCxcDesdeVenta } from './cxc.service';
 
 export type ItemVentaPayload = {
   producto_id?: string | null;
@@ -116,7 +118,6 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     saveLocalVentas([venta, ...getLocalVentas()]);
 
     // Descontar stock local (soporta cantidades fraccionarias exactas)
-    const { updateProductStockInStore } = await import('@/lib/productStore');
     for (const item of payload.items) {
       if (item.tipo_item === 'producto' && item.producto_id) {
         updateProductStockInStore(item.producto_id, -item.cantidad);
@@ -149,7 +150,6 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
   const credito = Number(payload.monto_credito ?? 0);
   if (credito > 0 || payload.metodo_pago === 'credito') {
     try {
-      const { crearCxcDesdeVenta } = await import('./cxc.service');
       await crearCxcDesdeVenta({
         venta_id: resultado.venta_id,
         numero_factura: resultado.numero_factura,

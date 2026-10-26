@@ -17,7 +17,7 @@ import {
 import type { CartItem, Customer } from './POSTerminal';
 import { useClientes } from '@/hooks/useClientes';
 import { useProductos } from '@/hooks/useProductos';
-import { initialProducts } from '@/pages/product-management/components/ProductManagementScreen';
+import { initialProducts } from '@/lib/initialProducts';
 import PosAddCustomerModal from './PosAddCustomerModal';
 import { toast } from '@/lib/toast';
 import type { NCFType } from '@/lib/ncfStore';

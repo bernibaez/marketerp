@@ -1,4 +1,4 @@
-import { Product as PMProduct, initialProducts } from '@/pages/product-management/components/ProductManagementScreen';
+import { initialProducts, type Product as PMProduct } from '@/lib/initialProducts';
 import { isSupabaseConfigured } from '@/services/clienteSupabase';
 
 export type ProductItem = PMProduct;

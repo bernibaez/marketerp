@@ -15,6 +15,9 @@ import {
 import NCFSettingsTab from './settings/NCFSettingsTab';
 import PermissionsSettingsTab from './settings/PermissionsSettingsTab';
 import InvoiceSettingsTab from './settings/InvoiceSettingsTab';
+import { obtenerConfiguracionEmpresa, guardarConfiguracionEmpresa } from '@/services/empresa.service';
+import { obtenerSucursales } from '@/services/transferencias.service';
+import { saveInvoiceSettings } from '@/lib/invoiceSettingsStore';
 
 const settingsSections = [
   { id: 'company', label: 'Empresa', icon: <Building2 size={18} /> },
@@ -66,8 +69,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     void syncCompanyLogoFromDb().then((url) => setLogoPreview(url));
-    void import('@/services/empresa.service')
-      .then(({ obtenerConfiguracionEmpresa }) => obtenerConfiguracionEmpresa())
+    void obtenerConfiguracionEmpresa()
       .then((cfg) => {
         if (!cfg) return;
         setEmpresaNombre(cfg.nombre_comercial || '');
@@ -86,8 +88,7 @@ export default function SettingsPage() {
   useEffect(() => {
     if (activeSection !== 'locations') return;
     setLoadingSucursales(true);
-    void import('@/services/transferencias.service')
-      .then(({ obtenerSucursales }) => obtenerSucursales())
+    void obtenerSucursales()
       .then(setSucursales)
       .catch(() => setSucursales([]))
       .finally(() => setLoadingSucursales(false));
@@ -126,8 +127,6 @@ export default function SettingsPage() {
   const handleSaveEmpresa = async () => {
     setSavingEmpresa(true);
     try {
-      const { guardarConfiguracionEmpresa } = await import('@/services/empresa.service');
-      const { saveInvoiceSettings } = await import('@/lib/invoiceSettingsStore');
       await guardarConfiguracionEmpresa({
         nombre_comercial: empresaNombre,
         rnc: empresaRnc,
@@ -422,7 +421,7 @@ export default function SettingsPage() {
                         aria-label={n.label}
                         onClick={() => {
                           setNotifPrefs((prev) => {
-                            const next = { ...prev, [n.key]: !Boolean(prev[n.key]) };
+                            const next = { ...prev, [n.key]: !prev[n.key] };
                             try {
                               localStorage.setItem('mercato_notif_prefs', JSON.stringify(next));
                             } catch {

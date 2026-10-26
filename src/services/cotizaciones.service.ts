@@ -1,5 +1,6 @@
 import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupabase';
 import type { Cotizacion, EstadoCotizacion } from '@/types/database';
+import { procesarVenta } from './ventas.service';
 
 export interface ItemCotizacionPayload {
   producto_id?: string | null;
@@ -265,7 +266,6 @@ export async function convertirCotizacionAVenta(
     if (!cot) throw new Error('Cotización no encontrada');
     
     // Crear venta local
-    const { procesarVenta } = await import('./ventas.service');
     const res = await procesarVenta({
       cliente_id: cot.cliente_id,
       subtotal: cot.subtotal,
@@ -312,7 +312,6 @@ export async function convertirCotizacionAVenta(
 
   if (fetchErr || !cot) throw new Error('Error al cargar la cotización para conversión');
 
-  const { procesarVenta } = await import('./ventas.service');
   const res = await procesarVenta({
     cliente_id: cot.cliente_id,
     cajero_id: cot.vendedor_id,

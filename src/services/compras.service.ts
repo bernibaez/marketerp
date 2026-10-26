@@ -1,5 +1,6 @@
 import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupabase';
 import { actualizarProducto } from './productos.service';
+import { crearCxpDesdeCompra } from './cxp.service';
 
 export type CompraLista = {
   id: string;
@@ -176,7 +177,6 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
   const metodo = mapMetodoPago(input.metodo_pago);
   if (metodo === 'credito' && compra.proveedor_id) {
     try {
-      const { crearCxpDesdeCompra } = await import('./cxp.service');
       await crearCxpDesdeCompra({
         compra_id: compra.id,
         proveedor_id: compra.proveedor_id,

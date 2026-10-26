@@ -1,19 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from '@/lib/toast';
-import { RefreshCw, Banknote, CreditCard, XCircle, Pause, CheckCircle, FileText, ShoppingBag } from 'lucide-react';
 import POSHeader from './POSHeader';
 import ProductPanel from './ProductPanel';
 import CartPanel from './CartPanel';
 import PaymentPanel from './PaymentPanel';
-import PosExpenseModal from './PosExpenseModal';
-import PosHoldModal from './PosHoldModal';
-import PosScaleModal from './PosScaleModal';
-import PosReturnModal from './PosReturnModal';
-import PosCashSwitchModal from './PosCashSwitchModal';
-import RegisterDetailsModal from './RegisterDetailsModal';
-import PosCashOpenModal from './PosCashOpenModal';
-import PosCashCloseModal from './PosCashCloseModal';
-import FiscalInvoiceModal from '@/components/FiscalInvoiceModal';
+import { POSBottomBar } from './POSBottomBar';
+import { POSModals } from './POSModals';
+import { usePOSCart } from '../hooks/usePOSCart';
+
 import { findCashRegister, getCashRegister, type CashRegisterId } from '@/lib/cashRegisters';
 import { useCashRegisters } from '@/hooks/useCashRegisters';
 import {
@@ -36,20 +30,14 @@ import { useAuth } from '@/context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useProductos } from '@/hooks/useProductos';
 import { useCombos } from '@/hooks/useCombos';
-import { initialProducts } from '@/pages/product-management/components/ProductManagementScreen';
+import { initialProducts } from '@/lib/initialProducts';
 import { parseScaleBarcode } from '../utils/scaleUtils';
 import { decodeVariableWeightBarcode, isVariableWeightBarcode, productMatchesScanCode } from '@/lib/scaleBarcode';
 import { buscarProductoPorCodigoEscaneado, productoAUi } from '@/services/productos.service';
-import PosWeightScanModal from './PosWeightScanModal';
 
 const ADMIN_OWN_CASH: CashRegisterId = '1';
 const DEFAULT_CASHIER_CASH: CashRegisterId = '2';
 
-/**
- * Enfoca el input de código de barras y selecciona todo el texto.
- * Usado cuando el código no se encontró, para que el próximo escaneo
- * reemplace el código anterior sin concatenarlo.
- */
 function selectPosBarcodeInput() {
   const el = document.getElementById('pos-barcode-search-input') as HTMLInputElement | null;
   if (!el) return;
@@ -59,15 +47,11 @@ function selectPosBarcodeInput() {
     try {
       el.setSelectionRange(0, el.value.length);
     } catch {
-      // Algunos inputs no permiten setSelectionRange
+      // Ignorar si el navegador no soporta setSelectionRange
     }
   }
 }
 
-/**
- * Enfoca el input de código de barras con el campo vacío.
- * Usado después de un escaneo exitoso para recibir el siguiente código.
- */
 function focusPosBarcodeInput() {
   const el = document.getElementById('pos-barcode-search-input') as HTMLInputElement | null;
   if (!el) return;
@@ -112,13 +96,44 @@ export default function POSTerminal() {
   const navigate = useNavigate();
   const isAdminUser = user?.role === 'Administrador';
   const { registers, refetch: refetchRegisters, markRegisterClosed } = useCashRegisters();
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [globalDiscount, setGlobalDiscount] = useState(0);
+
+  // Cart & calculations hook
+  const {
+    cart,
+    setCart,
+    selectedCustomer,
+    setSelectedCustomer,
+    globalDiscount,
+    setGlobalDiscount,
+    fiscalEnabled,
+    setFiscalEnabled,
+    selectedNcfType,
+    setSelectedNcfType,
+    awaitingDeleteScan,
+    toggleDeleteMode,
+    handleCancelDeleteMode,
+    addToCart,
+    deductOrRemoveFromCart,
+    updateQty,
+    updateDiscount,
+    removeFromCart,
+    clearCart,
+    toggleWholesalePrice,
+    toggleAllWholesale,
+    subtotal,
+    globalDiscountAmount,
+    taxTotal,
+    total,
+  } = usePOSCart();
+
+  // Payment Drawer state
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [preferredPayMethod, setPreferredPayMethod] = useState<'cash' | 'card' | 'transfer' | 'credit' | 'split' | undefined>();
   const [orderCompleted, setOrderCompleted] = useState(false);
-  const [lastPayments, setLastPayments] = useState<PaymentSplit | null>(null);
+  const [, setLastPayments] = useState<PaymentSplit | null>(null);
+  const [, setLastSaleResult] = useState<{ venta_id: string; numero_factura: string; ncf?: string | null } | null>(null);
+
+  // Modals state
   const [expenseOpen, setExpenseOpen] = useState(false);
   const [holdOpen, setHoldOpen] = useState(false);
   const [scaleOpen, setScaleOpen] = useState(false);
@@ -126,17 +141,14 @@ export default function POSTerminal() {
   const [returnOpen, setReturnOpen] = useState(false);
   const [registerDetailsOpen, setRegisterDetailsOpen] = useState(false);
   const [lastFiscalInvoice, setLastFiscalInvoice] = useState<FiscalInvoiceRecord | null>(null);
-  const [fiscalEnabled, setFiscalEnabled] = useState(false);
-  const [selectedNcfType, setSelectedNcfType] = useState<NCFType>('B02');
-  const [lastSaleResult, setLastSaleResult] = useState<{ venta_id: string; numero_factura: string; ncf?: string | null } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   const handleOpenScale = (productId?: string, weight?: number) => {
     setScaleParams(productId || weight ? { productId, weight } : null);
     setScaleOpen(true);
   };
+
   const [heldSales, setHeldSales] = useState<HeldSale[]>(() => getHeldSales());
-  const [awaitingDeleteScan, setAwaitingDeleteScan] = useState(false);
   const [activeCashId, setActiveCashId] = useState<CashRegisterId>(() =>
     user?.role === 'Administrador' ? ADMIN_OWN_CASH : DEFAULT_CASHIER_CASH
   );
@@ -186,219 +198,6 @@ export default function POSTerminal() {
 
   const refreshHeld = () => setHeldSales(getHeldSales());
 
-  const handleCancelDeleteMode = useCallback(() => {
-    setAwaitingDeleteScan(false);
-    toast.info('Modo venta normal activado');
-    setTimeout(focusPosBarcodeInput, 50);
-  }, []);
-
-  const toggleDeleteMode = useCallback(() => {
-    if (cart.length === 0 && !awaitingDeleteScan) {
-      toast.error('El carrito está vacío');
-      return;
-    }
-    setAwaitingDeleteScan((prev) => {
-      const next = !prev;
-      if (next) {
-        toast.info('Modo quitar activado: escanea los productos a descontar o quitar del carrito');
-      } else {
-        toast.info('Modo venta normal activado');
-      }
-      setTimeout(focusPosBarcodeInput, 50);
-      return next;
-    });
-  }, [cart.length, awaitingDeleteScan]);
-
-  const deductOrRemoveFromCart = useCallback(
-    (product: { productId?: string; sku?: string; barcode?: string; name?: string }) => {
-      setCart((prev) => {
-        const prodSku = (product.sku || '').toLowerCase();
-        const prodBarcode = (product.barcode || '').toLowerCase();
-        const prodName = (product.name || '').toLowerCase();
-
-        const idxReversed = [...prev].reverse().findIndex((item) => {
-          if (product.productId && item.productId === product.productId) return true;
-          if (prodSku && item.sku && item.sku.toLowerCase() === prodSku) return true;
-          if (prodBarcode && item.barcode && item.barcode.toLowerCase() === prodBarcode) return true;
-          if (prodBarcode && item.sku && item.sku.toLowerCase() === prodBarcode) return true;
-          if (prodSku && item.barcode && item.barcode.toLowerCase() === prodSku) return true;
-          if (prodName && item.name.toLowerCase() === prodName) return true;
-          return false;
-        });
-
-        if (idxReversed === -1) {
-          toast.error(
-            `"${product.name || product.sku || product.barcode || 'Producto'}" no está en el carrito`
-          );
-          return prev;
-        }
-
-        const realIdx = prev.length - 1 - idxReversed;
-        const currentItem = prev[realIdx];
-
-        // Restar 1 unidad por cada escaneo (y eliminarlo si la cantidad llega a 0 o es producto por peso)
-        if (currentItem.qty > 1 && !currentItem.isWeighted) {
-          const newQty = Math.round((currentItem.qty - 1) * 100) / 100;
-          toast.info(`Restada 1 unidad de "${currentItem.name}" (Quedan ${newQty})`);
-          return prev.map((item, i) => (i === realIdx ? { ...item, qty: newQty } : item));
-        } else {
-          toast.success(`Eliminado del carrito: "${currentItem.name}"`);
-          const nextCart = prev.filter((_, i) => i !== realIdx);
-          if (nextCart.length === 0) {
-            toast.info('Carrito vacío. Modo quitar desactivado.');
-            setAwaitingDeleteScan(false);
-          }
-          return nextCart;
-        }
-      });
-    },
-    []
-  );
-
-  const addToCart = useCallback(
-    (product: Omit<CartItem, 'qty' | 'discount'>, qty = 1) => {
-      if (
-        product.sku.toUpperCase() === DELETE_SKU ||
-        product.sku.toUpperCase() === 'ELIMINAR' ||
-        product.sku.toUpperCase() === 'QUITAR'
-      ) {
-        toggleDeleteMode();
-        return;
-      }
-
-      if (awaitingDeleteScan) {
-        deductOrRemoveFromCart({
-          productId: product.productId,
-          sku: product.sku,
-          barcode: product.barcode,
-          name: product.name,
-        });
-        return;
-      }
-
-      setCart((prev) => {
-        const existing = prev.find(
-          (item) => item.productId === product.productId || item.sku === product.sku
-        );
-        if (existing) {
-          return prev.map((item) =>
-            item.productId === product.productId || item.sku === product.sku
-              ? { ...item, qty: Math.round((item.qty + qty) * 100) / 100 }
-              : item
-          );
-        }
-        const regularPrice = product.regularPrice ?? product.price;
-        const wholesalePrice =
-          product.wholesalePrice && product.wholesalePrice > 0
-            ? Number(product.wholesalePrice)
-            : undefined;
-        return [
-          ...prev,
-          {
-            ...product,
-            regularPrice,
-            wholesalePrice,
-            isWholesale: product.isWholesale ?? false,
-            qty,
-            discount: 0,
-          },
-        ];
-      });
-    },
-    [awaitingDeleteScan, deductOrRemoveFromCart, toggleDeleteMode]
-  );
-
-  const toggleWholesalePrice = useCallback((cartId: string) => {
-    setCart((prev) =>
-      prev.map((item) => {
-        if (item.id !== cartId) return item;
-        const wholesale = item.wholesalePrice;
-        if (!wholesale || wholesale <= 0) {
-          toast.error(`"${item.name}" no tiene precio al por mayor configurado`);
-          return item;
-        }
-
-        const willBeWholesale = !item.isWholesale;
-        const regular = item.regularPrice ?? item.price;
-        const newPrice = willBeWholesale ? wholesale : regular;
-
-        if (willBeWholesale) {
-          toast.success(`"${item.name}" cambiado a precio al por mayor (RD$ ${wholesale.toFixed(2)})`);
-        } else {
-          toast.info(`"${item.name}" restaurado a precio normal (RD$ ${regular.toFixed(2)})`);
-        }
-
-        return {
-          ...item,
-          regularPrice: regular,
-          wholesalePrice: wholesale,
-          isWholesale: willBeWholesale,
-          price: newPrice,
-        };
-      })
-    );
-  }, []);
-
-  const toggleAllWholesale = useCallback(() => {
-    setCart((prev) => {
-      const eligible = prev.filter((i) => i.wholesalePrice && i.wholesalePrice > 0);
-      if (eligible.length === 0) {
-        toast.info('Ningún producto en el carrito tiene precio al por mayor configurado');
-        return prev;
-      }
-
-      const allAlreadyWholesale = eligible.every((i) => i.isWholesale);
-      const targetState = !allAlreadyWholesale;
-
-      const updated = prev.map((item) => {
-        if (!item.wholesalePrice || item.wholesalePrice <= 0) return item;
-        const regular = item.regularPrice ?? item.price;
-        const newPrice = targetState ? item.wholesalePrice : regular;
-        return {
-          ...item,
-          regularPrice: regular,
-          isWholesale: targetState,
-          price: newPrice,
-        };
-      });
-
-      if (targetState) {
-        toast.success(`Precio al por mayor aplicado a ${eligible.length} producto(s)`);
-      } else {
-        toast.info('Precio normal restaurado en todos los productos');
-      }
-
-      return updated;
-    });
-  }, []);
-
-  const updateQty = useCallback((cartId: string, qty: number) => {
-    const safeQty = Math.max(0, isNaN(qty) ? 0 : qty);
-    setCart((prev) => prev.map((item) => (item.id === cartId ? { ...item, qty: safeQty } : item)));
-  }, []);
-
-  const updateDiscount = useCallback((cartId: string, discount: number) => {
-    setCart((prev) =>
-      prev.map((item) =>
-        item.id === cartId ? { ...item, discount: Math.min(100, Math.max(0, discount)) } : item
-      )
-    );
-  }, []);
-
-  const removeFromCart = useCallback((cartId: string) => {
-    setCart((prev) => prev.filter((item) => item.id !== cartId));
-  }, []);
-
-  const clearCart = useCallback(() => {
-    setCart([]);
-    setSelectedCustomer(null);
-    setGlobalDiscount(0);
-    setOrderCompleted(false);
-    setLastPayments(null);
-    setAwaitingDeleteScan(false);
-    setFiscalEnabled(false);
-  }, []);
-
   const holdCurrentSale = (label: string) => {
     if (cart.length === 0) {
       toast.error('No hay productos para pausar');
@@ -432,24 +231,6 @@ export default function POSTerminal() {
     setHoldOpen(false);
     toast.success(`Retomada: ${sale.label}`);
   };
-
-  const subtotal = cart.reduce((sum, item) => {
-    const lineTotal = item.price * item.qty;
-    const lineDiscount = lineTotal * (item.discount / 100);
-    return sum + lineTotal - lineDiscount;
-  }, 0);
-
-  const globalDiscountAmount = subtotal * (globalDiscount / 100);
-  const afterDiscount = subtotal - globalDiscountAmount;
-  const taxTotal = cart
-    .filter((i) => i.tax > 0)
-    .reduce((sum, item) => {
-      const lineTotal = item.price * item.qty * (1 - item.discount / 100);
-      return sum + lineTotal * (item.tax / 100);
-    }, 0);
-  const total = afterDiscount + taxTotal;
-
-
 
   const { productosUi } = useProductos({ pagina: 1, limite: 500, estado: 'todos' });
   const { combos } = useCombos(true);
@@ -529,9 +310,6 @@ export default function POSTerminal() {
       if (!q) return false;
 
       const keepCodeSelected = () => {
-        // Restaura el código en el estado y luego selecciona todo el texto
-        // después del render de React, para que el próximo escaneo reemplace
-        // el código anterior en lugar de concatenarse.
         setSearchQuery(q);
         requestAnimationFrame(() => selectPosBarcodeInput());
         return false;
@@ -548,11 +326,10 @@ export default function POSTerminal() {
         return true;
       }
 
-      // ── MODO QUITAR / RESTAR ACTIVO ──────────────────────────────────────────
+      // Modo quitar / restar
       if (awaitingDeleteScan) {
         const qLower = q.toLowerCase();
 
-        // 1. Coincidencia directa con algún ítem ya presente en el carrito
         const directCartItem = cart.find(
           (item) =>
             (item.barcode && item.barcode.toLowerCase() === qLower) ||
@@ -573,7 +350,6 @@ export default function POSTerminal() {
           return true;
         }
 
-        // 2. Balanza EAN-13
         const scaleParsed = parseScaleBarcode(q, realScaleCatalog);
         if (scaleParsed) {
           const inCart = cart.find(
@@ -594,7 +370,6 @@ export default function POSTerminal() {
           }
         }
 
-        // 3. Peso variable
         if (isVariableWeightBarcode(q)) {
           try {
             const fromDb = await buscarProductoPorCodigoEscaneado(q);
@@ -620,7 +395,6 @@ export default function POSTerminal() {
           }
         }
 
-        // 4. Catálogo de productos
         const storeProducts = productosUi.map((p) => ({
           id: p.id,
           sku: p.sku,
@@ -702,7 +476,6 @@ export default function POSTerminal() {
           }
         }
 
-        // 5. Combos
         const activeCombos = combos.filter((c) => c.active);
         let matchedCombo = activeCombos.find(
           (c) => c.code.toLowerCase() === qLower || (c.barcode && c.barcode.toLowerCase() === qLower)
@@ -930,7 +703,6 @@ export default function POSTerminal() {
         return true;
       }
 
-      // 3. Search combos
       const activeCombos = combos.filter((c) => c.active);
       let matchedCombo = activeCombos.find(
         (c) => c.code.toLowerCase() === qLower || (c.barcode && c.barcode.toLowerCase() === qLower)
@@ -941,7 +713,7 @@ export default function POSTerminal() {
           (c) =>
             c.name.toLowerCase().includes(qLower) ||
             c.code.toLowerCase().includes(qLower) ||
-            (c.barcode && c.barcode.toLowerCase().includes(qLower))
+            (c.barcode && c.barcode.toLowerCase() === qLower)
         );
       }
 
@@ -977,7 +749,6 @@ export default function POSTerminal() {
     },
     [
       addToCart,
-      handleOpenScale,
       productosUi,
       combos,
       realScaleCatalog,
@@ -988,6 +759,7 @@ export default function POSTerminal() {
     ]
   );
 
+  // Keyboard Shortcuts Listener
   useEffect(() => {
     let scanBuffer = '';
     let lastKeyTime = Date.now();
@@ -1062,12 +834,7 @@ export default function POSTerminal() {
         }
       }
 
-      // Ignore scans if user is editing inside another text field/modal
       if (isModalOrOtherInput) return;
-
-      // Si el foco ya está en el input de código de barras, el input maneja
-      // los caracteres directamente a través de onChange. Solo redirigimos
-      // el buffer global cuando el foco está en otro lugar.
       if (target.id === 'pos-barcode-search-input') return;
 
       const now = Date.now();
@@ -1111,6 +878,33 @@ export default function POSTerminal() {
       return;
     }
     openPayment('cash');
+  };
+
+  const handleCreateQuote = async () => {
+    if (cart.length === 0) {
+      toast.error('Agrega productos para crear una cotización');
+      return;
+    }
+    try {
+      const cot = await crearCotizacion({
+        cliente_id: selectedCustomer?.id ?? null,
+        vendedor_id: user?.id ?? null,
+        subtotal,
+        monto_impuesto: taxTotal,
+        monto_total: total,
+        items: cart.map((item) => ({
+          producto_id: item.isCombo ? null : item.productId,
+          nombre_item: item.name,
+          precio_unitario: item.price,
+          cantidad: item.qty,
+          subtotal: item.price * item.qty * (1 - item.discount / 100),
+        })),
+      });
+      toast.success(`Cotización ${cot.codigo} creada`);
+      navigate('/sales');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo crear la cotización');
+    }
   };
 
   const paymentProps = {
@@ -1171,7 +965,6 @@ export default function POSTerminal() {
           monto_transferencia: _payments.transfer,
           monto_credito: _payments.credit,
           devuelta_entregada: Math.max(0, montoPagado - total),
-          // Con Supabase el RPC asigna NCF si hay tipo_ncf; no pasar NCF previo.
           ncf: isSupabaseConfigured() ? null : (fiscalInvoice?.ncf ?? null),
           tipo_ncf: effectiveNcfType,
           items: activeItems.map((item) => ({
@@ -1187,7 +980,6 @@ export default function POSTerminal() {
           })),
         });
 
-        // Contador local de ventas de combo solo en modo offline
         if (!isSupabaseConfigured()) {
           activeItems.forEach((cartItem) => {
             if (cartItem.isCombo && cartItem.comboId) {
@@ -1236,7 +1028,7 @@ export default function POSTerminal() {
               });
             }
           } catch {
-            /* no bloquear venta si falla el registro fiscal auxiliar */
+            /* no bloquear venta */
           }
           setLastFiscalInvoice(finalInvoice);
           toast.success(`Venta completada — Factura: ${resultado.numero_factura} ${finalInvoice.ncf ? `(NCF: ${finalInvoice.ncf})` : ''}`);
@@ -1254,170 +1046,117 @@ export default function POSTerminal() {
     onNewSale: clearCart,
   };
 
+  const isAnyModalOpen =
+    paymentOpen ||
+    expenseOpen ||
+    holdOpen ||
+    scaleOpen ||
+    returnOpen ||
+    cashSwitchOpen ||
+    registerDetailsOpen ||
+    openCashModalOpen ||
+    closeCashModalOpen ||
+    weightScanOpen ||
+    Boolean(lastFiscalInvoice);
+
   return (
     <div className="flex flex-col h-screen w-full bg-slate-100 dark:bg-slate-950 p-2 sm:p-3 overflow-y-auto">
-      {!(
-        paymentOpen ||
-        expenseOpen ||
-        holdOpen ||
-        scaleOpen ||
-        returnOpen ||
-        cashSwitchOpen ||
-        registerDetailsOpen ||
-        openCashModalOpen ||
-        closeCashModalOpen ||
-        weightScanOpen ||
-        lastFiscalInvoice
-      ) && (
-      <>
-      {/* Top Header */}
-      <POSHeader
-        cartCount={cart.reduce((s, i) => s + i.qty, 0)}
-        total={total}
-        heldCount={heldSales.length}
-        awaitingDelete={awaitingDeleteScan}
-        onToggleDeleteMode={toggleDeleteMode}
-        cashLabel={activeCash.label}
-        cashierName={activeCash.cashier}
-        isRemoteAdmin={isRemoteAdmin}
-        onClear={clearCart}
-        onHold={() => setHoldOpen(true)}
-        onExpense={() => setExpenseOpen(true)}
-        onReturn={() => setReturnOpen(true)}
-        onCancelDelete={handleCancelDeleteMode}
-        onSwitchCash={() => setCashSwitchOpen(true)}
-        onOpenRegisterDetails={() => setRegisterDetailsOpen(true)}
-        cashIsOpen={cashIsOpen}
-        onOpenCash={() => setOpenCashModalOpen(true)}
-        onCloseCash={() => setCloseCashModalOpen(true)}
-      />
-
-      {/* Main Grid: Left Panel (Cart) & Right Panel (Products Catalog) */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 overflow-hidden min-h-0">
-        {/* Left Column: Cart & Input Area (58% / 7 cols) */}
-        <div className="lg:col-span-7 flex flex-col overflow-hidden h-full">
-          <CartPanel
-            cart={cart}
-            customer={selectedCustomer}
-            onSetCustomer={(c) => {
-              setSelectedCustomer(c);
-              if (c?.tipo_ncf) {
-                setSelectedNcfType(c.tipo_ncf as NCFType);
-              } else if (c?.rnc_cedula) {
-                setSelectedNcfType('B01');
-              }
-            }}
-            selectedNcfType={selectedNcfType}
-            onSelectNcfType={(t) => {
-              setSelectedNcfType(t);
-              setFiscalEnabled(true);
-            }}
-            onUpdateQty={updateQty}
-            onUpdateDiscount={updateDiscount}
-            onRemove={removeFromCart}
-            onEditWeight={(item) => handleOpenScale(item.productId, item.qty)}
-            onOpenWeightScan={() => setWeightScanOpen(true)}
-            globalDiscount={globalDiscount}
-            onSetGlobalDiscount={setGlobalDiscount}
-            subtotal={subtotal}
-            taxTotal={taxTotal}
-            globalDiscountAmount={globalDiscountAmount}
+      {!isAnyModalOpen && (
+        <>
+          <POSHeader
+            cartCount={cart.reduce((s, i) => s + i.qty, 0)}
             total={total}
-            onCheckout={() => openPayment()}
-            fiscalEnabled={fiscalEnabled}
-            onToggleFiscal={() => setFiscalEnabled((prev) => !prev)}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            onSearchSubmit={handleSearchSubmit}
-            onAddToCart={addToCart}
+            heldCount={heldSales.length}
             awaitingDelete={awaitingDeleteScan}
             onToggleDeleteMode={toggleDeleteMode}
+            cashLabel={activeCash.label}
+            cashierName={activeCash.cashier}
+            isRemoteAdmin={isRemoteAdmin}
+            onClear={clearCart}
+            onHold={() => setHoldOpen(true)}
+            onExpense={() => setExpenseOpen(true)}
+            onReturn={() => setReturnOpen(true)}
             onCancelDelete={handleCancelDeleteMode}
-            onToggleWholesale={toggleWholesalePrice}
-            onToggleAllWholesale={toggleAllWholesale}
+            onSwitchCash={() => setCashSwitchOpen(true)}
+            onOpenRegisterDetails={() => setRegisterDetailsOpen(true)}
+            cashIsOpen={cashIsOpen}
+            onOpenCash={() => setOpenCashModalOpen(true)}
+            onCloseCash={() => setCloseCashModalOpen(true)}
           />
-        </div>
 
-        {/* Right Column: Products Catalog (42% / 5 cols) */}
-        <div className="lg:col-span-5 flex flex-col overflow-hidden h-full">
-          <ProductPanel
-            onAddToCart={addToCart}
-            onOpenScale={handleOpenScale}
-            awaitingDelete={awaitingDeleteScan}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-          />
-        </div>
-      </div>
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 overflow-hidden min-h-0">
+            <div className="lg:col-span-7 flex flex-col overflow-hidden h-full">
+              <CartPanel
+                cart={cart}
+                customer={selectedCustomer}
+                onSetCustomer={(c) => {
+                  setSelectedCustomer(c);
+                  if (c?.tipo_ncf) {
+                    setSelectedNcfType(c.tipo_ncf as NCFType);
+                  } else if (c?.rnc_cedula) {
+                    setSelectedNcfType('B01');
+                  }
+                }}
+                selectedNcfType={selectedNcfType}
+                onSelectNcfType={(t) => {
+                  setSelectedNcfType(t);
+                  setFiscalEnabled(true);
+                }}
+                onUpdateQty={updateQty}
+                onUpdateDiscount={updateDiscount}
+                onRemove={removeFromCart}
+                onEditWeight={(item) => handleOpenScale(item.productId, item.qty)}
+                onOpenWeightScan={() => setWeightScanOpen(true)}
+                globalDiscount={globalDiscount}
+                onSetGlobalDiscount={setGlobalDiscount}
+                subtotal={subtotal}
+                taxTotal={taxTotal}
+                globalDiscountAmount={globalDiscountAmount}
+                total={total}
+                onCheckout={() => openPayment()}
+                fiscalEnabled={fiscalEnabled}
+                onToggleFiscal={() => setFiscalEnabled((prev) => !prev)}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                onSearchSubmit={handleSearchSubmit}
+                onAddToCart={addToCart}
+                awaitingDelete={awaitingDeleteScan}
+                onToggleDeleteMode={toggleDeleteMode}
+                onCancelDelete={handleCancelDeleteMode}
+                onToggleWholesale={toggleWholesalePrice}
+                onToggleAllWholesale={toggleAllWholesale}
+              />
+            </div>
 
-      {/* Bottom Bar: Supermarket Sticky Payment Bar (Matches Reference Image) */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-md px-4 py-2.5 mt-2.5 flex-shrink-0 flex flex-wrap items-center justify-between gap-3">
-        {/* Left Action Shortcuts */}
-        <div className="flex items-center gap-1.5 overflow-x-auto py-0.5">
-          <button
-            type="button"
-            onClick={() => {
-              if (cart.length === 0) {
-                toast.error('Agrega productos para crear una preventa');
-                return;
+            <div className="lg:col-span-5 flex flex-col overflow-hidden h-full">
+              <ProductPanel
+                onAddToCart={addToCart}
+                onOpenScale={handleOpenScale}
+                awaitingDelete={awaitingDeleteScan}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+              />
+            </div>
+          </div>
+
+          <POSBottomBar
+            total={total}
+            cartCount={cart.reduce((s, i) => s + i.qty, 0)}
+            selectedCustomer={selectedCustomer}
+            fiscalEnabled={fiscalEnabled}
+            onToggleFiscal={() => {
+              const next = !fiscalEnabled;
+              setFiscalEnabled(next);
+              if (next) {
+                toast.info('Factura Fiscal (NCF) activada para esta venta');
+              } else {
+                toast.info('Factura Fiscal desactivada');
               }
-              setHoldOpen(true);
-              toast.info('Guarda la preventa como venta suspendida');
             }}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-          >
-            <FileText size={15} className="text-sky-500" strokeWidth={2.3} />
-            <span>Preventa</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              void (async () => {
-                if (cart.length === 0) {
-                  toast.error('Agrega productos para crear una cotización');
-                  return;
-                }
-                try {
-                  const cot = await crearCotizacion({
-                    cliente_id: selectedCustomer?.id ?? null,
-                    vendedor_id: user?.id ?? null,
-                    subtotal,
-                    monto_impuesto: taxTotal,
-                    monto_total: total,
-                    items: cart.map((item) => ({
-                      producto_id: item.isCombo ? null : item.productId,
-                      nombre_item: item.name,
-                      precio_unitario: item.price,
-                      cantidad: item.qty,
-                      subtotal: item.price * item.qty * (1 - item.discount / 100),
-                    })),
-                  });
-                  toast.success(`Cotización ${cot.codigo} creada`);
-                  navigate('/sales');
-                } catch (e) {
-                  toast.error(e instanceof Error ? e.message : 'No se pudo crear la cotización');
-                }
-              })();
-            }}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-          >
-            <FileText size={15} className="text-amber-500" strokeWidth={2.3} />
-            <span>Cotización</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setHoldOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-          >
-            <Pause size={15} className="text-red-500" strokeWidth={2.5} />
-            <span>Suspender</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
+            onQuickCash={handleQuickCashSale}
+            onCardPayment={() => openPayment('card')}
+            onSplitPayment={() => openPayment('split')}
+            onCreditPayment={() => {
               if (cart.length === 0) {
                 toast.error('El carrito está vacío');
                 return;
@@ -1429,97 +1168,22 @@ export default function POSTerminal() {
               setPreferredPayMethod('credit');
               openPayment('credit');
             }}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-          >
-            <CheckCircle size={15} className="text-indigo-600" strokeWidth={2.3} />
-            <span>Venta a crédito</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => openPayment('card')}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-          >
-            <CreditCard size={15} className="text-pink-500" strokeWidth={2.3} />
-            <span>Tarjeta</span>
-          </button>
-        </div>
-
-        {/* Center Main Payment Buttons */}
-        <div className="flex items-center gap-2.5">
-          {/* Pago múltiple (Dark Navy) */}
-          <button
-            type="button"
-            onClick={() => openPayment('split')}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#0e2942] hover:bg-[#081d30] text-white font-extrabold text-xs shadow-sm transition-all active:scale-95 cursor-pointer"
-          >
-            <ShoppingBag size={16} strokeWidth={2.3} />
-            <span>Pago múltiple</span>
-          </button>
-
-          {/* Efectivo (Green) */}
-          <button
-            type="button"
-            onClick={handleQuickCashSale}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#10b981] hover:bg-[#059669] text-white font-extrabold text-xs shadow-md transition-all active:scale-95 cursor-pointer"
-          >
-            <Banknote size={17} strokeWidth={2.3} />
-            <span>Efectivo</span>
-          </button>
-
-          {/* Factura Fiscal Button */}
-          <button
-            type="button"
-            onClick={() => {
-              const next = !fiscalEnabled;
-              setFiscalEnabled(next);
-              if (next) {
-                toast.info('Factura Fiscal (NCF) activada para esta venta');
-              } else {
-                toast.info('Factura Fiscal desactivada');
+            onClearCart={clearCart}
+            onOpenHold={() => setHoldOpen(true)}
+            onCreateQuote={handleCreateQuote}
+            onCreatePreSale={() => {
+              if (cart.length === 0) {
+                toast.error('Agrega productos para crear una preventa');
+                return;
               }
+              setHoldOpen(true);
+              toast.info('Guarda la preventa como venta suspendida');
             }}
-            className={`flex items-center gap-1.5 px-3 py-2.5 rounded-xl font-bold text-xs transition-all active:scale-95 border cursor-pointer ${
-              fiscalEnabled
-                ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-500 shadow-sm'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-200'
-            }`}
-            title={fiscalEnabled ? 'NCF Activado' : 'NCF Desactivado'}
-          >
-            <FileText size={15} className={fiscalEnabled ? 'text-white' : 'text-indigo-600 dark:text-indigo-400'} />
-            <span className="hidden sm:inline">NCF</span>
-            <span className={`px-1 py-0.2 text-[9px] rounded font-black ${fiscalEnabled ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
-              {fiscalEnabled ? 'ON' : 'OFF'}
-            </span>
-          </button>
-
-          {/* Cancelar (Red) */}
-          <button
-            type="button"
-            onClick={clearCart}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#dc2626] hover:bg-[#b91c1c] text-white font-extrabold text-xs shadow-sm transition-all active:scale-95 cursor-pointer"
-          >
-            <XCircle size={16} strokeWidth={2.3} />
-            <span>Cancelar</span>
-          </button>
-        </div>
-
-        {/* Right Total Payable (Matches Reference UI) */}
-        <div className="flex items-center gap-3 pl-3">
-          <div className="flex flex-col text-right leading-tight">
-            <span className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-tight">Total</span>
-            <span className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-tight">Payable:</span>
-          </div>
-          <span className="text-2xl sm:text-3xl font-black tabular-nums text-slate-900 dark:text-white tracking-tight">
-            {total.toFixed(2)}
-          </span>
-        </div>
-      </div>
-
-      </>
+          />
+        </>
       )}
 
-      {/* Payment Drawer / Modal when clicking Efectivo or Pago Múltiple */}
+      {/* Payment Drawer */}
       {paymentOpen && (
         <div className="dialog-inline-host">
           <div
@@ -1532,129 +1196,110 @@ export default function POSTerminal() {
         </div>
       )}
 
-      {expenseOpen && (
-        <PosExpenseModal
-          onClose={() => setExpenseOpen(false)}
-          cajaId={String(activeCashId)}
-          cashierLabel={activeCash.label}
-        />
-      )}
-      {holdOpen && (
-        <PosHoldModal
-          heldSales={heldSales}
-          canHold={cart.length > 0}
-          onHold={holdCurrentSale}
-          onResume={resumeHeldSale}
-          onDelete={(id) => {
-            removeHeldSale(id);
-            refreshHeld();
-            toast.success('Venta pausada eliminada');
-          }}
-          onClose={() => setHoldOpen(false)}
-        />
-      )}
-      {scaleOpen && (
-        <PosScaleModal
-          initialProductId={scaleParams?.productId}
-          initialWeight={scaleParams?.weight}
-          onClose={() => setScaleOpen(false)}
-          onConfirm={(item, qty) => {
-            addToCart(item, qty);
-            setScaleOpen(false);
-          }}
-        />
-      )}
-      {returnOpen && <PosReturnModal onClose={() => setReturnOpen(false)} />}
-      {cashSwitchOpen && (
-        <PosCashSwitchModal
-          currentId={activeCashId}
-          onSelect={(id) => {
-            const target = registers.find((c) => c.id === id);
-            if (!isAdminUser && target?.isAdminBox) {
-              toast.error('Solo el administrador puede entrar a la caja principal');
-              return;
-            }
-            setActiveCashId(id);
-            void refetchRegisters();
-          }}
-          onClose={() => {
-            setCashSwitchOpen(false);
-            void refetchRegisters();
-          }}
-        />
-      )}
-      {registerDetailsOpen && (
-        <RegisterDetailsModal
-          onClose={() => setRegisterDetailsOpen(false)}
-          cajaId={String(activeCashId)}
-          cajaLabel={activeCash.label}
-          includeUserSales={isAdminUser}
-        />
-      )}
-      {lastFiscalInvoice && (
-        <FiscalInvoiceModal
-          invoice={lastFiscalInvoice}
-          onClose={() => setLastFiscalInvoice(null)}
-        />
-      )}
-      {openCashModalOpen && (
-        <PosCashOpenModal
-          initialCajaId={String(activeCash.dbId || activeCashId)}
-          onSuccess={(cierre) => {
-            setShiftClosedLocally(false);
-            setShiftOpenedLocally(true);
-            if (cierre?.caja_id) setActiveCashId(cierre.caja_id);
-            void refetchRegisters();
-          }}
-          onClose={() => setOpenCashModalOpen(false)}
-        />
-      )}
-      {closeCashModalOpen && (
-        <PosCashCloseModal
-          initialCajaId={String(activeCash.dbId || activeCashId)}
-          onSuccess={() => {
-            setShiftOpenedLocally(false);
-            setShiftClosedLocally(true);
-            markRegisterClosed(String(activeCash.dbId || activeCashId));
-            clearCart();
-            setPaymentOpen(false);
-            setOrderCompleted(false);
-            setLastPayments(null);
-            setLastFiscalInvoice(null);
-            clearHeldSales();
-            refreshHeld();
-            void refetchRegisters();
-            toast.success('Cierre registrado. Ya puedes iniciar caja de nuevo.');
-          }}
-          onClose={() => setCloseCashModalOpen(false)}
-        />
-      )}
-      {weightScanOpen && (
-        <PosWeightScanModal
-          catalog={realScaleCatalog}
-          onConfirm={(matchedProduct, weight) => {
-            addToCart(
-              {
-                id: `cart-${matchedProduct.productId}-${Date.now()}`,
-                productId: matchedProduct.productId,
-                name: matchedProduct.name,
-                sku: matchedProduct.sku,
-                price: matchedProduct.price,
-                regularPrice: matchedProduct.price,
-                wholesalePrice: matchedProduct.wholesalePrice,
-                isWholesale: false,
-                cost: matchedProduct.cost,
-                tax: matchedProduct.tax,
-                image: matchedProduct.image || '',
-                unit: matchedProduct.unit || 'lb',
-                isWeighted: true,
-              },
-              weight
-            );
-          }}
-          onClose={() => setWeightScanOpen(false)}
-        />
-      )}
+      {/* Auxiliary Modals */}
+      <POSModals
+        expenseOpen={expenseOpen}
+        onCloseExpense={() => setExpenseOpen(false)}
+        activeCashId={activeCashId}
+        activeCashLabel={activeCash.label}
+        activeCashDbId={activeCash.dbId}
+
+        holdOpen={holdOpen}
+        onCloseHold={() => setHoldOpen(false)}
+        heldSales={heldSales}
+        canHold={cart.length > 0}
+        onHoldCurrent={holdCurrentSale}
+        onResumeHeld={resumeHeldSale}
+        onDeleteHeld={(id) => {
+          removeHeldSale(id);
+          refreshHeld();
+          toast.success('Venta pausada eliminada');
+        }}
+
+        scaleOpen={scaleOpen}
+        onCloseScale={() => setScaleOpen(false)}
+        scaleParams={scaleParams}
+        onConfirmScale={(item, qty) => {
+          addToCart(item, qty);
+          setScaleOpen(false);
+        }}
+
+        returnOpen={returnOpen}
+        onCloseReturn={() => setReturnOpen(false)}
+
+        cashSwitchOpen={cashSwitchOpen}
+        onCloseCashSwitch={() => {
+          setCashSwitchOpen(false);
+          void refetchRegisters();
+        }}
+        onSelectCashRegister={(id) => {
+          const target = registers.find((c) => c.id === id);
+          if (!isAdminUser && target?.isAdminBox) {
+            toast.error('Solo el administrador puede entrar a la caja principal');
+            return;
+          }
+          setActiveCashId(id);
+          void refetchRegisters();
+        }}
+        registers={registers}
+        isAdminUser={isAdminUser}
+
+        registerDetailsOpen={registerDetailsOpen}
+        onCloseRegisterDetails={() => setRegisterDetailsOpen(false)}
+
+        lastFiscalInvoice={lastFiscalInvoice}
+        onCloseFiscalInvoice={() => setLastFiscalInvoice(null)}
+
+        openCashModalOpen={openCashModalOpen}
+        onCloseOpenCash={() => setOpenCashModalOpen(false)}
+        onSuccessOpenCash={(cierre) => {
+          setShiftClosedLocally(false);
+          setShiftOpenedLocally(true);
+          if (cierre?.caja_id) setActiveCashId(cierre.caja_id);
+          void refetchRegisters();
+        }}
+
+        closeCashModalOpen={closeCashModalOpen}
+        onCloseCloseCash={() => setCloseCashModalOpen(false)}
+        onSuccessCloseCash={() => {
+          setShiftOpenedLocally(false);
+          setShiftClosedLocally(true);
+          markRegisterClosed(String(activeCash.dbId || activeCashId));
+          clearCart();
+          setPaymentOpen(false);
+          setOrderCompleted(false);
+          setLastPayments(null);
+          setLastFiscalInvoice(null);
+          clearHeldSales();
+          refreshHeld();
+          void refetchRegisters();
+          toast.success('Cierre registrado. Ya puedes iniciar caja de nuevo.');
+        }}
+
+        weightScanOpen={weightScanOpen}
+        onCloseWeightScan={() => setWeightScanOpen(false)}
+        realScaleCatalog={realScaleCatalog}
+        onConfirmWeightScan={(matchedProduct, weight) => {
+          addToCart(
+            {
+              id: `cart-${matchedProduct.productId}-${Date.now()}`,
+              productId: matchedProduct.productId,
+              name: matchedProduct.name,
+              sku: matchedProduct.sku,
+              price: matchedProduct.price,
+              regularPrice: matchedProduct.price,
+              wholesalePrice: matchedProduct.wholesalePrice,
+              isWholesale: false,
+              cost: matchedProduct.cost,
+              tax: matchedProduct.tax,
+              image: matchedProduct.image || '',
+              unit: matchedProduct.unit || 'lb',
+              isWeighted: true,
+            },
+            weight
+          );
+        }}
+      />
     </div>
   );
 }

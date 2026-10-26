@@ -4,6 +4,8 @@ import {
   createBlockStockAdjustment,
   getStoredAdjustments,
 } from '@/lib/stockAdjustmentStore';
+import { initialProducts } from '@/lib/initialProducts';
+import { updateProductStockInStore, getStoredProducts } from '@/lib/productStore';
 
 export type AjusteItemPayload = {
   producto_id: string;
@@ -21,7 +23,6 @@ export async function procesarAjusteStockBloque(
   items: AjusteItemPayload[]
 ): Promise<{ ajustes: number; ids: string[] }> {
   if (!isSupabaseConfigured()) {
-    const { getStoredProducts } = await import('@/lib/productStore');
     const products = getStoredProducts();
     const mapped = items
       .map((it) => {
@@ -67,9 +68,6 @@ export async function procesarAjusteStockBloque(
   }
 
   if (nonUuidItems.length > 0) {
-    const { initialProducts } = await import('@/pages/product-management/components/ProductManagementScreen');
-    const { updateProductStockInStore } = await import('@/lib/productStore');
-
     nonUuidItems.forEach((it) => {
       const demoProd = initialProducts.find((p) => p.id === it.producto_id || p.sku === it.producto_id);
       if (demoProd && it.cantidad_nueva != null) {
