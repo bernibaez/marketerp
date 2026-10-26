@@ -355,11 +355,11 @@ export default function CartPanel({
               }}
               className="bg-slate-50/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl pl-8 pr-7 h-8 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 appearance-none cursor-pointer"
             >
+              <option value="TICKET">Ticket Simple (Sin NCF)</option>
               <option value="B02">Factura Consumidor Final (B02)</option>
               <option value="B01">Factura Crédito Fiscal (B01)</option>
               <option value="B14">Régimen Especial (B14)</option>
               <option value="B15">Comprobante Gubernamental (B15)</option>
-              <option value="TICKET">Ticket Simple (Sin NCF)</option>
             </select>
             <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-[10px]">
               ▼

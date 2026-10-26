@@ -158,14 +158,6 @@ export const PERMISSION_MODULES: PermissionModule[] = [
     actions: ['ver', 'exportar'],
   },
   {
-    id: 'auditoria',
-    label: 'Auditoría',
-    group: 'Configuración',
-    href: '/audit',
-    description: 'Bitácora de acciones',
-    actions: ['ver', 'exportar'],
-  },
-  {
     id: 'usuarios',
     label: 'Usuarios',
     group: 'Configuración',
@@ -279,7 +271,6 @@ export function buildDefaultMatrix(): PermissionsMatrix {
     'ventas',
     'compras',
     'cierre_caja',
-    'auditoria',
     'configuracion',
   ]) {
     const mod = PERMISSION_MODULES.find((m) => m.id === id);

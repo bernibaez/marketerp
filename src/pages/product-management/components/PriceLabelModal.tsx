@@ -141,12 +141,11 @@ export default function PriceLabelModal({ products, onClose }: PriceLabelModalPr
         )
       : null;
 
-  return (
-    <>
-      <div
-        className="dialog-inline-host print:p-0 print:bg-white print:static"
-        onClick={onClose}
-      >
+  const dialogContent = (
+    <div
+      className="dialog-inline-host print:p-0 print:bg-white print:static"
+      onClick={onClose}
+    >
         <div
           className="card w-full max-w-3xl p-6 space-y-5 max-h-[90vh] overflow-y-auto"
           onClick={(e) => e.stopPropagation()}
@@ -261,7 +260,11 @@ export default function PriceLabelModal({ products, onClose }: PriceLabelModalPr
           </div>
         </div>
       </div>
+    );
 
+  return (
+    <>
+      {typeof document !== 'undefined' ? createPortal(dialogContent, document.body) : dialogContent}
       {printSheet}
     </>
   );

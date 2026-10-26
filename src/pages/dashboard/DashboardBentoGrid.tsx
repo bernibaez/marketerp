@@ -50,9 +50,9 @@ export default function DashboardBentoGrid() {
             Ventas del día
           </p>
 
-          <p className="text-2xl font-black text-slate-900 dark:text-white tabular-nums tracking-tight mt-1">
+          <div className="text-2xl font-black text-slate-900 dark:text-white tabular-nums tracking-tight mt-1">
             {loading ? <Skeleton className="h-8 w-28" /> : fmt(ventasTotal)}
-          </p>
+          </div>
 
           <div className="flex items-center gap-1 mt-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
             <span>↑ 12% vs. ayer</span>
@@ -105,9 +105,9 @@ export default function DashboardBentoGrid() {
             Ticket promedio
           </p>
 
-          <p className="text-2xl font-black text-slate-900 dark:text-white tabular-nums tracking-tight mt-1">
+          <div className="text-2xl font-black text-slate-900 dark:text-white tabular-nums tracking-tight mt-1">
             {loading ? <Skeleton className="h-8 w-28" /> : fmt(ticketPromedio)}
-          </p>
+          </div>
 
           <div className="flex items-center gap-1 mt-1 text-xs font-bold text-sky-600 dark:text-sky-400">
             <span>↑ 8% vs. ayer</span>
@@ -160,9 +160,9 @@ export default function DashboardBentoGrid() {
             Ganancias brutas
           </p>
 
-          <p className="text-2xl font-black text-slate-900 dark:text-white tabular-nums tracking-tight mt-1">
+          <div className="text-2xl font-black text-slate-900 dark:text-white tabular-nums tracking-tight mt-1">
             {loading ? <Skeleton className="h-8 w-28" /> : fmt(gananciaBruta)}
-          </p>
+          </div>
 
           <div className="flex items-center gap-1 mt-1 text-xs font-bold text-purple-600 dark:text-purple-400">
             <span>↑ 5% vs. ayer</span>
@@ -215,9 +215,9 @@ export default function DashboardBentoGrid() {
             Stock bajo
           </p>
 
-          <p className="text-2xl font-black text-slate-900 dark:text-white tabular-nums tracking-tight mt-1">
+          <div className="text-2xl font-black text-slate-900 dark:text-white tabular-nums tracking-tight mt-1">
             {loading ? <Skeleton className="h-8 w-16" /> : stockBajoCount}
-          </p>
+          </div>
 
           <div className="flex items-center gap-1 mt-1 text-xs font-bold text-amber-600 dark:text-amber-400">
             <span>{agotadosCount} agotados</span>

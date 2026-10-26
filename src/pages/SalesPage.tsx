@@ -42,7 +42,7 @@ import { obtenerProductos } from '@/services/productos.service';
 import type { Cliente, Producto, MetodoPago } from '@/types/database';
 import type { VentaConDetalle } from '@/services/ventas.service';
 import PrintableInvoice from '@/components/PrintableInvoice';
-import { getInvoiceSettings } from '@/lib/invoiceSettingsStore';
+import { getInvoiceSettings, type PrintFormat } from '@/lib/invoiceSettingsStore';
 import {
   obtenerDetalleCotizacion,
   type CotizacionConDetalle,
@@ -156,8 +156,8 @@ export default function SalesPage() {
   // Print Sale modal state
   const [printingSale, setPrintingSale] = useState<VentaConDetalle | null>(null);
   const [loadingPrintDetail, setLoadingPrintDetail] = useState(false);
-  const [printFormat, setPrintFormat] = useState<'ticket' | 'a4'>(() => {
-    return getInvoiceSettings().printFormat === 'full_page' ? 'a4' : 'ticket';
+  const [printFormat, setPrintFormat] = useState<PrintFormat>(() => {
+    return getInvoiceSettings().printFormat;
   });
 
   // Return modal state
@@ -2413,25 +2413,36 @@ export default function SalesPage() {
                     <div className="flex p-0.5 bg-secondary rounded-lg text-xs font-semibold border border-border">
                       <button
                         type="button"
-                        onClick={() => setPrintFormat('a4')}
-                        className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1 cursor-pointer ${
-                          printFormat === 'a4'
+                        onClick={() => setPrintFormat('ticket_58mm')}
+                        className={`px-2 py-1 rounded-md transition-all flex items-center gap-1 cursor-pointer ${
+                          printFormat === 'ticket_58mm'
                             ? 'bg-card text-foreground font-bold shadow-2xs'
                             : 'text-muted-foreground hover:text-foreground'
                         }`}
                       >
-                        <FileText size={12} /> Hoja A4
+                        <Receipt size={12} /> 58mm
                       </button>
                       <button
                         type="button"
-                        onClick={() => setPrintFormat('ticket')}
-                        className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1 cursor-pointer ${
-                          printFormat === 'ticket'
+                        onClick={() => setPrintFormat('ticket_80mm')}
+                        className={`px-2 py-1 rounded-md transition-all flex items-center gap-1 cursor-pointer ${
+                          printFormat === 'ticket_80mm'
                             ? 'bg-card text-foreground font-bold shadow-2xs'
                             : 'text-muted-foreground hover:text-foreground'
                         }`}
                       >
-                        <Receipt size={12} /> Ticket 80mm
+                        <Receipt size={12} /> 80mm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPrintFormat('full_page')}
+                        className={`px-2 py-1 rounded-md transition-all flex items-center gap-1 cursor-pointer ${
+                          printFormat === 'full_page'
+                            ? 'bg-card text-foreground font-bold shadow-2xs'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        <FileText size={12} /> Carta/A4
                       </button>
                     </div>
                     <button
@@ -2478,7 +2489,7 @@ export default function SalesPage() {
                         total: printingSale.monto_total,
                         paymentMethod: printingSale.metodo_pago,
                       }}
-                      formatOverride={printFormat === 'ticket' ? 'ticket_80mm' : 'full_page'}
+                      formatOverride={printFormat}
                     />
                   )}
                 </div>

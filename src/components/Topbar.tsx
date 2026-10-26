@@ -150,16 +150,7 @@ const MODULE_MAP: Record<string, ModuleInfo> = {
     name: 'Informes',
     group: 'Análisis',
     actions: [
-      { label: 'Auditoría', href: '/audit', icon: <ShieldCheck size={14} /> },
       { label: 'Dashboard', href: '/', icon: <Store size={14} /> },
-    ],
-  },
-  '/audit': {
-    name: 'Auditoría',
-    group: 'Configuración',
-    actions: [
-      { label: 'Informes', href: '/reports', icon: <BarChart2 size={14} /> },
-      { label: 'Usuarios', href: '/users', icon: <UserCheck size={14} /> },
     ],
   },
 };

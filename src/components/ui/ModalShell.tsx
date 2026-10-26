@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import BusyOverlay, { type BusyVariant } from './BusyOverlay';
 
 const SIZE: Record<string, string> = {
@@ -26,13 +27,14 @@ interface ModalShellProps {
   busyVariant?: BusyVariant;
 }
 
-/** Panel de diálogo en el flujo de la página (sin overlay flotante). */
+/** Diálogo modal overlay centrado mediante Portal a document.body */
 export default function ModalShell({
   open,
   onClose,
   children,
   size = 'lg',
   className = '',
+  disableBackdropClose = false,
   busy = false,
   busyLabel,
   busyVariant = 'saving',
@@ -43,23 +45,38 @@ export default function ModalShell({
       if (e.key === 'Escape' && !busy) onClose();
     };
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
   }, [open, onClose, busy]);
 
   if (!open) return null;
 
-  return (
-    <div className="dialog-inline-host" role="dialog" aria-modal="true">
+  const content = (
+    <div
+      className="dialog-inline-host"
+      role="dialog"
+      aria-modal="true"
+      onClick={() => {
+        if (!disableBackdropClose && !busy) onClose();
+      }}
+    >
       <div
         className={`
           relative w-full ${SIZE[size]} overflow-y-auto scrollbar-thin
           card modal-panel
           ${className}
         `}
+        onClick={(e) => e.stopPropagation()}
       >
         {children}
         <BusyOverlay show={busy} label={busyLabel} variant={busyVariant} contained />
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(content, document.body) : content;
 }

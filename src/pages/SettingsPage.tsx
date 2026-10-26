@@ -19,9 +19,8 @@ import InvoiceSettingsTab from './settings/InvoiceSettingsTab';
 const settingsSections = [
   { id: 'company', label: 'Empresa', icon: <Building2 size={18} /> },
   { id: 'locations', label: 'Ubicaciones', icon: <MapPin size={18} /> },
-  { id: 'invoice', label: 'Facturación', icon: <FileText size={18} /> },
+  { id: 'invoice', label: 'Facturación & Impresión', icon: <FileText size={18} /> },
   { id: 'ncf', label: 'Secuencias NCF (DGII)', icon: <ShieldCheck size={18} /> },
-  { id: 'printers', label: 'Impresoras', icon: <Printer size={18} /> },
   { id: 'taxes', label: 'Impuestos', icon: <Tag size={18} /> },
   { id: 'currency', label: 'Moneda', icon: <DollarSign size={18} /> },
   { id: 'localization', label: 'Localización', icon: <Globe size={18} /> },

@@ -137,7 +137,7 @@
   .dialog-inline-host {
     position: fixed;
     inset: 0;
-    z-index: 50;
+    z-index: 999;
     background-color: rgba(0, 0, 0, 0.6);
     backdrop-filter: blur(2px);
     display: flex;
@@ -185,12 +185,12 @@
 
   @keyframes slideUp {
     from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
+    to { opacity: 1; transform: none; }
   }
 
   @keyframes pageEnter {
     from { opacity: 0; transform: translateY(12px); }
-    to { opacity: 1; transform: translateY(0); }
+    to { opacity: 1; transform: none; }
   }
 
   @keyframes shimmer {
@@ -211,7 +211,7 @@
 
   @keyframes modalPanelIn {
     from { opacity: 0; transform: translateY(28px) scale(0.96); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
+    to { opacity: 1; transform: none; }
   }
 
   @keyframes busyFloatIn {
@@ -358,7 +358,27 @@
 @media print {
   @page {
     size: auto;
-    margin: 8mm;
+    margin: 3mm;
+  }
+
+  .print-format-58mm {
+    width: 48mm !important;
+    max-width: 48mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+  }
+
+  .print-format-80mm {
+    width: 72mm !important;
+    max-width: 72mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+  }
+
+  .print-format-half {
+    width: 140mm !important;
+    max-width: 140mm !important;
+    margin: 0 auto !important;
   }
 
   html,

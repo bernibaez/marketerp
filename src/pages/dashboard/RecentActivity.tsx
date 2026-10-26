@@ -143,10 +143,10 @@ export default function RecentActivity() {
         </div>
 
         <Link
-          to="/audit"
+          to="/sales"
           className="text-xs font-bold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 flex items-center gap-1 transition-colors"
         >
-          <span>Ver todas</span>
+          <span>Ver ventas</span>
           <ArrowRight size={13} />
         </Link>
       </div>

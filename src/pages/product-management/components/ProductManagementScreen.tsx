@@ -293,31 +293,8 @@ export default function ProductManagementScreen() {
     );
   }
 
-  if (importModalOpen) {
-    return (
-      <ProductImportModal
-        open={importModalOpen}
-        onClose={() => setImportModalOpen(false)}
-        existingProducts={products}
-        onImport={handleBatchImport}
-        defaultIsScaleMode={importIsScaleMode}
-      />
-    );
-  }
-
-  if (labelModalProducts) {
-    return (
-      <PriceLabelModal
-        products={labelModalProducts}
-        onClose={() => setLabelModalProducts(null)}
-      />
-    );
-  }
-
   return (
     <div className="space-y-6">
-      {!viewingProduct && (
-        <>
           <ProductsHeader
             onAdd={() => {
               setEditProduct(null);
@@ -455,9 +432,6 @@ export default function ProductManagementScreen() {
               }
             }}
           />
-
-        </>
-      )}
 
       <ModalShell
         open={!!viewingProduct}
@@ -700,6 +674,23 @@ export default function ProductManagementScreen() {
           );
         })()}
       </ModalShell>
+
+      {importModalOpen && (
+        <ProductImportModal
+          open={importModalOpen}
+          onClose={() => setImportModalOpen(false)}
+          existingProducts={products}
+          onImport={handleBatchImport}
+          defaultIsScaleMode={importIsScaleMode}
+        />
+      )}
+
+      {labelModalProducts && (
+        <PriceLabelModal
+          products={labelModalProducts}
+          onClose={() => setLabelModalProducts(null)}
+        />
+      )}
     </div>
   );
 }

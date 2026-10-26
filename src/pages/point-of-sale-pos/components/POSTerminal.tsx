@@ -126,7 +126,7 @@ export default function POSTerminal() {
   const [returnOpen, setReturnOpen] = useState(false);
   const [registerDetailsOpen, setRegisterDetailsOpen] = useState(false);
   const [lastFiscalInvoice, setLastFiscalInvoice] = useState<FiscalInvoiceRecord | null>(null);
-  const [fiscalEnabled, setFiscalEnabled] = useState(true);
+  const [fiscalEnabled, setFiscalEnabled] = useState(false);
   const [selectedNcfType, setSelectedNcfType] = useState<NCFType>('B02');
   const [lastSaleResult, setLastSaleResult] = useState<{ venta_id: string; numero_factura: string; ncf?: string | null } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -396,6 +396,7 @@ export default function POSTerminal() {
     setOrderCompleted(false);
     setLastPayments(null);
     setAwaitingDeleteScan(false);
+    setFiscalEnabled(false);
   }, []);
 
   const holdCurrentSale = (label: string) => {
@@ -1302,10 +1303,8 @@ export default function POSTerminal() {
               setSelectedCustomer(c);
               if (c?.tipo_ncf) {
                 setSelectedNcfType(c.tipo_ncf as NCFType);
-                setFiscalEnabled(true);
               } else if (c?.rnc_cedula) {
                 setSelectedNcfType('B01');
-                setFiscalEnabled(true);
               }
             }}
             selectedNcfType={selectedNcfType}
