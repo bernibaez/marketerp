@@ -4,19 +4,63 @@ import { isSupabaseConfigured } from '@/services/clienteSupabase';
 export type ProductItem = PMProduct;
 
 const STORAGE_KEY = 'mercato_products_store';
+const DELETED_KEYS_STORAGE = 'mercato_deleted_product_keys';
+
+export function getDeletedProductKeys(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_KEYS_STORAGE);
+    if (!raw) return new Set(['prod-00132', 'que-che-lb', '00132']);
+    const parsed = JSON.parse(raw);
+    const set = new Set<string>(
+      Array.isArray(parsed) ? parsed.map((s) => String(s).toLowerCase().trim()) : []
+    );
+    // Asegurar que el queso cheddar demo eliminado quede siempre registrado
+    set.add('prod-00132');
+    set.add('que-che-lb');
+    set.add('00132');
+    return set;
+  } catch {
+    return new Set(['prod-00132', 'que-che-lb', '00132']);
+  }
+}
+
+export function markProductAsDeleted(key: string): void {
+  if (!key) return;
+  try {
+    const set = getDeletedProductKeys();
+    set.add(key.toLowerCase().trim());
+    localStorage.setItem(DELETED_KEYS_STORAGE, JSON.stringify([...set]));
+  } catch (e) {
+    console.error('Error saving deleted product key to localStorage', e);
+  }
+}
 
 export function getStoredProducts(): ProductItem[] {
   // Con Supabase activo no devolvemos catálogo demo local.
   if (isSupabaseConfigured()) return [];
 
+  const deletedKeys = getDeletedProductKeys();
+
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(initialProducts));
-      return initialProducts;
+      const filtered = initialProducts.filter(
+        (p) =>
+          !deletedKeys.has(p.id.toLowerCase()) &&
+          !deletedKeys.has((p.sku || '').toLowerCase()) &&
+          !(p.barcode && deletedKeys.has(p.barcode.toLowerCase()))
+      );
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+      return filtered;
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : initialProducts;
+    const list: ProductItem[] = Array.isArray(parsed) && parsed.length > 0 ? parsed : initialProducts;
+    return list.filter(
+      (p) =>
+        !deletedKeys.has(p.id.toLowerCase()) &&
+        !deletedKeys.has((p.sku || '').toLowerCase()) &&
+        !(p.barcode && deletedKeys.has(p.barcode.toLowerCase()))
+    );
   } catch {
     return [];
   }
@@ -24,7 +68,14 @@ export function getStoredProducts(): ProductItem[] {
 
 export function saveStoredProducts(products: ProductItem[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(products));
+    const deletedKeys = getDeletedProductKeys();
+    const filtered = products.filter(
+      (p) =>
+        !deletedKeys.has(p.id.toLowerCase()) &&
+        !deletedKeys.has((p.sku || '').toLowerCase()) &&
+        !(p.barcode && deletedKeys.has(p.barcode.toLowerCase()))
+    );
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
   } catch (e) {
     console.error('Error saving products to localStorage', e);
   }

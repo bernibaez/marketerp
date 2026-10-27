@@ -1,6 +1,6 @@
 import { tryGetSupabase, isSupabaseConfigured, getSupabase } from './clienteSupabase';
 import { type EstadoProducto, type Producto } from '@/types/database';
-import { getStoredProducts, saveStoredProducts } from '@/lib/productStore';
+import { getStoredProducts, saveStoredProducts, getDeletedProductKeys, markProductAsDeleted } from '@/lib/productStore';
 import { initialProducts, type Product } from '@/lib/initialProducts';
 import {
   decodeVariableWeightBarcode,
@@ -287,7 +287,15 @@ export function uiAProductoInsert(p: Omit<Product, 'id' | 'stockStatus'> & { id?
 }
 
 function demoAsProductos(): Producto[] {
-  return initialProducts.map((p) => {
+  const deletedKeys = getDeletedProductKeys();
+  return initialProducts
+    .filter(
+      (p) =>
+        !deletedKeys.has(p.id.toLowerCase()) &&
+        !deletedKeys.has((p.sku || '').toLowerCase()) &&
+        !(p.barcode && deletedKeys.has(p.barcode.toLowerCase()))
+    )
+    .map((p) => {
     const isWeight = p.saleType === 'weight' || p.saleType === 'both' || !!p.isWeightProduct;
     return {
       id: p.id,
@@ -459,8 +467,12 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
   // Excluir productos del catálogo base que ya existan en Supabase (por SKU o código de barras)
   const dbSkus = new Set(dbProducts.map((p) => (p.sku || '').toLowerCase()));
   const dbBarcodes = new Set(dbProducts.map((p) => (p.codigo_barras || '').toLowerCase()));
+  const deletedKeys = getDeletedProductKeys();
   const missingFromDb = fallbackList.filter(
     (p) =>
+      !deletedKeys.has(p.id.toLowerCase()) &&
+      !deletedKeys.has((p.sku || '').toLowerCase()) &&
+      !(p.codigo_barras && deletedKeys.has(p.codigo_barras.toLowerCase())) &&
       !dbSkus.has((p.sku || '').toLowerCase()) &&
       (!p.codigo_barras || !dbBarcodes.has(p.codigo_barras.toLowerCase()))
   );
@@ -673,15 +685,27 @@ export async function upsertProductoImportacion(
 }
 
 export async function eliminarProducto(id: string): Promise<void> {
-  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+  const cleanId = id.trim();
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cleanId);
+
+  // Registrar en la lista de eliminados para que no resucite del demo ni de localStorage
+  markProductAsDeleted(cleanId);
+
+  const matchedDemo = initialProducts.find((p) => p.id === cleanId || p.sku === cleanId || p.barcode === cleanId);
+  if (matchedDemo) {
+    if (matchedDemo.id) markProductAsDeleted(matchedDemo.id);
+    if (matchedDemo.sku) markProductAsDeleted(matchedDemo.sku);
+    if (matchedDemo.barcode) markProductAsDeleted(matchedDemo.barcode);
+  }
+
+  saveStoredProducts(getStoredProducts().filter((p) => p.id !== cleanId && p.sku !== cleanId));
 
   if (!isUuid || !isSupabaseConfigured()) {
-    saveStoredProducts(getStoredProducts().filter((p) => p.id !== id));
     return;
   }
 
   const sb = getSupabase();
-  const { error } = await sb.from('productos').delete().eq('id', id);
+  const { error } = await sb.from('productos').delete().eq('id', cleanId);
   if (error) {
     if (
       error.code === '23503' ||
@@ -689,14 +713,20 @@ export async function eliminarProducto(id: string): Promise<void> {
       String(error.message || '').includes('foreign key') ||
       String(error.details || '').includes('referenced from table')
     ) {
+      // Como tiene ventas/movimientos históricos, cambiar automáticamente a inactivo
+      try {
+        await sb.from('productos').update({ estado: 'inactivo' }).eq('id', cleanId);
+      } catch {
+        // Continuar si falla la actualización
+      }
       throw new Error(
-        'No se puede eliminar este producto porque ya tiene ventas, compras o movimientos de inventario registrados. Para conservarlo en el historial, cámbialo a estado "Inactivo".'
+        'Este producto tiene ventas o movimientos registrados. Por seguridad contable no se puede borrar su historial, pero se ha cambiado automáticamente a estado "Inactivo".'
       );
     }
     throw errorSupabase(error);
   }
 
-  saveStoredProducts(getStoredProducts().filter((p) => p.id !== id));
+  saveStoredProducts(getStoredProducts().filter((p) => p.id !== cleanId && p.sku !== cleanId));
 }
 
 export async function obtenerProductoPorCodigoBarras(
