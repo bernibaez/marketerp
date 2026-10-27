@@ -3,6 +3,7 @@ import { toast } from '@/lib/toast';
 import { DELETE_SKU } from '@/lib/posStore';
 import type { NCFType } from '@/lib/ncfStore';
 import type { CartItem, Customer } from '../components/POSTerminal';
+import { calculateCartTotals } from '@/lib/cartCalculations';
 
 export function usePOSCart() {
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -228,41 +229,15 @@ export function usePOSCart() {
     setFiscalEnabled(false);
   }, []);
 
-  const subtotal = useMemo(
-    () =>
-      cart.reduce((sum, item) => {
-        const lineTotal = item.price * item.qty;
-        const lineDiscount = lineTotal * (item.discount / 100);
-        return sum + lineTotal - lineDiscount;
-      }, 0),
-    [cart]
+  const totals = useMemo(
+    () => calculateCartTotals(cart, globalDiscount),
+    [cart, globalDiscount]
   );
 
-  const globalDiscountAmount = useMemo(
-    () => subtotal * (globalDiscount / 100),
-    [subtotal, globalDiscount]
-  );
-
-  const afterDiscount = useMemo(
-    () => subtotal - globalDiscountAmount,
-    [subtotal, globalDiscountAmount]
-  );
-
-  const taxTotal = useMemo(
-    () =>
-      cart
-        .filter((i) => i.tax > 0)
-        .reduce((sum, item) => {
-          const lineTotal = item.price * item.qty * (1 - item.discount / 100);
-          return sum + lineTotal * (item.tax / 100);
-        }, 0),
-    [cart]
-  );
-
-  const total = useMemo(
-    () => afterDiscount + taxTotal,
-    [afterDiscount, taxTotal]
-  );
+  const subtotal = totals.subtotal;
+  const globalDiscountAmount = totals.globalDiscountAmount;
+  const taxTotal = totals.taxTotal;
+  const total = totals.total;
 
   return {
     cart,

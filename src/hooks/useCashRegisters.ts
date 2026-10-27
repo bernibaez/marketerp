@@ -63,6 +63,8 @@ export function useCashRegisters() {
             ...ids,
             label: caja.nombre,
             cashier: cashierName,
+            cashierId: sessionAbierta.cajero_id || undefined,
+            cierreId: sessionAbierta.id,
             role: userRole,
             isAdminBox,
             open: true,

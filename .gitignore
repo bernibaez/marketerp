@@ -4,6 +4,7 @@ node_modules/
 # Vite / build
 dist/
 .vite/
+.next/
 
 # Logs
 npm-debug.log*

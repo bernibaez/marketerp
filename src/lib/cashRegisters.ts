@@ -6,6 +6,8 @@ export type CashRegisterSession = {
   codigo?: string;
   label: string;
   cashier: string;
+  cashierId?: string;
+  cierreId?: string;
   role: string;
   isAdminBox?: boolean;
   open: boolean;

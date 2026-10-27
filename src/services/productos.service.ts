@@ -61,6 +61,16 @@ function errorSupabase(error: unknown): Error {
       }
       return new Error('Ya existe un producto registrado con esos datos (Código de barras, SKU o PLU duplicado).');
     }
+    if (
+      e.code === '23503' ||
+      e.status === 409 ||
+      String(e.message || '').includes('foreign key') ||
+      String(e.details || '').includes('referenced from table')
+    ) {
+      return new Error(
+        'No se puede eliminar este producto porque ya tiene ventas, compras o movimientos de inventario registrados. Para mantener la integridad fiscal y contable, márcalo como "Inactivo".'
+      );
+    }
     const parts = [e.message, e.details, e.hint].filter(Boolean);
     return new Error(parts.join(' — ') || 'Error de Supabase');
   }
@@ -663,13 +673,30 @@ export async function upsertProductoImportacion(
 }
 
 export async function eliminarProducto(id: string): Promise<void> {
-  if (!isSupabaseConfigured()) {
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+
+  if (!isUuid || !isSupabaseConfigured()) {
     saveStoredProducts(getStoredProducts().filter((p) => p.id !== id));
     return;
   }
+
   const sb = getSupabase();
   const { error } = await sb.from('productos').delete().eq('id', id);
-  if (error) throw errorSupabase(error);
+  if (error) {
+    if (
+      error.code === '23503' ||
+      (error as { status?: number }).status === 409 ||
+      String(error.message || '').includes('foreign key') ||
+      String(error.details || '').includes('referenced from table')
+    ) {
+      throw new Error(
+        'No se puede eliminar este producto porque ya tiene ventas, compras o movimientos de inventario registrados. Para conservarlo en el historial, cámbialo a estado "Inactivo".'
+      );
+    }
+    throw errorSupabase(error);
+  }
+
+  saveStoredProducts(getStoredProducts().filter((p) => p.id !== id));
 }
 
 export async function obtenerProductoPorCodigoBarras(

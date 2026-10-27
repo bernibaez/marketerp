@@ -6,6 +6,8 @@ export interface CartItem {
   precio_unitario: number;
 }
 
+export type SalesTab = 'sales' | 'quotes' | 'returns';
+
 export const saleStatusMap: Record<string, { label: string; cls: string }> = {
   completada: { label: 'Completada', cls: 'badge-success' },
   paid: { label: 'Pagada', cls: 'badge-success' },

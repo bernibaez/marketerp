@@ -21,6 +21,7 @@ import { findExistingImportProduct, isGenericScaleItemCode } from '@/lib/scaleIm
 import type { Product } from '@/lib/initialProducts';
 export type { Product };
 import { ProductDetailModal } from './ProductDetailModal';
+import OperationProgressModal, { type OperationProgressState } from './OperationProgressModal';
 
 export default function ProductManagementScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -39,6 +40,7 @@ export default function ProductManagementScreen() {
   const [sortField, setSortField] = useState<keyof Product>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [labelModalProducts, setLabelModalProducts] = useState<Product[] | null>(null);
+  const [operationProgress, setOperationProgress] = useState<OperationProgressState | null>(null);
 
   const estadoDb =
     filterStatus === 'active'
@@ -134,70 +136,150 @@ export default function ProductManagementScreen() {
   };
 
   const handleBatchImport = async (productsToImport: Product[]) => {
-    const catalogRes = await obtenerProductos({ pagina: 1, limite: 5000, estado: 'todos' });
-    const catalog = catalogRes.datos.map(productoAUi);
-    let created = 0;
-    let updated = 0;
+    setImportModalOpen(false);
+    const totalCount = productsToImport.length;
 
-    for (const item of productsToImport) {
-      const plu = normalizePlu(item.plu || '');
-      const existing = findExistingImportProduct(catalog, {
-        id: item.id,
-        plu,
-        barcode: item.barcode,
-        sku: item.sku,
-      });
+    setOperationProgress({
+      open: true,
+      title: importIsScaleMode
+        ? 'Sincronizando Productos con la Balanza'
+        : 'Importando Catálogo de Productos',
+      subtitle: importIsScaleMode
+        ? 'Procesando códigos PLU, precios y pesaje...'
+        : 'Validando e importando productos al inventario...',
+      current: 0,
+      total: totalCount,
+      currentItemName: 'Consultando catálogo existente...',
+      variant: 'emerald',
+      iconType: importIsScaleMode ? 'scale' : 'sync',
+      stats: {
+        successLabel: 'Nuevos',
+        successCount: 0,
+        warningLabel: 'Actualizados',
+        warningCount: 0,
+      },
+      isFinished: false,
+    });
 
-      const payload = existing
-        ? uiAProductoInsert({
-          ...existing,
-          name: item.name,
-          salePrice: item.salePrice,
-          wholesalePrice: item.wholesalePrice || item.salePrice,
-          costPrice: item.costPrice > 0 ? item.costPrice : existing.costPrice,
-          pricePerWeight: item.salePrice,
-          plu: plu || existing.plu,
-          barcode: isGenericScaleItemCode(existing.barcode)
-            ? item.barcode || existing.barcode
-            : existing.barcode || item.barcode,
-          sku: isGenericScaleItemCode(existing.sku)
-            ? item.sku || existing.sku
-            : existing.sku || item.sku,
-          isWeightProduct: true,
-          saleType: existing.saleType === 'both' ? 'both' : 'weight',
-          generateScaleBarcode: true,
-          unit: existing.unit && existing.unit !== 'Unidad' ? existing.unit : 'Libra',
-          weightUnit: existing.weightUnit || 'lb',
-          currentStock: existing.currentStock,
-          minStock: existing.minStock,
-          status: existing.status,
-          category: existing.category || item.category,
-          brand: existing.brand || item.brand,
-        })
-        : (() => {
-          const { id: _localId, ...rest } = item;
-          return uiAProductoInsert(rest);
-        })();
+    try {
+      const catalogRes = await obtenerProductos({ pagina: 1, limite: 5000, estado: 'todos' });
+      const catalog = catalogRes.datos.map(productoAUi);
+      let created = 0;
+      let updated = 0;
+      let processed = 0;
 
-      const result = existing
-        ? { data: await actualizarProducto(existing.id, payload), created: false }
-        : await upsertProductoImportacion(payload);
+      for (const item of productsToImport) {
+        processed += 1;
+        setOperationProgress((prev) =>
+          prev
+            ? {
+                ...prev,
+                current: processed,
+                currentItemName: `${item.name} ${item.plu ? `(PLU ${item.plu})` : ''}`,
+                stats: {
+                  ...prev.stats,
+                  successCount: created,
+                  warningCount: updated,
+                },
+              }
+            : null
+        );
 
-      if (result.created) {
-        created += 1;
-        catalog.push(productoAUi(result.data));
-      } else {
-        updated += 1;
-        const idx = catalog.findIndex((p) => p.id === result.data.id);
-        if (idx >= 0) catalog[idx] = productoAUi(result.data);
-        else catalog.push(productoAUi(result.data));
+        const plu = normalizePlu(item.plu || '');
+        const existing = findExistingImportProduct(catalog, {
+          id: item.id,
+          plu,
+          barcode: item.barcode,
+          sku: item.sku,
+        });
+
+        const payload = existing
+          ? uiAProductoInsert({
+            ...existing,
+            name: item.name,
+            salePrice: item.salePrice,
+            wholesalePrice: item.wholesalePrice || item.salePrice,
+            costPrice: item.costPrice > 0 ? item.costPrice : existing.costPrice,
+            pricePerWeight: item.salePrice,
+            plu: plu || existing.plu,
+            barcode: isGenericScaleItemCode(existing.barcode)
+              ? item.barcode || existing.barcode
+              : existing.barcode || item.barcode,
+            sku: isGenericScaleItemCode(existing.sku)
+              ? item.sku || existing.sku
+              : existing.sku || item.sku,
+            isWeightProduct: true,
+            saleType: existing.saleType === 'both' ? 'both' : 'weight',
+            generateScaleBarcode: true,
+            unit: existing.unit && existing.unit !== 'Unidad' ? existing.unit : 'Libra',
+            weightUnit: existing.weightUnit || 'lb',
+            currentStock: existing.currentStock,
+            minStock: existing.minStock,
+            status: existing.status,
+            category: existing.category || item.category,
+            brand: existing.brand || item.brand,
+          })
+          : (() => {
+            const { id: _localId, ...rest } = item;
+            return uiAProductoInsert(rest);
+          })();
+
+        const result = existing
+          ? { data: await actualizarProducto(existing.id, payload), created: false }
+          : await upsertProductoImportacion(payload);
+
+        if (result.created) {
+          created += 1;
+          catalog.push(productoAUi(result.data));
+        } else {
+          updated += 1;
+          const idx = catalog.findIndex((p) => p.id === result.data.id);
+          if (idx >= 0) catalog[idx] = productoAUi(result.data);
+          else catalog.push(productoAUi(result.data));
+        }
+
+        setOperationProgress((prev) =>
+          prev
+            ? {
+                ...prev,
+                current: processed,
+                stats: {
+                  ...prev.stats,
+                  successCount: created,
+                  warningCount: updated,
+                },
+              }
+            : null
+        );
       }
-    }
 
-    await refetch();
-    toast.success(
-      `Balanza sincronizada: ${created} producto(s) nuevo(s) y ${updated} actualizado(s). El stock no se modificó.`
-    );
+      await refetch();
+
+      setOperationProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              current: totalCount,
+              isFinished: true,
+              subtitle: `Sincronización finalizada: ${created} nuevo(s) y ${updated} actualizado(s).`,
+              currentItemName: '¡Todos los productos fueron procesados con éxito!',
+              stats: {
+                ...prev.stats,
+                successCount: created,
+                warningCount: updated,
+              },
+              onClose: () => setOperationProgress(null),
+            }
+          : null
+      );
+
+      toast.success(
+        `Balanza sincronizada: ${created} producto(s) nuevo(s) y ${updated} actualizado(s).`
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al importar productos');
+      setOperationProgress(null);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -220,14 +302,104 @@ export default function ProductManagementScreen() {
   };
 
   const handleBulkDelete = async () => {
-    const count = selectedIds.size;
-    try {
-      await Promise.all([...selectedIds].map((id) => eliminar(id)));
-      setSelectedIds(new Set());
-      toast.success(`${count} productos eliminados`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Error al eliminar');
-      await refetch();
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    const totalCount = ids.length;
+
+    setOperationProgress({
+      open: true,
+      title: 'Eliminando Productos Seleccionados',
+      subtitle: 'Comprobando dependencias históricas y eliminando registros...',
+      current: 0,
+      total: totalCount,
+      currentItemName: 'Iniciando proceso...',
+      variant: 'rose',
+      iconType: 'trash',
+      stats: {
+        successLabel: 'Eliminados',
+        successCount: 0,
+        warningLabel: 'Protegidos (ventas)',
+        warningCount: 0,
+      },
+      isFinished: false,
+    });
+
+    let deletedCount = 0;
+    let conflictCount = 0;
+    let processed = 0;
+
+    for (const id of ids) {
+      processed += 1;
+      const targetProduct = products.find((p) => p.id === id);
+      const name = targetProduct?.name || id;
+
+      setOperationProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              current: processed,
+              currentItemName: `Eliminando: ${name}`,
+              stats: {
+                ...prev.stats,
+                successCount: deletedCount,
+                warningCount: conflictCount,
+              },
+            }
+          : null
+      );
+
+      try {
+        await eliminar(id);
+        deletedCount++;
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      } catch {
+        conflictCount++;
+      }
+
+      setOperationProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              current: processed,
+              stats: {
+                ...prev.stats,
+                successCount: deletedCount,
+                warningCount: conflictCount,
+              },
+            }
+          : null
+      );
+    }
+
+    await refetch();
+
+    setOperationProgress((prev) =>
+      prev
+        ? {
+            ...prev,
+            current: totalCount,
+            isFinished: true,
+            subtitle:
+              conflictCount > 0
+                ? `${deletedCount} eliminados exitosamente, ${conflictCount} protegidos por tener ventas registradas.`
+                : `${deletedCount} productos eliminados exitosamente.`,
+            currentItemName: 'Proceso de eliminación finalizado.',
+            onClose: () => setOperationProgress(null),
+          }
+        : null
+    );
+
+    if (deletedCount > 0) {
+      toast.success(`${deletedCount} producto(s) eliminado(s) exitosamente`);
+    }
+    if (conflictCount > 0) {
+      toast.warning(
+        `${conflictCount} producto(s) no se pudieron borrar por tener ventas asociadas. Márcalos como inactivos.`
+      );
     }
   };
 
@@ -456,6 +628,13 @@ export default function ProductManagementScreen() {
         <PriceLabelModal
           products={labelModalProducts}
           onClose={() => setLabelModalProducts(null)}
+        />
+      )}
+
+      {operationProgress && (
+        <OperationProgressModal
+          {...operationProgress}
+          onClose={() => setOperationProgress(null)}
         />
       )}
     </div>
