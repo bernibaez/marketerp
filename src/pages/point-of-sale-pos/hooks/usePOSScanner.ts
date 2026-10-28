@@ -51,6 +51,8 @@ interface UsePOSScannerProps {
   paymentOpen: boolean;
   setPaymentOpen: (open: boolean) => void;
   openPayment: (method?: 'cash' | 'card' | 'transfer' | 'credit' | 'split') => void;
+  closePayment?: () => void;
+  onOpenScale?: (productId?: string, weight?: number, product?: any) => void;
   clearCart: () => void;
 }
 
@@ -68,6 +70,8 @@ export function usePOSScanner({
   paymentOpen,
   setPaymentOpen,
   openPayment,
+  closePayment,
+  onOpenScale,
   clearCart,
 }: UsePOSScannerProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -536,6 +540,12 @@ export function usePOSScanner({
           return keepCodeSelected();
         }
 
+        if (matchedProd.isWeighted && onOpenScale) {
+          setSearchQuery('');
+          onOpenScale(matchedProd.id, undefined, matchedProd);
+          return true;
+        }
+
         addToCart({
           id: `cart-${matchedProd.id}-${Date.now()}`,
           productId: matchedProd.id,
@@ -574,6 +584,12 @@ export function usePOSScanner({
             ui.saleType === 'both' ||
             ui.unit?.toLowerCase().includes('lb') ||
             ui.unit?.toLowerCase().includes('kg');
+
+          if (isWeighted && onOpenScale) {
+            setSearchQuery('');
+            onOpenScale(ui.id, undefined, ui);
+            return true;
+          }
 
           addToCart({
             id: `cart-${ui.id}-${Date.now()}`,
@@ -655,6 +671,7 @@ export function usePOSScanner({
       cart,
       deductOrRemoveFromCart,
       toggleDeleteMode,
+      onOpenScale,
     ]
   );
 
@@ -692,8 +709,12 @@ export function usePOSScanner({
       }
       if (e.key === 'F9') {
         e.preventDefault();
-        if (paymentOpen) setPaymentOpen(false);
-        else openPayment('cash');
+        if (paymentOpen) {
+          if (closePayment) closePayment();
+          else setPaymentOpen(false);
+        } else {
+          openPayment('cash');
+        }
         return;
       }
       if (e.key === 'F12' && orderCompleted) {
@@ -702,8 +723,12 @@ export function usePOSScanner({
         const finish = () => {
           if (closed) return;
           closed = true;
-          clearCart();
-          setPaymentOpen(false);
+          if (closePayment) {
+            closePayment();
+          } else {
+            clearCart();
+            setPaymentOpen(false);
+          }
         };
         window.addEventListener('afterprint', finish, { once: true });
         window.print();
@@ -712,8 +737,12 @@ export function usePOSScanner({
       }
       if (e.key === 'F2' && orderCompleted) {
         e.preventDefault();
-        clearCart();
-        setPaymentOpen(false);
+        if (closePayment) {
+          closePayment();
+        } else {
+          clearCart();
+          setPaymentOpen(false);
+        }
         return;
       }
       if (e.key === 'F4') {
@@ -724,7 +753,8 @@ export function usePOSScanner({
       if (e.key === 'Escape') {
         if (paymentOpen) {
           e.preventDefault();
-          setPaymentOpen(false);
+          if (closePayment) closePayment();
+          else setPaymentOpen(false);
           return;
         }
         if (awaitingDeleteScan) {
@@ -768,6 +798,7 @@ export function usePOSScanner({
     paymentOpen,
     clearCart,
     openPayment,
+    closePayment,
     awaitingDeleteScan,
     toggleDeleteMode,
     handleCancelDeleteMode,

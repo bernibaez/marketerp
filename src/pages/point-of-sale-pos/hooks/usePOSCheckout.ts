@@ -67,15 +67,30 @@ export function usePOSCheckout({
         toast.error('Inicia la caja antes de realizar ventas');
         return;
       }
-      if (method) setPreferredPayMethod(method);
+      if (cart.length === 0) {
+        toast.error('El carrito está vacío — agrega productos primero');
+        return;
+      }
+      setOrderCompleted(false);
+      setLastPayments(null);
+      setLastSaleResult(null);
+      setLastFiscalInvoice(null);
+      setPreferredPayMethod(method ?? 'cash');
       setPaymentOpen(true);
     },
-    [cashIsOpen]
+    [cashIsOpen, cart.length]
   );
 
   const closePayment = useCallback(() => {
+    if (orderCompleted) {
+      clearCart();
+    }
+    setOrderCompleted(false);
+    setLastPayments(null);
+    setLastSaleResult(null);
+    setLastFiscalInvoice(null);
     setPaymentOpen(false);
-  }, []);
+  }, [orderCompleted, clearCart]);
 
   const handleQuickCashSale = useCallback(() => {
     if (cart.length === 0) {
@@ -242,7 +257,6 @@ export function usePOSCheckout({
           } catch {
             /* no bloquear venta */
           }
-          setLastFiscalInvoice(finalInvoice);
           toast.success(
             `Venta completada — Factura: ${resultado.numero_factura} ${
               finalInvoice.ncf ? `(NCF: ${finalInvoice.ncf})` : ''
@@ -259,7 +273,14 @@ export function usePOSCheckout({
         return;
       }
     },
-    onNewSale: clearCart,
+    onNewSale: () => {
+      clearCart();
+      setOrderCompleted(false);
+      setLastPayments(null);
+      setLastSaleResult(null);
+      setLastFiscalInvoice(null);
+      setPaymentOpen(false);
+    },
   };
 
   const resetOrderState = useCallback(() => {

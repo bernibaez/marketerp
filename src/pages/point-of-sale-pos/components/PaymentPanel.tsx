@@ -86,6 +86,7 @@ export default function PaymentPanel({
     numero_factura: string;
     ncf?: string | null;
   } | null>(null);
+  const cashInputRef = React.useRef<HTMLInputElement>(null);
 
   // Fiscal Invoice (NCF) State
   const [ncfType, setNcfType] = useState<NCFType>(
@@ -98,6 +99,25 @@ export default function PaymentPanel({
   React.useEffect(() => {
     if (initialMethod) setMethod(initialMethod);
   }, [initialMethod]);
+
+  React.useEffect(() => {
+    if (!orderCompleted) {
+      setCashReceived('');
+      setLastChange(0);
+      setCompletedSaleResult(null);
+      setSplit({ cash: '', card: '', transfer: '', credit: '' });
+    }
+  }, [orderCompleted]);
+
+  React.useEffect(() => {
+    if (!orderCompleted && method === 'cash') {
+      const t = setTimeout(() => {
+        cashInputRef.current?.focus();
+        cashInputRef.current?.select();
+      }, 60);
+      return () => clearTimeout(t);
+    }
+  }, [orderCompleted, method]);
 
   React.useEffect(() => {
     if (initialNcfType) {
@@ -588,11 +608,18 @@ export default function PaymentPanel({
               </p>
               <div>
                 <input
+                  ref={cashInputRef}
                   type="number"
                   step="0.01"
                   placeholder="0.00"
                   value={cashReceived}
                   onChange={(e) => setCashReceived(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !processing && cashAmount >= total && cart.length > 0) {
+                      e.preventDefault();
+                      void handleProcess();
+                    }
+                  }}
                   className={`w-full text-center text-3xl font-extrabold tabular-nums h-16 rounded-xl border bg-white dark:bg-slate-900 px-4 focus:outline-none focus:ring-2 ${
                     isCashInsufficient && cashAmount > 0
                       ? 'border-rose-500 text-rose-600 focus:ring-rose-500'

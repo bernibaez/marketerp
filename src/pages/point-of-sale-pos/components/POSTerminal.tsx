@@ -222,7 +222,40 @@ export default function POSTerminal() {
     navigate,
   });
 
-  // 6. Scanner, Scale Parser & Global Keyboard Shortcuts Hook
+  // 6. Auxiliary Modals State
+  const [expenseOpen, setExpenseOpen] = useState(false);
+  const [scaleOpen, setScaleOpen] = useState(false);
+  const [scaleParams, setScaleParams] = useState<{
+    productId?: string;
+    weight?: number;
+    product?: any;
+  } | null>(null);
+  const [returnOpen, setReturnOpen] = useState(false);
+  const [registerDetailsOpen, setRegisterDetailsOpen] = useState(false);
+  const [cashSwitchOpen, setCashSwitchOpen] = useState(false);
+  const [openCashModalOpen, setOpenCashModalOpen] = useState(false);
+  const [closeCashModalOpen, setCloseCashModalOpen] = useState(false);
+  const [weightScanOpen, setWeightScanOpen] = useState(false);
+
+  const handleOpenScale = (productId?: string, weight?: number, product?: any) => {
+    const existingInCart = productId
+      ? cart.find(
+          (i) =>
+            i.productId === productId ||
+            (product?.sku && i.sku && i.sku.toLowerCase() === String(product.sku).toLowerCase())
+        )
+      : undefined;
+    const effectiveWeight = weight !== undefined ? weight : existingInCart?.qty ?? 1.0;
+    const effectiveProduct = product || existingInCart;
+    setScaleParams(
+      productId || effectiveWeight || effectiveProduct
+        ? { productId, weight: effectiveWeight, product: effectiveProduct }
+        : null
+    );
+    setScaleOpen(true);
+  };
+
+  // 7. Scanner, Scale Parser & Global Keyboard Shortcuts Hook
   const { searchQuery, setSearchQuery, realScaleCatalog, handleSearchSubmit } = usePOSScanner({
     enabled: cashIsOpen,
     cart,
@@ -237,19 +270,10 @@ export default function POSTerminal() {
     paymentOpen,
     setPaymentOpen,
     openPayment,
+    closePayment,
+    onOpenScale: handleOpenScale,
     clearCart,
   });
-
-  // 7. Auxiliary Modals State
-  const [expenseOpen, setExpenseOpen] = useState(false);
-  const [scaleOpen, setScaleOpen] = useState(false);
-  const [scaleParams, setScaleParams] = useState<{ productId?: string; weight?: number } | null>(null);
-  const [returnOpen, setReturnOpen] = useState(false);
-  const [registerDetailsOpen, setRegisterDetailsOpen] = useState(false);
-  const [cashSwitchOpen, setCashSwitchOpen] = useState(false);
-  const [openCashModalOpen, setOpenCashModalOpen] = useState(false);
-  const [closeCashModalOpen, setCloseCashModalOpen] = useState(false);
-  const [weightScanOpen, setWeightScanOpen] = useState(false);
 
   // Modal de Descuento Manual para producto en carrito
   const [discountModalOpen, setDiscountModalOpen] = useState(false);
@@ -283,11 +307,6 @@ export default function POSTerminal() {
     toast.success(`Descuento actualizado para "${discountTargetProduct.name}"`);
     setDiscountModalOpen(false);
     setDiscountTargetProduct(null);
-  };
-
-  const handleOpenScale = (productId?: string, weight?: number) => {
-    setScaleParams(productId || weight ? { productId, weight } : null);
-    setScaleOpen(true);
   };
 
   const isAnyModalOpen =
@@ -357,7 +376,7 @@ export default function POSTerminal() {
               onUpdateQty={updateQty}
               onUpdateDiscount={updateDiscount}
               onRemove={removeFromCart}
-              onEditWeight={(item) => handleOpenScale(item.productId, item.qty)}
+              onEditWeight={(item) => handleOpenScale(item.productId, item.qty, item)}
               onOpenWeightScan={() => setWeightScanOpen(true)}
               globalDiscount={globalDiscount}
               onSetGlobalDiscount={setGlobalDiscount}
@@ -500,7 +519,7 @@ export default function POSTerminal() {
         onCloseScale={() => setScaleOpen(false)}
         scaleParams={scaleParams}
         onConfirmScale={(item, qty) => {
-          addToCart(item, qty);
+          addToCart(item, qty, true);
           setScaleOpen(false);
         }}
 
