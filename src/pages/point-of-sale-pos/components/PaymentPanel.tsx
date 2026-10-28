@@ -30,6 +30,12 @@ import { useAuth } from '@/context/AuthContext';
 type PaymentMethod = 'cash' | 'card' | 'transfer' | 'credit' | 'split';
 
 interface PaymentPanelProps {
+  checkoutSessionId?: number;
+  completedSaleResult?: {
+    venta_id?: string;
+    numero_factura: string;
+    ncf?: string | null;
+  } | null;
   total: number;
   subtotal?: number;
   taxTotal?: number;
@@ -59,6 +65,8 @@ const paymentMethods = [
 const quickCashPresets = [50, 100, 200, 500, 1000];
 
 export default function PaymentPanel({
+  checkoutSessionId,
+  completedSaleResult: propCompletedSaleResult,
   total,
   subtotal,
   taxTotal,
@@ -78,6 +86,8 @@ export default function PaymentPanel({
 }: PaymentPanelProps) {
   const { user } = useAuth();
   const [method, setMethod] = useState<PaymentMethod>(initialMethod ?? 'cash');
+  const [methodConfirmed, setMethodConfirmed] = useState<boolean>(Boolean(initialMethod));
+  const [showMethodPrompt, setShowMethodPrompt] = useState<boolean>(false);
   const [cashReceived, setCashReceived] = useState('');
   const [processing, setProcessing] = useState(false);
   const [split, setSplit] = useState({ cash: '', card: '', transfer: '', credit: '' });
@@ -87,6 +97,13 @@ export default function PaymentPanel({
     ncf?: string | null;
   } | null>(null);
   const cashInputRef = React.useRef<HTMLInputElement>(null);
+  const firstMethodBtnRef = React.useRef<HTMLButtonElement>(null);
+
+  const handleSelectMethod = React.useCallback((selected: PaymentMethod) => {
+    setMethod(selected);
+    setMethodConfirmed(true);
+    setShowMethodPrompt(false);
+  }, []);
 
   // Fiscal Invoice (NCF) State
   const [ncfType, setNcfType] = useState<NCFType>(
@@ -97,8 +114,16 @@ export default function PaymentPanel({
   const [showFiscalDetails, setShowFiscalDetails] = useState(false);
 
   React.useEffect(() => {
-    if (initialMethod) setMethod(initialMethod);
-  }, [initialMethod]);
+    if (initialMethod) {
+      setMethod(initialMethod);
+      setMethodConfirmed(true);
+      setShowMethodPrompt(false);
+    } else {
+      setMethod('cash');
+      setMethodConfirmed(false);
+      setShowMethodPrompt(false);
+    }
+  }, [initialMethod, checkoutSessionId]);
 
   React.useEffect(() => {
     if (!orderCompleted) {
@@ -106,18 +131,26 @@ export default function PaymentPanel({
       setLastChange(0);
       setCompletedSaleResult(null);
       setSplit({ cash: '', card: '', transfer: '', credit: '' });
+      setMethodConfirmed(Boolean(initialMethod));
+      setShowMethodPrompt(false);
     }
-  }, [orderCompleted]);
+  }, [orderCompleted, initialMethod, checkoutSessionId]);
 
   React.useEffect(() => {
-    if (!orderCompleted && method === 'cash') {
+    if (!orderCompleted && methodConfirmed && method === 'cash') {
       const t = setTimeout(() => {
         cashInputRef.current?.focus();
         cashInputRef.current?.select();
       }, 60);
       return () => clearTimeout(t);
     }
-  }, [orderCompleted, method]);
+    if (!orderCompleted && !methodConfirmed) {
+      const t = setTimeout(() => {
+        firstMethodBtnRef.current?.focus();
+      }, 60);
+      return () => clearTimeout(t);
+    }
+  }, [orderCompleted, method, methodConfirmed]);
 
   React.useEffect(() => {
     if (initialNcfType) {
@@ -196,6 +229,13 @@ export default function PaymentPanel({
   const handleProcess = async () => {
     if (cart.length === 0) {
       toast.error('El carrito está vacío');
+      return;
+    }
+
+    if (!methodConfirmed) {
+      setShowMethodPrompt(true);
+      toast.info('Selecciona el método de pago en "1. FORMA DE PAGO" antes de finalizar');
+      firstMethodBtnRef.current?.focus();
       return;
     }
 
@@ -297,15 +337,38 @@ export default function PaymentPanel({
       if (res && typeof res === 'object' && (res as any).numero_factura) {
         setCompletedSaleResult(res as any);
       }
-      if (!fiscalEnabled) {
-        toast.success(`Venta completada — ${fmt(total)} (Sin Comprobante Fiscal)`);
-      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Error al procesar el pago');
     } finally {
       setProcessing(false);
     }
   };
+
+  React.useEffect(() => {
+    if (orderCompleted) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F6') {
+        e.preventDefault();
+        handleSelectMethod('cash');
+      } else if (e.key === 'F7') {
+        e.preventDefault();
+        handleSelectMethod('card');
+      } else if (e.key === 'F8') {
+        e.preventDefault();
+        handleSelectMethod('transfer');
+      } else if (e.key === 'F5') {
+        e.preventDefault();
+        handleSelectMethod('split');
+      } else if (e.key === 'F9') {
+        e.preventDefault();
+        if (!processing) {
+          void handleProcess();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
 
   // ----------------------------------------------------
   // VIEW 2: ORDER COMPLETED (¡VENTA COMPLETADA!)
@@ -321,12 +384,14 @@ export default function PaymentPanel({
         ? taxTotal
         : Math.max(0, total - computedSubtotal + (discountTotal || 0));
 
+    const effectiveSaleResult = propCompletedSaleResult || completedSaleResult;
+
     const actualInvoiceNumber =
-      completedSaleResult?.numero_factura ||
+      effectiveSaleResult?.numero_factura ||
       `FAC-${Date.now().toString().slice(-6)}`;
 
     const actualNcf =
-      completedSaleResult?.ncf ||
+      effectiveSaleResult?.ncf ||
       (fiscalEnabled ? (ncfType === 'B01' ? 'B0100000001' : 'B0200000001') : null);
 
     const completedInvoiceData = {
@@ -429,7 +494,10 @@ export default function PaymentPanel({
 
               <div className="pt-3 border-t border-slate-200 dark:border-slate-700 space-y-1 text-[11px] text-slate-500 dark:text-slate-400 font-medium">
                 <div className="flex justify-between">
-                  <span>Venta #{completedInvoiceData.invoiceNumber.replace('FAC-', '')}</span>
+                  <span>Factura</span>
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                    {completedInvoiceData.invoiceNumber}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span>Fecha</span>
@@ -564,22 +632,52 @@ export default function PaymentPanel({
         </div>
 
         {/* 1. FORMA DE PAGO */}
-        <div>
-          <p className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
-            1. FORMA DE PAGO
-          </p>
+        <div
+          className={`rounded-2xl transition-all ${
+            showMethodPrompt
+              ? 'p-3 -m-3 bg-amber-50/80 dark:bg-amber-950/30 border-2 border-amber-500 shadow-sm'
+              : ''
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              1. FORMA DE PAGO
+            </p>
+            {!methodConfirmed ? (
+              <span
+                className={`text-[11px] font-extrabold px-2.5 py-0.5 rounded-full ${
+                  showMethodPrompt
+                    ? 'bg-amber-500 text-white animate-pulse'
+                    : 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300'
+                }`}
+              >
+                {showMethodPrompt
+                  ? '¡Selecciona el método de pago para continuar!'
+                  : 'Selecciona el método de pago'}
+              </span>
+            ) : (
+              <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
+                <Check size={12} strokeWidth={3} />
+                Método confirmado: {paymentMethods.find((pm) => pm.id === method)?.label}
+              </span>
+            )}
+          </div>
           <div className="grid grid-cols-5 gap-2.5">
-            {paymentMethods.map((m) => {
-              const isSelected = method === m.id;
+            {paymentMethods.map((m, idx) => {
+              const isSelected = method === m.id && methodConfirmed;
+              const isPreview = method === m.id && !methodConfirmed;
               return (
                 <button
                   key={`pm-${m.id}`}
+                  ref={idx === 0 ? firstMethodBtnRef : undefined}
                   type="button"
-                  onClick={() => setMethod(m.id)}
+                  onClick={() => handleSelectMethod(m.id)}
                   className={`flex flex-col items-center justify-center p-3 rounded-2xl border transition-all active:scale-95 text-center min-h-[82px] cursor-pointer ${
                     isSelected
                       ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 ring-2 ring-emerald-500/40 font-extrabold shadow-2xs'
-                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:border-slate-300 hover:bg-slate-50/80 dark:hover:bg-slate-800/60 font-semibold'
+                      : isPreview
+                        ? 'border-amber-400 dark:border-amber-500/70 bg-amber-50/30 dark:bg-amber-950/20 text-slate-700 dark:text-slate-200 hover:border-emerald-500 font-bold'
+                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:border-slate-300 hover:bg-slate-50/80 dark:hover:bg-slate-800/60 font-semibold'
                   }`}
                 >
                   <div
@@ -617,6 +715,12 @@ export default function PaymentPanel({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !processing && cashAmount >= total && cart.length > 0) {
                       e.preventDefault();
+                      if (!methodConfirmed) {
+                        setShowMethodPrompt(true);
+                        toast.info('Selecciona el método de pago en "1. FORMA DE PAGO" antes de finalizar');
+                        firstMethodBtnRef.current?.focus();
+                        return;
+                      }
                       void handleProcess();
                     }
                   }}

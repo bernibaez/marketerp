@@ -121,12 +121,15 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
                 customerPhone: clients.find((c) => c.id === sale.cliente_id)?.telefono || undefined,
                 customerAddress: clients.find((c) => c.id === sale.cliente_id)?.direccion || undefined,
                 items: (sale.detalle_ventas || []).map((it) => ({
-                  sku: it.producto_id || undefined,
+                  sku: (it as any).sku || (it.producto_id ? String(it.producto_id).slice(0, 8) : undefined),
                   name: it.nombre_item,
                   qty: it.cantidad,
                   price: it.precio_unitario,
                   subtotal: it.subtotal,
-                  itbis: (it.precio_unitario - it.precio_unitario / 1.18) * it.cantidad,
+                  itbis:
+                    Number(it.porcentaje_impuesto || 0) > 0
+                      ? Math.round(((it.subtotal * Number(it.porcentaje_impuesto)) / 100) * 100) / 100
+                      : 0,
                 })),
                 subtotal: sale.subtotal,
                 discount: sale.monto_descuento || undefined,

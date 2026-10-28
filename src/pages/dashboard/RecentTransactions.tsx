@@ -8,67 +8,28 @@ export default function RecentTransactions() {
   const navigate = useNavigate();
   const { ventas, loading } = useVentas({ pagina: 1, limite: 4 });
 
-  // Si no hay ventas en la base de datos (ej. entorno inicial), mostramos transacciones de muestra idénticas al mockup
-  const demoFallback = [
-    {
-      id: 'demo-1',
-      ref: 'FAC-20261008-0EFB6630',
-      method: 'Tarjeta',
-      total: 'RD$ 60.00',
-      status: 'Pagada',
-      time: '03:49 p. m.',
-    },
-    {
-      id: 'demo-2',
-      ref: 'FAC-20261008-19A89313',
-      method: 'Transferencia',
-      total: 'RD$ 60.00',
-      status: 'Pagada',
-      time: '03:44 p. m.',
-    },
-    {
-      id: 'demo-3',
-      ref: 'FAC-20261008-7F32A104',
-      method: 'Efectivo',
-      total: 'RD$ 100.00',
-      status: 'Pagada',
-      time: '02:17 p. m.',
-    },
-    {
-      id: 'demo-4',
-      ref: 'FAC-20261008-5C9D2F11',
-      method: 'Tarjeta',
-      total: 'RD$ 45.00',
-      status: 'Pagada',
-      time: '01:32 p. m.',
-    },
-  ];
+  const transactions = ventas.slice(0, 4).map((v) => {
+    const d = new Date(v.creado_en);
+    const methodLabel =
+      v.metodo_pago === 'efectivo'
+        ? 'Efectivo'
+        : v.metodo_pago === 'tarjeta'
+          ? 'Tarjeta'
+          : v.metodo_pago === 'transferencia'
+            ? 'Transferencia'
+            : v.metodo_pago === 'credito'
+              ? 'Crédito'
+              : 'Mixto';
 
-  const transactions =
-    ventas.length > 0
-      ? ventas.slice(0, 4).map((v) => {
-          const d = new Date(v.creado_en);
-          const methodLabel =
-            v.metodo_pago === 'efectivo'
-              ? 'Efectivo'
-              : v.metodo_pago === 'tarjeta'
-                ? 'Tarjeta'
-                : v.metodo_pago === 'transferencia'
-                  ? 'Transferencia'
-                  : v.metodo_pago === 'credito'
-                    ? 'Crédito'
-                    : 'Mixto';
-
-          return {
-            id: v.id,
-            ref: v.numero_factura || `FAC-${v.id.slice(0, 8).toUpperCase()}`,
-            method: methodLabel,
-            total: `RD$ ${Number(v.monto_total).toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-            status: v.estado === 'anulada' ? 'Anulada' : 'Pagada',
-            time: d.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', hour12: true }),
-          };
-        })
-      : demoFallback;
+    return {
+      id: v.id,
+      ref: v.numero_factura || `FAC-${v.id.slice(0, 8).toUpperCase()}`,
+      method: methodLabel,
+      total: `RD$ ${Number(v.monto_total).toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      status: v.estado === 'anulada' ? 'Anulada' : 'Pagada',
+      time: d.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', hour12: true }),
+    };
+  });
 
   return (
     <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col justify-between h-full">
@@ -113,6 +74,12 @@ export default function RecentTransactions() {
                   <td className="py-3 pl-4" />
                 </tr>
               ))
+            ) : transactions.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="py-8 text-center text-slate-400">
+                  No hay transacciones recientes registradas
+                </td>
+              </tr>
             ) : (
               transactions.map((txn) => (
                 <tr

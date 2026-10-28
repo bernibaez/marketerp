@@ -94,6 +94,15 @@ export default function CartPanel({
   const [searchingDb, setSearchingDb] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const searchContainerRef = useRef<HTMLDivElement>(null);
+  const cartListRef = useRef<HTMLDivElement>(null);
+
+  // Mantener el scroll arriba cuando se agrega o escanea un producto (el último agregado aparece primero)
+  const topCartItemKey = cart[0] ? `${cart[0].id}-${cart[0].qty}` : '';
+  useEffect(() => {
+    if (cartListRef.current && topCartItemKey) {
+      cartListRef.current.scrollTop = 0;
+    }
+  }, [topCartItemKey]);
 
   const { productosUi } = useProductos({ pagina: 1, limite: 500, estado: 'todos' });
 
@@ -238,11 +247,7 @@ export default function CartPanel({
         regularPrice: unitPrice,
         wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
         isWholesale: false,
-<<<<<<< HEAD
-        cost: p.costPrice ?? p.cost ?? 0,
-=======
         cost: Number(p.costPrice ?? p.cost ?? 0),
->>>>>>> a6ff56f7f6787114b3968b75bb3719634a5ba97c
         tax: Number(p.tax ?? 0),
         image: p.image || '',
         unit: p.unit || p.weightUnit || 'lb',
@@ -261,11 +266,7 @@ export default function CartPanel({
         regularPrice: unitPrice,
         wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
         isWholesale: false,
-<<<<<<< HEAD
-        cost: p.costPrice ?? p.cost ?? 0,
-=======
         cost: Number(p.costPrice ?? p.cost ?? 0),
->>>>>>> a6ff56f7f6787114b3968b75bb3719634a5ba97c
         tax: Number(p.tax ?? 0),
         image: p.image || '',
         unit: p.unit || 'Und',
@@ -658,14 +659,18 @@ export default function CartPanel({
       </div>
 
       {/* Table Body: Cart Items List */}
-      <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 border-x border-b border-slate-200/90 dark:border-slate-700/80 rounded-b-xl mb-2.5 min-h-[160px]">
+      <div
+        ref={cartListRef}
+        className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 border-x border-b border-slate-200/90 dark:border-slate-700/80 rounded-b-xl mb-2.5 min-h-[160px]"
+      >
         {cart.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 gap-1.5 text-slate-400">
             <p className="text-sm font-bold">Carrito vacío</p>
             <p className="text-xs">Busca o escanea productos para comenzar la venta</p>
           </div>
         ) : (
-          cart.map((item) => {
+          cart.map((item, idx) => {
+            const isLatestItem = idx === 0;
             const isWeightItem =
               item.isWeighted ||
               ['lb', 'kg', 'g', 'oz', 'libra'].some((u) => (item.unit || '').toLowerCase().includes(u));
@@ -683,7 +688,11 @@ export default function CartPanel({
             return (
               <div
                 key={item.id}
-                className="grid grid-cols-12 gap-2 px-4 py-3.5 sm:py-4 items-center hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                className={`grid grid-cols-12 gap-2 px-4 py-3.5 sm:py-4 items-center transition-colors ${
+                  isLatestItem
+                    ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-l-4 border-l-emerald-500 hover:bg-emerald-50/70 dark:hover:bg-emerald-950/30'
+                    : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                }`}
               >
                 <div className="col-span-6 min-w-0 pr-1">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -702,6 +711,12 @@ export default function CartPanel({
                         title={item.name}
                       >
                         {item.name}
+                      </span>
+                    )}
+
+                    {isLatestItem && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider bg-emerald-500 text-white shadow-2xs">
+                        Último
                       </span>
                     )}
 

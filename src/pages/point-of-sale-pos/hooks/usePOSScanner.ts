@@ -100,9 +100,7 @@ export function usePOSScanner({
       saleType: p.saleType,
     }));
 
-    const storeSkus = new Set(storeProducts.map((p) => p.sku.toLowerCase()));
-    const demoExtras = initialProducts
-      .filter((ip) => !storeSkus.has(ip.sku.toLowerCase()))
+    const demoExtras = storeProducts.length > 0 ? [] : initialProducts
       .map((ip) => ({
         id: ip.id,
         sku: ip.sku,
@@ -257,9 +255,7 @@ export function usePOSScanner({
             p.unit.toLowerCase().includes('kg'),
           saleType: p.saleType,
         }));
-        const storeSkus = new Set(storeProducts.map((p) => p.sku.toLowerCase()));
-        const demoExtras = initialProducts
-          .filter((ip) => !storeSkus.has(ip.sku.toLowerCase()))
+        const demoExtras = storeProducts.length > 0 ? [] : initialProducts
           .map((ip) => ({
             id: ip.id,
             sku: ip.sku,
@@ -489,9 +485,7 @@ export function usePOSScanner({
         saleType: p.saleType,
       }));
 
-      const storeSkus = new Set(storeProducts.map((p) => p.sku.toLowerCase()));
-      const demoExtras = initialProducts
-        .filter((ip) => !storeSkus.has(ip.sku.toLowerCase()))
+      const demoExtras = storeProducts.length > 0 ? [] : initialProducts
         .map((ip) => ({
           id: ip.id,
           sku: ip.sku,
@@ -687,34 +681,29 @@ export function usePOSScanner({
         (target.tagName === 'INPUT' && target.id !== 'pos-barcode-search-input') ||
         target.tagName === 'TEXTAREA';
 
-      if (e.key === 'F6') {
+      if (e.key === 'F6' && !paymentOpen) {
         e.preventDefault();
         openPayment('cash');
         return;
       }
-      if (e.key === 'F7') {
+      if (e.key === 'F7' && !paymentOpen) {
         e.preventDefault();
         openPayment('card');
         return;
       }
-      if (e.key === 'F8') {
+      if (e.key === 'F8' && !paymentOpen) {
         e.preventDefault();
         openPayment('transfer');
         return;
       }
-      if (e.key === 'F5') {
+      if (e.key === 'F5' && !paymentOpen) {
         e.preventDefault();
         openPayment('split');
         return;
       }
-      if (e.key === 'F9') {
+      if (e.key === 'F9' && !paymentOpen) {
         e.preventDefault();
-        if (paymentOpen) {
-          if (closePayment) closePayment();
-          else setPaymentOpen(false);
-        } else {
-          openPayment('cash');
-        }
+        openPayment();
         return;
       }
       if (e.key === 'F12' && orderCompleted) {

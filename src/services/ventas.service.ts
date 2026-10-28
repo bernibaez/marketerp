@@ -4,12 +4,39 @@ import { updateProductStockInStore } from '@/lib/productStore';
 import { getCashClosures } from '@/lib/cashClosureStore';
 import { crearCxcDesdeVenta } from './cxc.service';
 import { AUTH_ACCOUNTS } from '@/lib/auth';
+import { isAbortError } from '@/lib/isAbortError';
+
+function isUUID(str: string | null | undefined): boolean {
+  return Boolean(
+    str && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str)
+  );
+}
+
+const INVALID_CASHIER_NAMES = new Set([
+  'cajero',
+  'cajero activo',
+  'usuario',
+  'sin turno activo',
+  'disponible / sin turno activo',
+  'sra. alba iris martinez',
+  'luisa fernández',
+  'luisa fernandez',
+  'no especificado',
+]);
+
+function isValidCashierName(name?: string | null): boolean {
+  if (!name || typeof name !== 'string') return false;
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  return !INVALID_CASHIER_NAMES.has(trimmed.toLowerCase());
+}
 
 export type ItemVentaPayload = {
   producto_id?: string | null;
   combo_id?: string | null;
   tipo_item: 'producto' | 'combo';
   nombre_item: string;
+  sku?: string | null;
   precio_unitario: number;
   costo_unitario: number;
   cantidad: number;
@@ -60,6 +87,8 @@ const LOCAL_VENTAS_META_KEY = 'mercato_ventas_meta_map';
 const LOCAL_CAJEROS_MAP_KEY = 'mercato_cajeros_nombre_map';
 
 type VentaMetaInfo = {
+  numero_factura?: string;
+  ncf?: string | null;
   cajero_id?: string | null;
   cajero_nombre?: string | null;
   cliente_id?: string | null;
@@ -70,6 +99,7 @@ type VentaMetaInfo = {
   monto_descuento?: number;
   monto_total?: number;
   costo_total?: number;
+  detalle_ventas?: Array<DetalleVenta & { sku?: string | null }>;
 };
 
 function round2(n: number): number {
@@ -106,9 +136,8 @@ function getCajerosNombreMap(): Record<string, string> {
 }
 
 export function rememberCajeroNombre(cajeroId?: string | null, cajeroNombre?: string | null) {
-  if (!cajeroId || !cajeroNombre) return;
-  const trimmed = cajeroNombre.trim();
-  if (!trimmed || trimmed.toLowerCase() === 'cajero' || trimmed.toLowerCase() === 'usuario') return;
+  if (!cajeroId || !isValidCashierName(cajeroNombre)) return;
+  const trimmed = cajeroNombre!.trim();
   try {
     const map = getCajerosNombreMap();
     map[String(cajeroId)] = trimmed;
@@ -235,24 +264,29 @@ function resolveCajeroForRow(
 
   // 1. Nombre directo desde el join de perfiles en Supabase
   const joinedPerfil = extractJoinedName(row.perfiles, 'nombre_completo');
-  if (joinedPerfil) {
+  if (isValidCashierName(joinedPerfil)) {
     if (row.cajero_id) rememberCajeroNombre(String(row.cajero_id), joinedPerfil);
-    return joinedPerfil;
+    return joinedPerfil!.trim();
   }
 
   // 2. Nombre guardado en metadatos de la venta al momento de facturar
-  if (meta?.cajero_nombre && meta.cajero_nombre.trim() && meta.cajero_nombre !== 'Cajero') {
-    return meta.cajero_nombre.trim();
+  if (isValidCashierName(meta?.cajero_nombre)) {
+    return meta!.cajero_nombre!.trim();
   }
 
   // 3. Buscar por cajero_id en el directorio de perfiles (Supabase + local + cierres)
   const cajeroId = row.cajero_id || meta?.cajero_id;
   if (cajeroId) {
     const byId = perfilesMap.get(String(cajeroId));
-    if (byId && byId.trim()) return byId.trim();
+    if (isValidCashierName(byId)) return byId!.trim();
   }
 
-  // 4. Buscar por sesión de caja (caja_id) en cierres locales
+  // 4. Si la fila ya trae cajero_nombre válido
+  if (isValidCashierName(row.cajero_nombre)) {
+    return row.cajero_nombre.trim();
+  }
+
+  // 5. Buscar por sesión de caja (caja_id) en cierres locales
   const cajaId = row.caja_id || meta?.caja_id;
   if (cajaId) {
     const closures = getCashClosures();
@@ -261,27 +295,24 @@ function resolveCajeroForRow(
       const sameBox =
         String(c.cashRegisterId) === String(cajaId) ||
         String(c.cashRegisterLabel || '').toLowerCase().includes(String(cajaId).toLowerCase());
-      if (!sameBox || !c.userName) return false;
+      if (!sameBox || !isValidCashierName(c.userName)) return false;
       if (!rowTime || !c.openedAt) return true;
       const openTime = new Date(c.openedAt).getTime();
       const closeTime = c.closedAt ? new Date(c.closedAt).getTime() : Date.now() + 86_400_000;
       return rowTime >= openTime - 60_000 && rowTime <= closeTime + 60_000;
     });
-    if (matchingClosure?.userName) return matchingClosure.userName;
+    if (matchingClosure?.userName) return matchingClosure.userName.trim();
   }
 
-  // 5. Si la fila ya trae cajero_nombre válido
-  if (typeof row.cajero_nombre === 'string' && row.cajero_nombre.trim() && row.cajero_nombre !== 'Cajero') {
-    return row.cajero_nombre.trim();
-  }
-
-  // 6. Usuario autenticado actual si coincide su ID
+  // 6. Usuario autenticado actual
   const authUser = getCurrentAuthUser();
-  if (authUser?.id && cajeroId && String(authUser.id) === String(cajeroId) && authUser.name) {
-    return authUser.name;
+  if (authUser?.name && isValidCashierName(authUser.name)) {
+    if (!cajeroId || String(authUser.id) === String(cajeroId)) {
+      return authUser.name.trim();
+    }
   }
 
-  return meta?.cajero_nombre || 'No especificado';
+  return (meta?.cajero_nombre && meta.cajero_nombre.trim()) || authUser?.name || 'Cajero';
 }
 
 function normalizeVentaAmounts(row: any, detalles: DetalleVenta[], meta?: VentaMetaInfo) {
@@ -357,10 +388,14 @@ function saveLocalVentas(ventas: VentaConDetalle[]) {
 
 export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVenta> {
   const authUser = getCurrentAuthUser();
-  const effectiveCajeroId = payload.cajero_id || authUser?.id || null;
+  const effectiveCajeroId = authUser?.id || payload.cajero_id || null;
   const perfilesLocales = getLocalPerfilesMap();
+  const payloadCajeroValido = isValidCashierName(payload.cajero_nombre)
+    ? payload.cajero_nombre!.trim()
+    : '';
   const effectiveCajeroNombre =
-    (payload.cajero_nombre && payload.cajero_nombre.trim()) ||
+    (authUser?.name && isValidCashierName(authUser.name) ? authUser.name.trim() : '') ||
+    payloadCajeroValido ||
     (effectiveCajeroId ? perfilesLocales.get(String(effectiveCajeroId)) : undefined) ||
     authUser?.name ||
     'Cajero';
@@ -401,13 +436,14 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
       payload.numero_factura ??
       `FAC-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${id.slice(0, 8)}`;
 
-    const items: DetalleVenta[] = payload.items.map((it) => ({
+    const items: Array<DetalleVenta & { sku?: string | null }> = payload.items.map((it) => ({
       id: crypto.randomUUID(),
       venta_id: id,
       producto_id: it.producto_id ?? null,
       combo_id: it.combo_id ?? null,
       tipo_item: it.tipo_item,
       nombre_item: it.nombre_item,
+      sku: it.sku ?? null,
       precio_unitario: round2(it.precio_unitario),
       costo_unitario: round2(it.costo_unitario),
       cantidad: Number(it.cantidad),
@@ -446,6 +482,8 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     };
 
     saveVentaMeta(id, {
+      numero_factura: numero,
+      ncf: payload.ncf ?? null,
       cajero_id: effectiveCajeroId,
       cajero_nombre: effectiveCajeroNombre,
       cliente_id: payload.cliente_id ?? null,
@@ -456,8 +494,9 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
       monto_descuento: exactDiscount,
       monto_total: exactTotal,
       costo_total: exactCostoTotal,
+      detalle_ventas: items,
     });
-    saveLocalVentas([venta, ...getLocalVentas()]);
+    saveLocalVentas([venta, ...getLocalVentas().filter((v) => v.id !== id)]);
 
     // Descontar stock local (soporta cantidades fraccionarias exactas)
     for (const item of payload.items) {
@@ -468,9 +507,6 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
 
     return { venta_id: id, numero_factura: numero, ncf: payload.ncf ?? null };
   }
-
-  const isUUID = (str: string | null | undefined): boolean =>
-    Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str));
 
   const sanitizedPayload = {
     ...payload,
@@ -502,7 +538,26 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
   const resultado = data as ResultadoVenta;
 
   if (resultado?.venta_id) {
+    const localItems: Array<DetalleVenta & { sku?: string | null }> = payload.items.map((it, idx) => ({
+      id: `${resultado.venta_id}-item-${idx + 1}`,
+      venta_id: resultado.venta_id,
+      producto_id: it.producto_id ?? null,
+      combo_id: it.combo_id ?? null,
+      tipo_item: it.tipo_item,
+      nombre_item: it.nombre_item,
+      sku: it.sku ?? null,
+      precio_unitario: round2(it.precio_unitario),
+      costo_unitario: round2(it.costo_unitario),
+      cantidad: Number(it.cantidad),
+      porcentaje_impuesto: Number(it.porcentaje_impuesto ?? 0),
+      subtotal: round2(
+        Number(it.subtotal) > 0 ? it.subtotal : it.precio_unitario * it.cantidad
+      ),
+    }));
+
     saveVentaMeta(resultado.venta_id, {
+      numero_factura: resultado.numero_factura,
+      ncf: resultado.ncf ?? payload.ncf ?? null,
       cajero_id: effectiveCajeroId,
       cajero_nombre: effectiveCajeroNombre,
       cliente_id: payload.cliente_id ?? null,
@@ -513,7 +568,42 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
       monto_descuento: exactDiscount,
       monto_total: exactTotal,
       costo_total: exactCostoTotal,
+      detalle_ventas: localItems,
     });
+
+    try {
+      const mirroredVenta: VentaConDetalle = {
+        id: resultado.venta_id,
+        numero_factura: resultado.numero_factura,
+        ncf: resultado.ncf ?? payload.ncf ?? null,
+        tipo_ncf: payload.tipo_ncf ?? null,
+        sucursal_id: payload.sucursal_id ?? null,
+        cajero_id: effectiveCajeroId,
+        cliente_id: payload.cliente_id ?? null,
+        caja_id: payload.caja_id ?? null,
+        subtotal: exactSubtotal,
+        monto_impuesto: exactTax,
+        monto_descuento: exactDiscount,
+        monto_total: exactTotal,
+        costo_total: exactCostoTotal,
+        metodo_pago: payload.metodo_pago,
+        monto_pagado: round2(payload.monto_pagado || exactTotal),
+        monto_efectivo: round2(payload.monto_efectivo ?? 0),
+        monto_tarjeta: round2(payload.monto_tarjeta ?? 0),
+        monto_transferencia: round2(payload.monto_transferencia ?? 0),
+        monto_credito: round2(payload.monto_credito ?? 0),
+        devuelta_entregada: round2(payload.devuelta_entregada ?? 0),
+        estado: 'completada',
+        creado_en: new Date().toISOString(),
+        cliente_nombre: effectiveClienteNombre,
+        cajero_nombre: effectiveCajeroNombre,
+        detalle_ventas: localItems,
+      };
+      const existingLocal = getLocalVentas().filter((v) => v.id !== resultado.venta_id);
+      saveLocalVentas([mirroredVenta, ...existingLocal].slice(0, 300));
+    } catch {
+      // ignore local mirror error
+    }
   }
 
   const credito = Number(payload.monto_credito ?? 0);
@@ -596,6 +686,12 @@ export async function obtenerHistorialVentas(params: {
     return { datos: list.slice(desde, hasta + 1), total: list.length };
   }
 
+  if (params.signal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError');
+  }
+
+  const cajeroIdIsUuid = Boolean(params.cajeroId && isUUID(params.cajeroId));
+
   const buildQuery = (selectClause: string) => {
     let q = sb
       .from('ventas')
@@ -604,8 +700,10 @@ export async function obtenerHistorialVentas(params: {
       .range(desde, hasta);
 
     if (params.busqueda?.trim()) {
-      const term = params.busqueda.trim();
-      q = q.or(`numero_factura.ilike."%${term}%",ncf.ilike."%${term}%"`);
+      const term = params.busqueda.trim().replace(/[%,"']/g, '');
+      if (term) {
+        q = q.or(`numero_factura.ilike.%${term}%,ncf.ilike.%${term}%`);
+      }
     }
     if (params.fechaInicio) q = q.gte('creado_en', params.fechaInicio);
     if (params.fechaFin) q = q.lte('creado_en', params.fechaFin + 'T23:59:59');
@@ -620,7 +718,9 @@ export async function obtenerHistorialVentas(params: {
         q = q.eq('caja_id', params.cajaId);
       }
     }
-    if (params.cajeroId) q = q.eq('cajero_id', params.cajeroId);
+    if (params.cajeroId && cajeroIdIsUuid) {
+      q = q.eq('cajero_id', params.cajeroId);
+    }
     if (params.excluirAnuladas) q = q.neq('estado', 'anulada');
     if (params.signal) q = q.abortSignal(params.signal);
     return q;
@@ -630,45 +730,118 @@ export async function obtenerHistorialVentas(params: {
     '*, clientes(nombre), perfiles!cajero_id(nombre_completo), detalle_ventas(*)'
   );
   if (error) {
-    const fallback = await buildQuery('*, clientes(nombre), perfiles!cajero_id(nombre_completo)');
-    if (fallback.error) throw fallback.error;
-    data = fallback.data;
-    count = fallback.count;
+    if (params.signal?.aborted || isAbortError(error)) {
+      throw new DOMException('The operation was aborted.', 'AbortError');
+    }
+    const fallback1 = await buildQuery('*, detalle_ventas(*)');
+    if (!fallback1.error) {
+      data = fallback1.data;
+      count = fallback1.count;
+      error = null;
+    } else {
+      if (params.signal?.aborted || isAbortError(fallback1.error)) {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      }
+      const fallback2 = await buildQuery('*');
+      if (!fallback2.error) {
+        data = fallback2.data;
+        count = fallback2.count;
+        error = null;
+      } else {
+        if (params.signal?.aborted || isAbortError(fallback2.error)) {
+          throw new DOMException('The operation was aborted.', 'AbortError');
+        }
+        const localFallback = getLocalVentas();
+        data = localFallback as any[];
+        count = localFallback.length;
+        error = null;
+      }
+    }
+  }
+
+  if (params.signal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError');
   }
 
   const [perfilesMap] = await Promise.all([fetchPerfilesDirectory()]);
   const metaMap = getVentasMetaMap();
+  const localVentasMap = new Map<string, VentaConDetalle>(
+    getLocalVentas().map((lv) => [String(lv.id), lv])
+  );
 
-  const datos: VentaConDetalle[] = (data ?? []).map((row: any) => {
-    const meta = metaMap[String(row.id)];
-    const rawDetalles: DetalleVenta[] = Array.isArray(row.detalle_ventas)
-      ? row.detalle_ventas.map((d: any) => ({
-          id: d.id,
-          venta_id: d.venta_id,
-          producto_id: d.producto_id,
-          combo_id: d.combo_id,
-          tipo_item: d.tipo_item,
-          nombre_item: d.nombre_item,
-          precio_unitario: Number(d.precio_unitario),
-          costo_unitario: Number(d.costo_unitario),
-          cantidad: Number(d.cantidad),
-          porcentaje_impuesto: Number(d.porcentaje_impuesto || 0),
-          subtotal: Number(d.subtotal),
-        }))
-      : [];
+  const rowsList: any[] = data ?? [];
+  const missingDetalleIds = rowsList
+    .filter((r) => !Array.isArray(r.detalle_ventas) || r.detalle_ventas.length === 0)
+    .map((r) => String(r.id))
+    .filter((id) => isUUID(id));
+
+  const extraDetallesByVenta = new Map<string, DetalleVenta[]>();
+  if (missingDetalleIds.length > 0) {
+    try {
+      const { data: extraDetalles } = await sb
+        .from('detalle_ventas')
+        .select('*')
+        .in('venta_id', missingDetalleIds);
+      for (const d of extraDetalles ?? []) {
+        const vid = String((d as any).venta_id);
+        const arr = extraDetallesByVenta.get(vid) ?? [];
+        arr.push(d as DetalleVenta);
+        extraDetallesByVenta.set(vid, arr);
+      }
+    } catch {
+      // ignore if RLS or network fails; metaMap/localVentasMap will provide fallback
+    }
+  }
+
+  let datos: VentaConDetalle[] = rowsList.map((row: any) => {
+    const rowId = String(row.id);
+    const meta = metaMap[rowId];
+    const localMirror = localVentasMap.get(rowId);
+    const sourceDetalles =
+      Array.isArray(row.detalle_ventas) && row.detalle_ventas.length > 0
+        ? row.detalle_ventas
+        : extraDetallesByVenta.get(rowId) && extraDetallesByVenta.get(rowId)!.length > 0
+          ? extraDetallesByVenta.get(rowId)!
+          : Array.isArray(meta?.detalle_ventas) && meta.detalle_ventas.length > 0
+            ? meta.detalle_ventas
+            : Array.isArray(localMirror?.detalle_ventas)
+              ? localMirror.detalle_ventas
+              : [];
+
+    const rawDetalles: DetalleVenta[] = sourceDetalles.map((d: any, idx: number) => {
+      const metaItem = meta?.detalle_ventas?.[idx];
+      return {
+        id: d.id || `${rowId}-item-${idx + 1}`,
+        venta_id: d.venta_id || rowId,
+        producto_id: d.producto_id ?? metaItem?.producto_id ?? null,
+        combo_id: d.combo_id ?? metaItem?.combo_id ?? null,
+        tipo_item: d.tipo_item || metaItem?.tipo_item || 'producto',
+        nombre_item: d.nombre_item || metaItem?.nombre_item || 'Producto',
+        ...(d.sku || metaItem?.sku ? { sku: d.sku || metaItem?.sku } : {}),
+        precio_unitario: Number(d.precio_unitario ?? metaItem?.precio_unitario ?? 0),
+        costo_unitario: Number(d.costo_unitario ?? metaItem?.costo_unitario ?? 0),
+        cantidad: Number(d.cantidad ?? metaItem?.cantidad ?? 1),
+        porcentaje_impuesto: Number(d.porcentaje_impuesto ?? metaItem?.porcentaje_impuesto ?? 0),
+        subtotal: Number(
+          d.subtotal ??
+            metaItem?.subtotal ??
+            Number(d.precio_unitario || 0) * Number(d.cantidad || 1)
+        ),
+      };
+    });
 
     const amounts = normalizeVentaAmounts(row, rawDetalles, meta);
     const clienteJoined = extractJoinedName(row.clientes, 'nombre');
 
     return {
       id: row.id,
-      numero_factura: row.numero_factura,
-      ncf: row.ncf,
-      tipo_ncf: row.tipo_ncf,
+      numero_factura: row.numero_factura || meta?.numero_factura || localMirror?.numero_factura || `FAC-${rowId.slice(0, 8)}`,
+      ncf: row.ncf ?? meta?.ncf ?? localMirror?.ncf ?? null,
+      tipo_ncf: row.tipo_ncf ?? localMirror?.tipo_ncf ?? null,
       sucursal_id: row.sucursal_id,
-      cajero_id: row.cajero_id ?? meta?.cajero_id ?? null,
-      cliente_id: row.cliente_id ?? meta?.cliente_id ?? null,
-      caja_id: row.caja_id ?? meta?.caja_id ?? null,
+      cajero_id: row.cajero_id ?? meta?.cajero_id ?? localMirror?.cajero_id ?? null,
+      cliente_id: row.cliente_id ?? meta?.cliente_id ?? localMirror?.cliente_id ?? null,
+      caja_id: row.caja_id ?? meta?.caja_id ?? localMirror?.caja_id ?? null,
       subtotal: amounts.subtotal,
       monto_impuesto: amounts.monto_impuesto,
       monto_descuento: amounts.monto_descuento,
@@ -683,13 +856,22 @@ export async function obtenerHistorialVentas(params: {
       devuelta_entregada: round2(Number(row.devuelta_entregada || 0)),
       estado: row.estado,
       creado_en: row.creado_en,
-      cliente_nombre: clienteJoined || meta?.cliente_nombre || 'Cliente general',
+      cliente_nombre:
+        clienteJoined ||
+        meta?.cliente_nombre ||
+        localMirror?.cliente_nombre ||
+        'Cliente general',
       cajero_nombre: resolveCajeroForRow(row, perfilesMap, metaMap),
-      ...(rawDetalles.length > 0 ? { detalle_ventas: rawDetalles } : {}),
+      detalle_ventas: rawDetalles,
     };
   });
 
-  return { datos, total: count ?? 0 };
+  if (params.cajeroId && !cajeroIdIsUuid) {
+    datos = datos.filter((v) => String(v.cajero_id ?? '') === String(params.cajeroId));
+    return { datos, total: datos.length };
+  }
+
+  return { datos, total: count ?? datos.length };
 }
 
 /** Ventas del turno (caja/cajero) con detalle de ítems — para resumen POS / admin. */
@@ -847,22 +1029,26 @@ export async function obtenerUltimasVentasParaDevolucion(limite = 8): Promise<Ve
 export async function obtenerVentaPorId(ventaId: string): Promise<VentaConDetalle | null> {
   const sb = tryGetSupabase();
   const metaMap = getVentasMetaMap();
+  const localFound = getLocalVentas().find((v) => v.id === ventaId);
   if (!sb) {
     const perfilesMap = getLocalPerfilesMap();
-    const list = getLocalVentas();
-    const found = list.find((v) => v.id === ventaId);
-    if (!found) return null;
-    const meta = metaMap[found.id];
-    const amounts = normalizeVentaAmounts(found, found.detalle_ventas ?? [], meta);
+    if (!localFound) return null;
+    const meta = metaMap[localFound.id];
+    const detalles =
+      Array.isArray(localFound.detalle_ventas) && localFound.detalle_ventas.length > 0
+        ? localFound.detalle_ventas
+        : meta?.detalle_ventas ?? [];
+    const amounts = normalizeVentaAmounts(localFound, detalles, meta);
     return {
-      ...found,
+      ...localFound,
       ...amounts,
-      cajero_nombre: resolveCajeroForRow(found, perfilesMap, metaMap),
-      cliente_nombre: found.cliente_nombre || meta?.cliente_nombre || 'Cliente general',
+      detalle_ventas: detalles,
+      cajero_nombre: resolveCajeroForRow(localFound, perfilesMap, metaMap),
+      cliente_nombre: localFound.cliente_nombre || meta?.cliente_nombre || 'Cliente general',
     };
   }
 
-  const [{ data: venta, error: vErr }, { data: detalle }, perfilesMap] = await Promise.all([
+  let [{ data: venta, error: vErr }, { data: detalle }, perfilesMap] = await Promise.all([
     sb
       .from('ventas')
       .select('*, clientes(nombre, rnc_cedula), perfiles!cajero_id(nombre_completo)')
@@ -875,35 +1061,69 @@ export async function obtenerVentaPorId(ventaId: string): Promise<VentaConDetall
     fetchPerfilesDirectory(),
   ]);
 
-  if (vErr || !venta) return null;
-
-  const detalleMapped: DetalleVenta[] = (detalle ?? []).map((d: any) => ({
-    id: d.id,
-    venta_id: d.venta_id,
-    producto_id: d.producto_id,
-    combo_id: d.combo_id,
-    tipo_item: d.tipo_item,
-    nombre_item: d.nombre_item,
-    precio_unitario: Number(d.precio_unitario),
-    costo_unitario: Number(d.costo_unitario),
-    cantidad: Number(d.cantidad),
-    porcentaje_impuesto: Number(d.porcentaje_impuesto || 0),
-    subtotal: Number(d.subtotal),
-  }));
+  if (vErr || !venta) {
+    const fallbackVenta = await sb.from('ventas').select('*').eq('id', ventaId).single();
+    if (!fallbackVenta.error && fallbackVenta.data) {
+      venta = fallbackVenta.data;
+      vErr = null;
+    } else if (localFound) {
+      const meta = metaMap[localFound.id];
+      const amounts = normalizeVentaAmounts(localFound, localFound.detalle_ventas ?? [], meta);
+      return {
+        ...localFound,
+        ...amounts,
+        cajero_nombre: resolveCajeroForRow(localFound, perfilesMap, metaMap),
+        cliente_nombre: localFound.cliente_nombre || meta?.cliente_nombre || 'Cliente general',
+      };
+    } else {
+      return null;
+    }
+  }
 
   const meta = metaMap[String(venta.id)];
+  const sourceDetalle =
+    Array.isArray(detalle) && detalle.length > 0
+      ? detalle
+      : Array.isArray(meta?.detalle_ventas) && meta.detalle_ventas.length > 0
+        ? meta.detalle_ventas
+        : Array.isArray(localFound?.detalle_ventas)
+          ? localFound.detalle_ventas
+          : [];
+
+  const detalleMapped: DetalleVenta[] = sourceDetalle.map((d: any, idx: number) => {
+    const metaItem = meta?.detalle_ventas?.[idx];
+    return {
+      id: d.id || `${venta.id}-item-${idx + 1}`,
+      venta_id: d.venta_id || venta.id,
+      producto_id: d.producto_id ?? metaItem?.producto_id ?? null,
+      combo_id: d.combo_id ?? metaItem?.combo_id ?? null,
+      tipo_item: d.tipo_item || metaItem?.tipo_item || 'producto',
+      nombre_item: d.nombre_item || metaItem?.nombre_item || 'Producto',
+      ...(d.sku || metaItem?.sku ? { sku: d.sku || metaItem?.sku } : {}),
+      precio_unitario: Number(d.precio_unitario ?? metaItem?.precio_unitario ?? 0),
+      costo_unitario: Number(d.costo_unitario ?? metaItem?.costo_unitario ?? 0),
+      cantidad: Number(d.cantidad ?? metaItem?.cantidad ?? 1),
+      porcentaje_impuesto: Number(d.porcentaje_impuesto ?? metaItem?.porcentaje_impuesto ?? 0),
+      subtotal: Number(
+        d.subtotal ??
+          metaItem?.subtotal ??
+          Number(d.precio_unitario || 0) * Number(d.cantidad || 1)
+      ),
+    };
+  });
+
   const amounts = normalizeVentaAmounts(venta, detalleMapped, meta);
   const clienteJoined = extractJoinedName(venta.clientes, 'nombre');
 
   return {
     id: venta.id,
-    numero_factura: venta.numero_factura,
-    ncf: venta.ncf,
-    tipo_ncf: venta.tipo_ncf,
+    numero_factura: venta.numero_factura || meta?.numero_factura || localFound?.numero_factura,
+    ncf: venta.ncf ?? meta?.ncf ?? localFound?.ncf ?? null,
+    tipo_ncf: venta.tipo_ncf ?? localFound?.tipo_ncf ?? null,
     sucursal_id: venta.sucursal_id,
-    cajero_id: venta.cajero_id ?? meta?.cajero_id ?? null,
-    cliente_id: venta.cliente_id ?? meta?.cliente_id ?? null,
-    caja_id: venta.caja_id ?? meta?.caja_id ?? null,
+    cajero_id: venta.cajero_id ?? meta?.cajero_id ?? localFound?.cajero_id ?? null,
+    cliente_id: venta.cliente_id ?? meta?.cliente_id ?? localFound?.cliente_id ?? null,
+    caja_id: venta.caja_id ?? meta?.caja_id ?? localFound?.caja_id ?? null,
     subtotal: amounts.subtotal,
     monto_impuesto: amounts.monto_impuesto,
     monto_descuento: amounts.monto_descuento,
@@ -918,7 +1138,11 @@ export async function obtenerVentaPorId(ventaId: string): Promise<VentaConDetall
     devuelta_entregada: round2(Number(venta.devuelta_entregada || 0)),
     estado: venta.estado,
     creado_en: venta.creado_en,
-    cliente_nombre: clienteJoined || meta?.cliente_nombre || 'Cliente general',
+    cliente_nombre:
+      clienteJoined ||
+      meta?.cliente_nombre ||
+      localFound?.cliente_nombre ||
+      'Cliente general',
     cajero_nombre: resolveCajeroForRow(venta, perfilesMap, metaMap),
     detalle_ventas: detalleMapped,
   };

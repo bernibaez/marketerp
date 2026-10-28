@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isAbortError } from '@/lib/isAbortError';
 import {
   obtenerCotizaciones,
   crearCotizacion,
@@ -33,9 +34,10 @@ export function useCotizaciones(params: {
       if (!ac.signal.aborted) {
         setCotizaciones(res.datos);
         setTotal(res.total);
+        setError(null);
       }
     } catch (e) {
-      if ((e as Error)?.name === 'AbortError') return;
+      if (ac.signal.aborted || isAbortError(e)) return;
       setError(e instanceof Error ? e.message : 'Error al cargar cotizaciones');
     } finally {
       if (!ac.signal.aborted) setLoading(false);

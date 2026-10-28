@@ -44,26 +44,22 @@ export default function SalesWeeklyChart() {
       try {
         const rows = await obtenerTendenciaVentas(7);
         if (!alive) return;
-        // Si no hay datos (modo offline / local inicial), generamos puntos representativos suaves
-        const hasRealData = rows.some((r) => r.ventas > 0);
-        if (hasRealData) {
+        if (rows.length > 0) {
           setData(rows);
         } else {
-          // Genera los últimos 7 días con días en español
           const today = new Date();
-          const demoRows: PuntoTendenciaVenta[] = [];
-          const demoValues = [120, 180, 260, 320, 210, 240, 380];
+          const emptyRows: PuntoTendenciaVenta[] = [];
           for (let i = 6; i >= 0; i--) {
             const d = new Date(today);
             d.setDate(today.getDate() - i);
             const weekday = d.toLocaleDateString('es-DO', { weekday: 'short' });
             const dayNum = d.getDate();
-            demoRows.push({
+            emptyRows.push({
               day: `${weekday.charAt(0).toUpperCase() + weekday.slice(1)} ${dayNum}`,
-              ventas: demoValues[6 - i] ?? 150,
+              ventas: 0,
             });
           }
-          setData(demoRows);
+          setData(emptyRows);
         }
       } catch {
         if (alive) setData([]);
@@ -81,7 +77,7 @@ export default function SalesWeeklyChart() {
       if (metricType === 'transacciones') {
         return {
           ...item,
-          valor: Math.max(1, Math.round(item.ventas / 80)),
+          valor: item.ventas > 0 ? Math.max(1, Math.round(item.ventas / 80)) : 0,
         };
       }
       if (metricType === 'ganancias') {

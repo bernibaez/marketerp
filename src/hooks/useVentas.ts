@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isAbortError } from '@/lib/isAbortError';
 import {
   obtenerHistorialVentas,
   obtenerVentaPorId,
@@ -37,10 +38,17 @@ export function useVentas(params: {
       if (!ac.signal.aborted) {
         setVentas(res.datos);
         setTotal(res.total);
+        setError(null);
       }
     } catch (e) {
-      if ((e as Error)?.name === 'AbortError') return;
-      setError(e instanceof Error ? e.message : 'Error al cargar ventas');
+      if (ac.signal.aborted || isAbortError(e)) return;
+      const msg =
+        e instanceof Error
+          ? e.message
+          : typeof e === 'object' && e !== null && 'message' in e
+            ? String((e as { message: unknown }).message)
+            : 'Error al cargar ventas';
+      setError(msg || 'Error al cargar ventas');
     } finally {
       if (!ac.signal.aborted) setLoading(false);
     }

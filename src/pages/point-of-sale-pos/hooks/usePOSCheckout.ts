@@ -59,8 +59,9 @@ export function usePOSCheckout({
     'cash' | 'card' | 'transfer' | 'credit' | 'split' | undefined
   >();
   const [orderCompleted, setOrderCompleted] = useState(false);
+  const [checkoutSessionId, setCheckoutSessionId] = useState(0);
   const [, setLastPayments] = useState<PaymentSplit | null>(null);
-  const [, setLastSaleResult] = useState<{
+  const [lastSaleResult, setLastSaleResult] = useState<{
     venta_id: string;
     numero_factura: string;
     ncf?: string | null;
@@ -77,11 +78,12 @@ export function usePOSCheckout({
         toast.error('El carrito está vacío — agrega productos primero');
         return;
       }
+      setCheckoutSessionId((n) => n + 1);
       setOrderCompleted(false);
       setLastPayments(null);
       setLastSaleResult(null);
       setLastFiscalInvoice(null);
-      setPreferredPayMethod(method ?? 'cash');
+      setPreferredPayMethod(method);
       setPaymentOpen(true);
     },
     [cashIsOpen, cart.length]
@@ -95,6 +97,7 @@ export function usePOSCheckout({
     setLastPayments(null);
     setLastSaleResult(null);
     setLastFiscalInvoice(null);
+    setPreferredPayMethod(undefined);
     setPaymentOpen(false);
   }, [orderCompleted, clearCart]);
 
@@ -134,6 +137,8 @@ export function usePOSCheckout({
   }, [cart, selectedCustomer, user, subtotal, taxTotal, total, navigate]);
 
   const paymentProps = {
+    checkoutSessionId,
+    completedSaleResult: lastSaleResult,
     total,
     subtotal,
     taxTotal,
@@ -180,10 +185,23 @@ export function usePOSCheckout({
       try {
         const effectiveNcfType =
           fiscalInvoice?.ncfType ?? (fiscalEnabled ? selectedNcfType : null);
-        const effectiveCajeroId = activeCashCashierId || user?.id || null;
+        const invalidCashierNames = new Set([
+          'cajero activo',
+          'disponible / sin turno activo',
+          'sin turno activo',
+          'sra. alba iris martinez',
+          'luisa fernández',
+          'luisa fernandez',
+        ]);
+        const cleanRegisterCashierName =
+          activeCashCashierName &&
+          !invalidCashierNames.has(activeCashCashierName.trim().toLowerCase())
+            ? activeCashCashierName.trim()
+            : '';
+        const effectiveCajeroId = user?.id || activeCashCashierId || null;
         const effectiveCajeroNombre =
-          (activeCashCashierName && activeCashCashierName.trim()) ||
-          user?.name ||
+          (user?.name && user.name.trim()) ||
+          cleanRegisterCashierName ||
           'Cajero';
         const resultado = await procesarVenta({
           cajero_id: effectiveCajeroId,
@@ -210,6 +228,7 @@ export function usePOSCheckout({
             combo_id: item.comboId ?? null,
             tipo_item: item.isCombo ? 'combo' : 'producto',
             nombre_item: item.name,
+            sku: item.sku,
             precio_unitario: item.price,
             costo_unitario: item.cost,
             cantidad: item.qty,
@@ -293,6 +312,7 @@ export function usePOSCheckout({
       setLastPayments(null);
       setLastSaleResult(null);
       setLastFiscalInvoice(null);
+      setPreferredPayMethod(undefined);
       setPaymentOpen(false);
     },
   };
@@ -301,7 +321,9 @@ export function usePOSCheckout({
     setPaymentOpen(false);
     setOrderCompleted(false);
     setLastPayments(null);
+    setLastSaleResult(null);
     setLastFiscalInvoice(null);
+    setPreferredPayMethod(undefined);
   }, []);
 
   return {

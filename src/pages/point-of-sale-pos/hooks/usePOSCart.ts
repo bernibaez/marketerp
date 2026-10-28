@@ -49,7 +49,7 @@ export function usePOSCart() {
         const prodBarcode = (product.barcode || '').toLowerCase();
         const prodName = (product.name || '').toLowerCase();
 
-        const idxReversed = [...prev].reverse().findIndex((item) => {
+        const realIdx = prev.findIndex((item) => {
           if (product.productId && item.productId === product.productId) return true;
           if (prodSku && item.sku && item.sku.toLowerCase() === prodSku) return true;
           if (prodBarcode && item.barcode && item.barcode.toLowerCase() === prodBarcode) return true;
@@ -59,14 +59,13 @@ export function usePOSCart() {
           return false;
         });
 
-        if (idxReversed === -1) {
+        if (realIdx === -1) {
           toast.error(
             `"${product.name || product.sku || product.barcode || 'Producto'}" no está en el carrito`
           );
           return prev;
         }
 
-        const realIdx = prev.length - 1 - idxReversed;
         const currentItem = prev[realIdx];
 
         if (currentItem.qty > 1 && !currentItem.isWeighted) {
@@ -126,22 +125,18 @@ export function usePOSCart() {
             (product.sku && item.sku && item.sku.toLowerCase() === product.sku.toLowerCase())
         );
         if (existing) {
-          return prev.map((item) =>
-            (product.productId && item.productId === product.productId) ||
-            (product.sku && item.sku && item.sku.toLowerCase() === product.sku.toLowerCase())
-              ? {
-                  ...item,
-                  qty: replaceQty
-                    ? safeQty
-                    : Math.round((item.qty + safeQty) * 1000) / 1000,
-                  price: product.price ?? item.price,
-                  discount: product.discount !== undefined ? product.discount : item.discount,
-                  discountType: product.discountType ?? item.discountType,
-                  discountValue: product.discountValue ?? item.discountValue,
-                  professionalDiscount: product.professionalDiscount ?? item.professionalDiscount,
-                }
-              : item
-          );
+          const updatedItem: CartItem = {
+            ...existing,
+            qty: replaceQty
+              ? safeQty
+              : Math.round((existing.qty + safeQty) * 1000) / 1000,
+            price: product.price ?? existing.price,
+            discount: product.discount !== undefined ? product.discount : existing.discount,
+            discountType: product.discountType ?? existing.discountType,
+            discountValue: product.discountValue ?? existing.discountValue,
+            professionalDiscount: product.professionalDiscount ?? existing.professionalDiscount,
+          };
+          return [updatedItem, ...prev.filter((item) => item.id !== existing.id)];
         }
         const regularPrice = product.regularPrice ?? product.price;
         const wholesalePrice =
@@ -149,7 +144,6 @@ export function usePOSCart() {
             ? Number(product.wholesalePrice)
             : undefined;
         return [
-          ...prev,
           {
             ...product,
             regularPrice,
@@ -161,6 +155,7 @@ export function usePOSCart() {
             discountValue: product.discountValue ?? (product.discount ? (product.discount * product.price) / 100 : 0),
             professionalDiscount: product.professionalDiscount ?? 0,
           },
+          ...prev,
         ];
       });
     },

@@ -106,6 +106,7 @@ export const SalesTable: React.FC<SalesTableProps> = ({
               </th>
               <th className="text-left px-4 py-3.5">Cliente</th>
               <th className="text-left px-4 py-3.5">Cajero</th>
+              <th className="text-left px-4 py-3.5">Productos</th>
               <th className="text-center px-4 py-3.5">Método de Pago</th>
               <th className="text-right px-5 py-3.5">Total</th>
               <th className="text-right px-5 py-3.5">Ganancia Bruta</th>
@@ -116,13 +117,13 @@ export const SalesTable: React.FC<SalesTableProps> = ({
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
             {loading ? (
               <tr>
-                <td colSpan={9} className="px-4 py-12 text-center text-slate-400">
-                  Cargando ventas desde Supabase...
+                <td colSpan={10} className="px-4 py-12 text-center text-slate-400">
+                  Cargando ventas...
                 </td>
               </tr>
             ) : sales.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={10} className="px-4 py-12 text-center text-slate-400">
                   No se encontraron ventas registradas
                 </td>
               </tr>
@@ -174,7 +175,40 @@ export const SalesTable: React.FC<SalesTableProps> = ({
                     </td>
 
                     <td className="px-4 py-3.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      {s.cajero_nombre || 'No especificado'}
+                      {s.cajero_nombre || 'Cajero'}
+                    </td>
+
+                    <td className="px-4 py-3.5 text-xs max-w-[220px]">
+                      {Array.isArray(s.detalle_ventas) && s.detalle_ventas.length > 0 ? (
+                        <div>
+                          <div
+                            className="font-semibold text-slate-800 dark:text-slate-200 truncate"
+                            title={s.detalle_ventas
+                              .map((d) => `${d.cantidad}x ${d.nombre_item}`)
+                              .join(', ')}
+                          >
+                            {s.detalle_ventas
+                              .slice(0, 2)
+                              .map((d) => `${d.cantidad}x ${d.nombre_item}`)
+                              .join(', ')}
+                            {s.detalle_ventas.length > 2
+                              ? ` (+${s.detalle_ventas.length - 2} más)`
+                              : ''}
+                          </div>
+                          <div className="text-[11px] text-slate-400 font-medium">
+                            {s.detalle_ventas.reduce((acc, d) => acc + Number(d.cantidad || 0), 0)}{' '}
+                            {s.detalle_ventas.length === 1 ? 'artículo' : 'artículos'}
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onViewDetail(s)}
+                          className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                        >
+                          Ver productos →
+                        </button>
+                      )}
                     </td>
 
                     <td className="px-4 py-3.5 text-center">

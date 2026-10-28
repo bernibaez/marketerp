@@ -419,6 +419,7 @@ export async function calcularResumenCajaAbierta(cajaId: string, cajeroId?: stri
     const searchCajaIds = Array.from(ids);
     const ventas = await obtenerVentasTurno({
       cajaId: searchCajaIds.length > 0 ? searchCajaIds : cajaId,
+      cajeroId: abierta?.cajero_id || cajeroId,
       desde,
       limite: 1000,
     });

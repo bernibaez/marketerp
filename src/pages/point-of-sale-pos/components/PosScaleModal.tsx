@@ -71,7 +71,7 @@ export default function PosScaleModal({
           (p.unit.toLowerCase().includes('lb') || p.unit.toLowerCase().includes('kg')))
     );
 
-    const listToUse = filtered.length > 0 ? filtered : combinedRaw;
+    const listToUse = filtered;
 
     const mapped: ScaleProduct[] = listToUse.map((p) => {
       const unitPrice = Number(

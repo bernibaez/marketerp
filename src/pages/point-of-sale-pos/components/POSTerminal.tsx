@@ -234,6 +234,7 @@ export default function POSTerminal() {
     productId?: string;
     weight?: number;
     product?: any;
+    replaceExisting?: boolean;
   } | null>(null);
   const [returnOpen, setReturnOpen] = useState(false);
   const [registerDetailsOpen, setRegisterDetailsOpen] = useState(false);
@@ -242,7 +243,7 @@ export default function POSTerminal() {
   const [closeCashModalOpen, setCloseCashModalOpen] = useState(false);
   const [weightScanOpen, setWeightScanOpen] = useState(false);
 
-  const handleOpenScale = (productId?: string, weight?: number, product?: any) => {
+  const handleOpenScale = (productId?: string, weight?: number, product?: any, replaceExisting?: boolean) => {
     const existingInCart = productId
       ? cart.find(
           (i) =>
@@ -254,7 +255,12 @@ export default function POSTerminal() {
     const effectiveProduct = product || existingInCart;
     setScaleParams(
       productId || effectiveWeight || effectiveProduct
-        ? { productId, weight: effectiveWeight, product: effectiveProduct }
+        ? {
+            productId,
+            weight: effectiveWeight,
+            product: effectiveProduct,
+            replaceExisting: replaceExisting ?? Boolean(existingInCart),
+          }
         : null
     );
     setScaleOpen(true);
@@ -280,26 +286,6 @@ export default function POSTerminal() {
     clearCart,
   });
 
-<<<<<<< HEAD
-  // 7. Auxiliary Modals State
-  const [expenseOpen, setExpenseOpen] = useState(false);
-  const [scaleOpen, setScaleOpen] = useState(false);
-  const [scaleParams, setScaleParams] = useState<{
-    productId?: string;
-    weight?: number;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    product?: any;
-    replaceExisting?: boolean;
-  } | null>(null);
-  const [returnOpen, setReturnOpen] = useState(false);
-  const [registerDetailsOpen, setRegisterDetailsOpen] = useState(false);
-  const [cashSwitchOpen, setCashSwitchOpen] = useState(false);
-  const [openCashModalOpen, setOpenCashModalOpen] = useState(false);
-  const [closeCashModalOpen, setCloseCashModalOpen] = useState(false);
-  const [weightScanOpen, setWeightScanOpen] = useState(false);
-
-=======
->>>>>>> a6ff56f7f6787114b3968b75bb3719634a5ba97c
   // Modal de Descuento Manual para producto en carrito
   const [discountModalOpen, setDiscountModalOpen] = useState(false);
   const [discountTargetProduct, setDiscountTargetProduct] = useState<CartItem | null>(null);
@@ -334,19 +320,6 @@ export default function POSTerminal() {
     setDiscountTargetProduct(null);
   };
 
-<<<<<<< HEAD
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleOpenScale = (productId?: string, weight?: number, product?: any, replaceExisting?: boolean) => {
-    setScaleParams(
-      productId || weight || product
-        ? { productId, weight, product, replaceExisting }
-        : null
-    );
-    setScaleOpen(true);
-  };
-
-=======
->>>>>>> a6ff56f7f6787114b3968b75bb3719634a5ba97c
   const isAnyModalOpen =
     paymentOpen ||
     expenseOpen ||
@@ -414,11 +387,7 @@ export default function POSTerminal() {
               onUpdateQty={updateQty}
               onUpdateDiscount={updateDiscount}
               onRemove={removeFromCart}
-<<<<<<< HEAD
               onEditWeight={(item) => handleOpenScale(item.productId, item.qty, item, true)}
-=======
-              onEditWeight={(item) => handleOpenScale(item.productId, item.qty, item)}
->>>>>>> a6ff56f7f6787114b3968b75bb3719634a5ba97c
               onOpenWeightScan={() => setWeightScanOpen(true)}
               globalDiscount={globalDiscount}
               onSetGlobalDiscount={setGlobalDiscount}
@@ -536,7 +505,7 @@ export default function POSTerminal() {
               orderCompleted ? 'max-w-4xl' : 'max-w-2xl'
             } bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden max-h-[94vh] flex flex-col transition-all duration-300`}
           >
-            <PaymentPanel {...paymentProps} onClose={closePayment} />
+            <PaymentPanel key={paymentProps.checkoutSessionId} {...paymentProps} onClose={closePayment} />
           </div>
         </div>
       )}
@@ -561,11 +530,7 @@ export default function POSTerminal() {
         onCloseScale={() => setScaleOpen(false)}
         scaleParams={scaleParams}
         onConfirmScale={(item, qty) => {
-<<<<<<< HEAD
-          addToCart(item, qty, Boolean(scaleParams?.replaceExisting));
-=======
-          addToCart(item, qty, true);
->>>>>>> a6ff56f7f6787114b3968b75bb3719634a5ba97c
+          addToCart(item, qty, scaleParams?.replaceExisting ?? true);
           setScaleOpen(false);
         }}
 

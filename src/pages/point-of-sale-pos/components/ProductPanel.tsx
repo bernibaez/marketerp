@@ -89,9 +89,11 @@ export default function ProductPanel({
       };
     });
 
-    const storeSkus = new Set(fromStore.map((p) => p.sku.toLowerCase()));
+    if (fromStore.length > 0) {
+      return fromStore;
+    }
+
     const demoExtras: Product[] = initialProducts
-      .filter((ip) => !storeSkus.has(ip.sku.toLowerCase()))
       .map((ip) => {
         const isWeight =
           ip.isWeightProduct ||

@@ -107,7 +107,9 @@ export default function PosCashOpenModal({
   }, []);
 
   useEffect(() => {
-    if (isAdmin && !selectedCajeroId && dbUsers.length > 0) {
+    if (user?.id && !selectedCajeroId) {
+      setSelectedCajeroId(user.id);
+    } else if (isAdmin && !selectedCajeroId && dbUsers.length > 0) {
       const match = dbUsers.find((u) => u.id === user?.id) || dbUsers[0];
       if (match) setSelectedCajeroId(match.id);
     }
