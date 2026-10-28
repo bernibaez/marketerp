@@ -9,6 +9,7 @@ import { exportTableToPdf, formatMoneyPdf } from '@/lib/exportPdf';
 import type { FiscalInvoiceRecord } from '@/lib/ncfStore';
 import { NCF_TYPES } from '@/lib/ncfStore';
 import PrintableInvoice from './PrintableInvoice';
+import { getInvoiceSettings, type PrintFormat } from '@/lib/invoiceSettingsStore';
 
 interface FiscalInvoiceModalProps {
   invoice: FiscalInvoiceRecord;
@@ -18,7 +19,8 @@ interface FiscalInvoiceModalProps {
 export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const [copiedNcf, setCopiedNcf] = useState(false);
-  const [viewFormat, setViewFormat] = useState<'ticket' | 'a4'>('a4');
+  // Leer el formato configurado en Configuración → Facturación como valor inicial
+  const [viewFormat, setViewFormat] = useState<PrintFormat>(() => getInvoiceSettings().printFormat);
 
   const ncfInfo = NCF_TYPES[invoice.ncfType];
 
@@ -91,27 +93,39 @@ export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceMo
             <div className="flex p-1 bg-slate-200/60 dark:bg-slate-800 rounded-xl text-xs font-bold">
               <button
                 type="button"
-                onClick={() => setViewFormat('a4')}
+                onClick={() => setViewFormat('ticket_58mm')}
                 className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
-                  viewFormat === 'a4'
+                  viewFormat === 'ticket_58mm'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                <Receipt size={14} />
+                <span>58mm</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewFormat('ticket_80mm')}
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                  viewFormat === 'ticket_80mm'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                <Receipt size={14} />
+                <span>80mm</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewFormat('full_page')}
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                  viewFormat === 'full_page'
                     ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
                     : 'text-slate-500 hover:text-slate-900'
                 }`}
               >
                 <FileText size={14} />
                 <span>Hoja A4</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewFormat('ticket')}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
-                  viewFormat === 'ticket'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
-                    : 'text-slate-500 hover:text-slate-900'
-                }`}
-              >
-                <Receipt size={14} />
-                <span>Ticket 80mm</span>
               </button>
             </div>
 
@@ -146,7 +160,7 @@ export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceMo
               total: invoice.total,
               paymentMethod: invoice.paymentMethod,
             }}
-            formatOverride={viewFormat === 'ticket' ? 'ticket_80mm' : 'full_page'}
+            formatOverride={viewFormat}
           />
         </div>
 
