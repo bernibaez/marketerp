@@ -1,4 +1,4 @@
-import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupabase';
+import { tryGetSupabase } from './clienteSupabase';
 
 export type Categoria = {
   id: string;
@@ -11,29 +11,14 @@ export type Categoria = {
 
 const CATEGORIAS_STORAGE_KEY = 'mercato_product_categorias';
 
-const CATEGORIAS_POR_DEFECTO: Categoria[] = [
-  { id: 'cat-01', codigo: 'CAT-001', nombre: 'Abarrotes y Granos', descripcion: 'Arroz, frijoles, aceites, pastas y enlatados', activo: true },
-  { id: 'cat-02', codigo: 'CAT-002', nombre: 'Lácteos y Huevos', descripcion: 'Leche, quesos, yogures, mantequillas y huevos', activo: true },
-  { id: 'cat-03', codigo: 'CAT-003', nombre: 'Carnes y Embutidos', descripcion: 'Pollo, res, cerdo, chuletas y salchichas', activo: true },
-  { id: 'cat-04', codigo: 'CAT-004', nombre: 'Bebidas y Refrescos', descripcion: 'Agua, jugos, sodas, maltas y energizantes', activo: true },
-  { id: 'cat-05', codigo: 'CAT-005', nombre: 'Limpieza y Hogar', descripcion: 'Detergentes, desinfectantes, esponjas y papel toalla', activo: true },
-  { id: 'cat-06', codigo: 'CAT-006', nombre: 'Panadería y Repostería', descripcion: 'Pan de molde, galletas, pan sobao y pastelillos', activo: true },
-  { id: 'cat-07', codigo: 'CAT-007', nombre: 'Frutas y Vegetales', descripcion: 'Plátanos, aguacates, tomates, cebollas y frutas frescas', activo: true },
-  { id: 'cat-08', codigo: 'CAT-008', nombre: 'Snacks y Golosinas', descripcion: 'Platanitos, papas fritas, chocolates y caramelos', activo: true },
-  { id: 'cat-09', codigo: 'CAT-009', nombre: 'Cuidado Personal', descripcion: 'Jabones, pastas dentales, champú y desodorantes', activo: true },
-];
-
 function getStoredCategorias(): Categoria[] {
   try {
     const raw = localStorage.getItem(CATEGORIAS_STORAGE_KEY);
-    if (!raw) {
-      localStorage.setItem(CATEGORIAS_STORAGE_KEY, JSON.stringify(CATEGORIAS_POR_DEFECTO));
-      return CATEGORIAS_POR_DEFECTO;
-    }
+    if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : CATEGORIAS_POR_DEFECTO;
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
-    return CATEGORIAS_POR_DEFECTO;
+    return [];
   }
 }
 
@@ -71,18 +56,20 @@ export async function obtenerCategorias(params?: {
       if (params?.signal) query = query.abortSignal(params.signal);
 
       const { data, error } = await query;
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
+        saveStoredCategorias(data as Categoria[]);
         return data as Categoria[];
       }
       if (error) {
-        console.warn('Aviso: no se pudo consultar tabla categorias en Supabase, usando almacenamiento local:', error.message);
+        console.warn('Aviso: no se pudo consultar tabla categorias en Supabase:', error.message);
       }
     } catch (err) {
+      if ((err as Error)?.name === 'AbortError') throw err;
       console.warn('Fallo al obtener categorias de Supabase, usando respaldo local:', err);
     }
   }
 
-  // Fallback local
+  // Fallback local solo si Supabase no está configurado o falla la red
   let list = getStoredCategorias().filter((c) => c.activo !== false);
   if (params?.busqueda?.trim()) {
     const q = params.busqueda.trim().toLowerCase();
@@ -105,29 +92,33 @@ export async function crearCategoria(datos: NuevaCategoriaInput): Promise<Catego
 
   const sb = tryGetSupabase();
   if (sb) {
-    try {
-      const { data, error } = await sb
-        .from('categorias')
-        .insert({
-          codigo,
-          nombre: nombreClean,
-          descripcion,
-          activo: true,
-        })
-        .select('id, codigo, nombre, descripcion, activo, creado_en')
-        .single();
+    const { data, error } = await sb
+      .from('categorias')
+      .insert({
+        codigo,
+        nombre: nombreClean,
+        descripcion,
+        activo: true,
+      })
+      .select('id, codigo, nombre, descripcion, activo, creado_en')
+      .single();
 
-      if (!error && data) {
-        // Sincronizar también con local storage
-        const current = getStoredCategorias();
-        saveStoredCategorias([data as Categoria, ...current.filter((c) => c.id !== data.id)]);
-        return data as Categoria;
+    if (error) {
+      if (error.code === '42501') {
+        throw new Error(
+          'Permisos RLS requeridos: ejecuta supabase/migrations/016_politicas_categorias_proveedores.sql en el SQL Editor de Supabase.'
+        );
       }
-      if (error) {
-        console.warn('Error al insertar categoría en Supabase, guardando localmente:', error.message);
+      if (error.code === '23505') {
+        throw new Error('Ya existe una categoría registrada con ese nombre o código.');
       }
-    } catch (err) {
-      console.warn('Fallo Supabase al crear categoría, guardando localmente:', err);
+      throw new Error(`Error en Supabase al crear categoría: ${error.message}`);
+    }
+
+    if (data) {
+      const current = getStoredCategorias();
+      saveStoredCategorias([data as Categoria, ...current.filter((c) => c.id !== data.id)]);
+      return data as Categoria;
     }
   }
 
@@ -151,27 +142,32 @@ export async function actualizarCategoria(
 ): Promise<Categoria> {
   const sb = tryGetSupabase();
   if (sb) {
-    try {
-      const patch: Record<string, unknown> = {};
-      if (datos.nombre !== undefined) patch.nombre = datos.nombre.trim();
-      if (datos.descripcion !== undefined) patch.descripcion = datos.descripcion?.trim() || null;
-      if (datos.codigo !== undefined) patch.codigo = datos.codigo.trim();
-      if (datos.activo !== undefined) patch.activo = datos.activo;
+    const patch: Record<string, unknown> = {};
+    if (datos.nombre !== undefined) patch.nombre = datos.nombre.trim();
+    if (datos.descripcion !== undefined) patch.descripcion = datos.descripcion?.trim() || null;
+    if (datos.codigo !== undefined) patch.codigo = datos.codigo.trim();
+    if (datos.activo !== undefined) patch.activo = datos.activo;
 
-      const { data, error } = await sb
-        .from('categorias')
-        .update(patch)
-        .eq('id', id)
-        .select('id, codigo, nombre, descripcion, activo, creado_en')
-        .single();
+    const { data, error } = await sb
+      .from('categorias')
+      .update(patch)
+      .eq('id', id)
+      .select('id, codigo, nombre, descripcion, activo, creado_en')
+      .single();
 
-      if (!error && data) {
-        const current = getStoredCategorias();
-        saveStoredCategorias(current.map((c) => (c.id === id ? (data as Categoria) : c)));
-        return data as Categoria;
+    if (error) {
+      if (error.code === '42501') {
+        throw new Error(
+          'Permisos RLS requeridos: ejecuta supabase/migrations/016_politicas_categorias_proveedores.sql en el SQL Editor de Supabase.'
+        );
       }
-    } catch (err) {
-      console.warn('Fallo Supabase al actualizar categoría, actualizando localmente:', err);
+      throw new Error(`Error en Supabase al actualizar categoría: ${error.message}`);
+    }
+
+    if (data) {
+      const current = getStoredCategorias();
+      saveStoredCategorias(current.map((c) => (c.id === id ? (data as Categoria) : c)));
+      return data as Categoria;
     }
   }
 
@@ -195,10 +191,14 @@ export async function actualizarCategoria(
 export async function eliminarCategoria(id: string): Promise<void> {
   const sb = tryGetSupabase();
   if (sb) {
-    try {
-      await sb.from('categorias').update({ activo: false }).eq('id', id);
-    } catch (err) {
-      console.warn('Fallo Supabase al eliminar categoría:', err);
+    const { error } = await sb.from('categorias').update({ activo: false }).eq('id', id);
+    if (error) {
+      if (error.code === '42501') {
+        throw new Error(
+          'Permisos RLS requeridos: ejecuta supabase/migrations/016_politicas_categorias_proveedores.sql en el SQL Editor de Supabase.'
+        );
+      }
+      throw new Error(`Error al eliminar categoría en Supabase: ${error.message}`);
     }
   }
 

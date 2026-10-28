@@ -487,78 +487,95 @@ export default function ProductManagementScreen() {
         lowStockCount={products.filter((p) => p.stockStatus === 'low' || p.stockStatus === 'out').length}
       />
 
-      {/* Metric Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="card p-4 hover:border-primary/40 transition-all">
-          <p className="text-xs text-muted-foreground font-medium">Productos en Catálogo</p>
-          <p className="text-2xl font-bold text-foreground mt-1">{products.length} productos</p>
+      {/* Metric Cards - Sleek & Compact */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-card border border-border p-3.5 rounded-xl shadow-xs hover:border-border/80 transition-all">
+          <p className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider">Total en Catálogo</p>
+          <div className="flex items-baseline gap-2 mt-1">
+            <span className="text-xl font-bold text-foreground">{products.length}</span>
+            <span className="text-xs text-muted-foreground">items</span>
+          </div>
         </div>
-        <div className="card p-4 hover:border-emerald-500/40 transition-all">
-          <p className="text-xs text-muted-foreground font-medium">Productos Activos</p>
-          <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
-            {products.filter((p) => p.status === 'active').length}
-          </p>
+        <div className="bg-card border border-border p-3.5 rounded-xl shadow-xs hover:border-emerald-500/40 transition-all">
+          <p className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider">Productos Activos</p>
+          <div className="flex items-baseline gap-2 mt-1">
+            <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
+              {products.filter((p) => p.status === 'active').length}
+            </span>
+            <span className="text-xs text-emerald-600/70 dark:text-emerald-400/70">disponibles</span>
+          </div>
         </div>
-        <div className="card p-4 hover:border-amber-500/40 transition-all">
-          <p className="text-xs text-muted-foreground font-medium">Con Stock Bajo / Agotado</p>
-          <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">
-            {products.filter((p) => p.stockStatus === 'low' || p.stockStatus === 'out').length}
-          </p>
+        <div className="bg-card border border-border p-3.5 rounded-xl shadow-xs hover:border-amber-500/40 transition-all">
+          <p className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider">Stock Crítico</p>
+          <div className="flex items-baseline gap-2 mt-1">
+            <span className="text-xl font-bold text-amber-600 dark:text-amber-400">
+              {products.filter((p) => p.stockStatus === 'low' || p.stockStatus === 'out').length}
+            </span>
+            <span className="text-xs text-amber-600/70 dark:text-amber-400/70">por reponer</span>
+          </div>
         </div>
-        <div className="card p-4 hover:border-blue-500/40 transition-all">
-          <p className="text-xs text-muted-foreground font-medium">Valor en Inventario</p>
-          <p className="text-2xl font-bold text-info mt-1">
-            RD$ {products.reduce((s, p) => s + p.costPrice * p.currentStock, 0).toLocaleString('es-DO', { maximumFractionDigits: 0 })}
-          </p>
+        <div className="bg-card border border-border p-3.5 rounded-xl shadow-xs hover:border-primary/40 transition-all">
+          <p className="text-[11px] text-muted-foreground font-semibold uppercase tracking-wider">Valor Inventario</p>
+          <div className="flex items-baseline gap-1 mt-1">
+            <span className="text-xs text-muted-foreground font-semibold">RD$</span>
+            <span className="text-xl font-bold text-foreground">
+              {products.reduce((s, p) => s + p.costPrice * p.currentStock, 0).toLocaleString('es-DO', { maximumFractionDigits: 0 })}
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Sección de pestañas de productos: Normales vs Balanza */}
-      <div className="flex items-center gap-2 border-b border-border pb-1 overflow-x-auto">
-        <button
-          type="button"
-          onClick={() => setProductTypeTab('all')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-t-lg font-bold text-xs transition-all border-b-2 ${productTypeTab === 'all'
-            ? 'border-primary text-primary bg-primary/10'
-            : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+      {/* Tipo de Producto - Segmented Pill Control */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="p-1 bg-secondary/60 rounded-xl inline-flex gap-1 border border-border/60">
+          <button
+            type="button"
+            onClick={() => setProductTypeTab('all')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              productTypeTab === 'all'
+                ? 'bg-background text-foreground shadow-xs font-semibold'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
-        >
-          <Package size={16} />
-          <span>Todos los Productos</span>
-          <span className="ml-1 text-[10px] px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold">
-            {products.length}
-          </span>
-        </button>
+          >
+            <Package size={14} />
+            <span>Todos</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-secondary text-muted-foreground font-semibold">
+              {products.length}
+            </span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setProductTypeTab('normal')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-t-lg font-bold text-xs transition-all border-b-2 ${productTypeTab === 'normal'
-            ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-blue-500/10'
-            : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+          <button
+            type="button"
+            onClick={() => setProductTypeTab('normal')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              productTypeTab === 'normal'
+                ? 'bg-background text-foreground shadow-xs font-semibold'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
-        >
-          <ShoppingCart size={16} />
-          <span>Productos Estándar (Unidades)</span>
-          <span className="ml-1 text-[10px] px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-extrabold">
-            {normalCount}
-          </span>
-        </button>
+          >
+            <ShoppingCart size={14} />
+            <span>Estándar (Unidades)</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-secondary text-muted-foreground font-semibold">
+              {normalCount}
+            </span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setProductTypeTab('balanza')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-t-lg font-bold text-xs transition-all border-b-2 ${productTypeTab === 'balanza'
-            ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10'
-            : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+          <button
+            type="button"
+            onClick={() => setProductTypeTab('balanza')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              productTypeTab === 'balanza'
+                ? 'bg-background text-foreground shadow-xs font-semibold'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
-        >
-          <Scale size={16} />
-          <span>Productos de Balanza (mscale / PLU)</span>
-          <span className="ml-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-extrabold">
-            {scaleCount}
-          </span>
-        </button>
+          >
+            <Scale size={14} />
+            <span>Balanza (PLU)</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-secondary text-muted-foreground font-semibold">
+              {scaleCount}
+            </span>
+          </button>
+        </div>
       </div>
 
 

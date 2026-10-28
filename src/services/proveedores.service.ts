@@ -64,7 +64,15 @@ export async function crearProveedor(datos: NuevoProveedorInput): Promise<Provee
     })
     .select(PROVEEDOR_COLUMNS)
     .single();
-  if (error) throw error;
+
+  if (error) {
+    if ((error as { code?: string }).code === '42501') {
+      throw new Error(
+        'Permisos RLS requeridos: ejecuta supabase/migrations/016_politicas_categorias_proveedores.sql en el SQL Editor de Supabase.'
+      );
+    }
+    throw error;
+  }
   return data as Proveedor;
 }
 

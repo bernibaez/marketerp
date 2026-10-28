@@ -11,32 +11,14 @@ export type Marca = {
 
 const MARCAS_STORAGE_KEY = 'mercato_product_marcas';
 
-const MARCAS_POR_DEFECTO: Marca[] = [
-  { id: 'marca-01', codigo: 'MAR-001', nombre: 'Molinos Modernos', descripcion: 'Harinas, pastas y galletas', activo: true },
-  { id: 'marca-02', codigo: 'MAR-002', nombre: 'Mazola', descripcion: 'Aceites vegetales y maíz', activo: true },
-  { id: 'marca-03', codigo: 'MAR-003', nombre: 'Pollo Rey', descripcion: 'Aves y carnes frescas', activo: true },
-  { id: 'marca-04', codigo: 'MAR-004', nombre: 'Carnation', descripcion: 'Leches evaporadas y condensadas', activo: true },
-  { id: 'marca-05', codigo: 'MAR-005', nombre: 'Central Romana', descripcion: 'Azúcar refinada y crema', activo: true },
-  { id: 'marca-06', codigo: 'MAR-006', nombre: 'Goya', descripcion: 'Granos, sazones y condimentos', activo: true },
-  { id: 'marca-07', codigo: 'MAR-007', nombre: 'Rica', descripcion: 'Leches, jugos y quesos', activo: true },
-  { id: 'marca-08', codigo: 'MAR-008', nombre: 'Crisol', descripcion: 'Aceites comestibles', activo: true },
-  { id: 'marca-09', codigo: 'MAR-009', nombre: 'Induveca', descripcion: 'Embutidos y fiambres', activo: true },
-  { id: 'marca-10', codigo: 'MAR-010', nombre: 'Colgate-Palmolive', descripcion: 'Higiene bucal y cuidado personal', activo: true },
-  { id: 'marca-11', codigo: 'MAR-011', nombre: 'Nestlé', descripcion: 'Café, cereales y confitería', activo: true },
-  { id: 'marca-12', codigo: 'MAR-012', nombre: 'Fabuloso', descripcion: 'Limpiadores multiusos y aromatizantes', activo: true },
-];
-
 function getStoredMarcas(): Marca[] {
   try {
     const raw = localStorage.getItem(MARCAS_STORAGE_KEY);
-    if (!raw) {
-      localStorage.setItem(MARCAS_STORAGE_KEY, JSON.stringify(MARCAS_POR_DEFECTO));
-      return MARCAS_POR_DEFECTO;
-    }
+    if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : MARCAS_POR_DEFECTO;
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
-    return MARCAS_POR_DEFECTO;
+    return [];
   }
 }
 
@@ -74,18 +56,20 @@ export async function obtenerMarcas(params?: {
       if (params?.signal) query = query.abortSignal(params.signal);
 
       const { data, error } = await query;
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
+        saveStoredMarcas(data as Marca[]);
         return data as Marca[];
       }
       if (error) {
-        console.warn('Aviso: no se pudo consultar tabla marcas en Supabase, usando almacenamiento local:', error.message);
+        console.warn('Aviso: no se pudo consultar tabla marcas en Supabase:', error.message);
       }
     } catch (err) {
+      if ((err as Error)?.name === 'AbortError') throw err;
       console.warn('Fallo al obtener marcas de Supabase, usando respaldo local:', err);
     }
   }
 
-  // Fallback local
+  // Fallback local solo si Supabase no está configurado o falla la red
   let list = getStoredMarcas().filter((m) => m.activo !== false);
   if (params?.busqueda?.trim()) {
     const q = params.busqueda.trim().toLowerCase();
@@ -108,28 +92,33 @@ export async function crearMarca(datos: NuevaMarcaInput): Promise<Marca> {
 
   const sb = tryGetSupabase();
   if (sb) {
-    try {
-      const { data, error } = await sb
-        .from('marcas')
-        .insert({
-          codigo,
-          nombre: nombreClean,
-          descripcion,
-          activo: true,
-        })
-        .select('id, codigo, nombre, descripcion, activo, creado_en')
-        .single();
+    const { data, error } = await sb
+      .from('marcas')
+      .insert({
+        codigo,
+        nombre: nombreClean,
+        descripcion,
+        activo: true,
+      })
+      .select('id, codigo, nombre, descripcion, activo, creado_en')
+      .single();
 
-      if (!error && data) {
-        const current = getStoredMarcas();
-        saveStoredMarcas([data as Marca, ...current.filter((m) => m.id !== data.id)]);
-        return data as Marca;
+    if (error) {
+      if (error.code === '42501') {
+        throw new Error(
+          'Permisos RLS requeridos: ejecuta supabase/migrations/016_politicas_categorias_proveedores.sql en el SQL Editor de Supabase.'
+        );
       }
-      if (error) {
-        console.warn('Error al insertar marca en Supabase, guardando localmente:', error.message);
+      if (error.code === '23505') {
+        throw new Error('Ya existe una marca registrada con ese nombre o código.');
       }
-    } catch (err) {
-      console.warn('Fallo Supabase al crear marca, guardando localmente:', err);
+      throw new Error(`Error en Supabase al crear marca: ${error.message}`);
+    }
+
+    if (data) {
+      const current = getStoredMarcas();
+      saveStoredMarcas([data as Marca, ...current.filter((m) => m.id !== data.id)]);
+      return data as Marca;
     }
   }
 
@@ -153,27 +142,32 @@ export async function actualizarMarca(
 ): Promise<Marca> {
   const sb = tryGetSupabase();
   if (sb) {
-    try {
-      const patch: Record<string, unknown> = {};
-      if (datos.nombre !== undefined) patch.nombre = datos.nombre.trim();
-      if (datos.descripcion !== undefined) patch.descripcion = datos.descripcion?.trim() || null;
-      if (datos.codigo !== undefined) patch.codigo = datos.codigo.trim();
-      if (datos.activo !== undefined) patch.activo = datos.activo;
+    const patch: Record<string, unknown> = {};
+    if (datos.nombre !== undefined) patch.nombre = datos.nombre.trim();
+    if (datos.descripcion !== undefined) patch.descripcion = datos.descripcion?.trim() || null;
+    if (datos.codigo !== undefined) patch.codigo = datos.codigo.trim();
+    if (datos.activo !== undefined) patch.activo = datos.activo;
 
-      const { data, error } = await sb
-        .from('marcas')
-        .update(patch)
-        .eq('id', id)
-        .select('id, codigo, nombre, descripcion, activo, creado_en')
-        .single();
+    const { data, error } = await sb
+      .from('marcas')
+      .update(patch)
+      .eq('id', id)
+      .select('id, codigo, nombre, descripcion, activo, creado_en')
+      .single();
 
-      if (!error && data) {
-        const current = getStoredMarcas();
-        saveStoredMarcas(current.map((m) => (m.id === id ? (data as Marca) : m)));
-        return data as Marca;
+    if (error) {
+      if (error.code === '42501') {
+        throw new Error(
+          'Permisos RLS requeridos: ejecuta supabase/migrations/016_politicas_categorias_proveedores.sql en el SQL Editor de Supabase.'
+        );
       }
-    } catch (err) {
-      console.warn('Fallo Supabase al actualizar marca, actualizando localmente:', err);
+      throw new Error(`Error en Supabase al actualizar marca: ${error.message}`);
+    }
+
+    if (data) {
+      const current = getStoredMarcas();
+      saveStoredMarcas(current.map((m) => (m.id === id ? (data as Marca) : m)));
+      return data as Marca;
     }
   }
 
@@ -197,10 +191,14 @@ export async function actualizarMarca(
 export async function eliminarMarca(id: string): Promise<void> {
   const sb = tryGetSupabase();
   if (sb) {
-    try {
-      await sb.from('marcas').update({ activo: false }).eq('id', id);
-    } catch (err) {
-      console.warn('Fallo Supabase al eliminar marca:', err);
+    const { error } = await sb.from('marcas').update({ activo: false }).eq('id', id);
+    if (error) {
+      if (error.code === '42501') {
+        throw new Error(
+          'Permisos RLS requeridos: ejecuta supabase/migrations/016_politicas_categorias_proveedores.sql en el SQL Editor de Supabase.'
+        );
+      }
+      throw new Error(`Error al eliminar marca en Supabase: ${error.message}`);
     }
   }
 
