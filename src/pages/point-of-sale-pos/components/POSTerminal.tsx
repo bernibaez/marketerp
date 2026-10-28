@@ -227,7 +227,40 @@ export default function POSTerminal() {
     },
   });
 
-  // 6. Scanner, Scale Parser & Global Keyboard Shortcuts Hook
+  // 6. Auxiliary Modals State
+  const [expenseOpen, setExpenseOpen] = useState(false);
+  const [scaleOpen, setScaleOpen] = useState(false);
+  const [scaleParams, setScaleParams] = useState<{
+    productId?: string;
+    weight?: number;
+    product?: any;
+  } | null>(null);
+  const [returnOpen, setReturnOpen] = useState(false);
+  const [registerDetailsOpen, setRegisterDetailsOpen] = useState(false);
+  const [cashSwitchOpen, setCashSwitchOpen] = useState(false);
+  const [openCashModalOpen, setOpenCashModalOpen] = useState(false);
+  const [closeCashModalOpen, setCloseCashModalOpen] = useState(false);
+  const [weightScanOpen, setWeightScanOpen] = useState(false);
+
+  const handleOpenScale = (productId?: string, weight?: number, product?: any) => {
+    const existingInCart = productId
+      ? cart.find(
+          (i) =>
+            i.productId === productId ||
+            (product?.sku && i.sku && i.sku.toLowerCase() === String(product.sku).toLowerCase())
+        )
+      : undefined;
+    const effectiveWeight = weight !== undefined ? weight : existingInCart?.qty ?? 1.0;
+    const effectiveProduct = product || existingInCart;
+    setScaleParams(
+      productId || effectiveWeight || effectiveProduct
+        ? { productId, weight: effectiveWeight, product: effectiveProduct }
+        : null
+    );
+    setScaleOpen(true);
+  };
+
+  // 7. Scanner, Scale Parser & Global Keyboard Shortcuts Hook
   const { searchQuery, setSearchQuery, realScaleCatalog, handleSearchSubmit } = usePOSScanner({
     enabled: cashIsOpen,
     cart,
@@ -242,9 +275,12 @@ export default function POSTerminal() {
     paymentOpen,
     setPaymentOpen,
     openPayment,
+    closePayment,
+    onOpenScale: handleOpenScale,
     clearCart,
   });
 
+<<<<<<< HEAD
   // 7. Auxiliary Modals State
   const [expenseOpen, setExpenseOpen] = useState(false);
   const [scaleOpen, setScaleOpen] = useState(false);
@@ -262,6 +298,8 @@ export default function POSTerminal() {
   const [closeCashModalOpen, setCloseCashModalOpen] = useState(false);
   const [weightScanOpen, setWeightScanOpen] = useState(false);
 
+=======
+>>>>>>> a6ff56f7f6787114b3968b75bb3719634a5ba97c
   // Modal de Descuento Manual para producto en carrito
   const [discountModalOpen, setDiscountModalOpen] = useState(false);
   const [discountTargetProduct, setDiscountTargetProduct] = useState<CartItem | null>(null);
@@ -296,6 +334,7 @@ export default function POSTerminal() {
     setDiscountTargetProduct(null);
   };
 
+<<<<<<< HEAD
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleOpenScale = (productId?: string, weight?: number, product?: any, replaceExisting?: boolean) => {
     setScaleParams(
@@ -306,6 +345,8 @@ export default function POSTerminal() {
     setScaleOpen(true);
   };
 
+=======
+>>>>>>> a6ff56f7f6787114b3968b75bb3719634a5ba97c
   const isAnyModalOpen =
     paymentOpen ||
     expenseOpen ||
@@ -373,7 +414,11 @@ export default function POSTerminal() {
               onUpdateQty={updateQty}
               onUpdateDiscount={updateDiscount}
               onRemove={removeFromCart}
+<<<<<<< HEAD
               onEditWeight={(item) => handleOpenScale(item.productId, item.qty, item, true)}
+=======
+              onEditWeight={(item) => handleOpenScale(item.productId, item.qty, item)}
+>>>>>>> a6ff56f7f6787114b3968b75bb3719634a5ba97c
               onOpenWeightScan={() => setWeightScanOpen(true)}
               globalDiscount={globalDiscount}
               onSetGlobalDiscount={setGlobalDiscount}
@@ -516,7 +561,11 @@ export default function POSTerminal() {
         onCloseScale={() => setScaleOpen(false)}
         scaleParams={scaleParams}
         onConfirmScale={(item, qty) => {
+<<<<<<< HEAD
           addToCart(item, qty, Boolean(scaleParams?.replaceExisting));
+=======
+          addToCart(item, qty, true);
+>>>>>>> a6ff56f7f6787114b3968b75bb3719634a5ba97c
           setScaleOpen(false);
         }}
 

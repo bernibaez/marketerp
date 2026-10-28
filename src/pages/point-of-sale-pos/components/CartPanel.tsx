@@ -21,7 +21,7 @@ import type { CartItem, Customer } from './POSTerminal';
 import { useClientes } from '@/hooks/useClientes';
 import { useProductos } from '@/hooks/useProductos';
 import { initialProducts } from '@/lib/initialProducts';
-import { productMatchesScanCode } from '@/lib/scaleBarcode';
+import { isVariableWeightBarcode, productMatchesScanCode } from '@/lib/scaleBarcode';
 import { obtenerProductos, productoAUi } from '@/services/productos.service';
 import PosAddCustomerModal from './PosAddCustomerModal';
 import { toast } from '@/lib/toast';
@@ -215,23 +215,39 @@ export default function CartPanel({
       p.saleType === 'weight' ||
       (p.unit && (p.unit.toLowerCase().includes('lb') || p.unit.toLowerCase().includes('kg')));
 
+    const unitPrice = Number(
+      p.salePrice && p.salePrice > 0
+        ? p.salePrice
+        : p.pricePerWeight && p.pricePerWeight > 0
+          ? p.pricePerWeight
+          : p.price ?? 0
+    );
+
+    const existingInCart = cart.find(
+      (i) => i.productId === p.id || (p.sku && i.sku && i.sku.toLowerCase() === p.sku.toLowerCase())
+    );
+
     if (isWeight && onEditWeight) {
       onEditWeight({
-        id: `cart-${p.id}-${Date.now()}`,
+        id: existingInCart?.id || `cart-${p.id}-${Date.now()}`,
         productId: p.id,
         name: p.name,
-        sku: p.sku,
+        sku: p.sku || '',
         barcode: p.barcode || '',
-        price: p.salePrice ?? p.price,
-        regularPrice: p.salePrice ?? p.price,
+        price: unitPrice,
+        regularPrice: unitPrice,
         wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
         isWholesale: false,
+<<<<<<< HEAD
         cost: p.costPrice ?? p.cost ?? 0,
+=======
+        cost: Number(p.costPrice ?? p.cost ?? 0),
+>>>>>>> a6ff56f7f6787114b3968b75bb3719634a5ba97c
         tax: Number(p.tax ?? 0),
         image: p.image || '',
-        unit: p.unit || 'lb',
-        qty: 1,
-        discount: 0,
+        unit: p.unit || p.weightUnit || 'lb',
+        qty: existingInCart ? existingInCart.qty : 1,
+        discount: existingInCart?.discount ?? 0,
         isWeighted: true,
       });
     } else if (onAddToCart) {
@@ -239,13 +255,17 @@ export default function CartPanel({
         id: `cart-${p.id}-${Date.now()}`,
         productId: p.id,
         name: p.name,
-        sku: p.sku,
+        sku: p.sku || '',
         barcode: p.barcode || '',
-        price: p.salePrice ?? p.price,
-        regularPrice: p.salePrice ?? p.price,
+        price: unitPrice,
+        regularPrice: unitPrice,
         wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
         isWholesale: false,
+<<<<<<< HEAD
         cost: p.costPrice ?? p.cost ?? 0,
+=======
+        cost: Number(p.costPrice ?? p.cost ?? 0),
+>>>>>>> a6ff56f7f6787114b3968b75bb3719634a5ba97c
         tax: Number(p.tax ?? 0),
         image: p.image || '',
         unit: p.unit || 'Und',
@@ -282,28 +302,35 @@ export default function CartPanel({
       const valueToSubmit = searchQuery.trim();
       if (!valueToSubmit) return;
 
-      // 1. Si el usuario navegó por la lista con las flechas y seleccionó uno:
-      if (dropdownOpen && searchResults.length > 0 && selectedIndex >= 0 && selectedIndex < searchResults.length) {
-        handleSelectProduct(searchResults[selectedIndex]);
+      // 0. Si es una etiqueta de balanza con peso embebido (EAN-13/12 prefijo 20-29),
+      // procesarla directamente con el decodificador de balanza para usar el peso exacto de la etiqueta.
+      if (isVariableWeightBarcode(valueToSubmit) && onSearchSubmit) {
+        if (onSearchChange) onSearchChange('');
+        setDropdownOpen(false);
+        void onSearchSubmit(valueToSubmit);
         return;
       }
 
-      // 2. Si hay coincidencia exacta por código de barras, SKU o PLU en los resultados:
+      // 1. Si hay coincidencia exacta por código de barras, SKU o PLU en los resultados:
       const exact = searchResults.find((p) => productMatchesScanCode(p, valueToSubmit));
       if (exact) {
         handleSelectProduct(exact);
         return;
       }
 
-      // 3. Si no hay coincidencia exacta local, delegar al procesador de escáner global
-      // que incluye decodificación de balanza, consulta a Supabase y combos.
+      // 2. Si la lista desplegable está visible y tiene resultados, seleccionar el ítem resaltado:
+      if (dropdownOpen && searchResults.length > 0 && selectedIndex >= 0 && selectedIndex < searchResults.length) {
+        handleSelectProduct(searchResults[selectedIndex]);
+        return;
+      }
+
+      // 3. Si no hay coincidencia local, delegar al procesador de escáner global (Supabase / combos):
       if (onSearchSubmit) {
         if (onSearchChange) onSearchChange('');
         setDropdownOpen(false);
         const res = onSearchSubmit(valueToSubmit);
         if (res && typeof (res as Promise<any>).then === 'function') {
           void (res as Promise<any>).then((added) => {
-            // Si el escáner no encontró coincidencia exacta y fue un término de búsqueda general (ej. "arroz")
             if (!added && searchResults.length > 0) {
               handleSelectProduct(searchResults[0]);
             }

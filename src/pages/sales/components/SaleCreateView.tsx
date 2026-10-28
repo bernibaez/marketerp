@@ -96,6 +96,10 @@ export const SaleCreateView: React.FC<SaleCreateViewProps> = ({
       toast.error('Agrega al menos un producto al carrito');
       return;
     }
+    if (paymentMethod === 'efectivo' && montoPagado < total) {
+      toast.error('Ingresa el monto de dinero recibido en efectivo (debe cubrir el total)');
+      return;
+    }
 
     const selectedClient = clients.find((c) => c.id === customerId);
 
@@ -257,15 +261,16 @@ export const SaleCreateView: React.FC<SaleCreateViewProps> = ({
                         <td className="px-3 py-2.5 text-center">
                           <input
                             type="number"
-                            min={1}
+                            min={0.001}
+                            step="any"
                             value={item.cantidad}
                             onChange={(e) => {
-                              const val = Math.max(1, Number(e.target.value) || 1);
+                              const val = Math.max(0.001, Number(e.target.value) || 0.001);
                               setCart((prev) =>
                                 prev.map((c, i) => (i === idx ? { ...c, cantidad: val } : c))
                               );
                             }}
-                            className="input-field text-center w-16 py-1.5 text-sm inline-block"
+                            className="input-field text-center w-20 py-1.5 text-sm inline-block"
                           />
                         </td>
                         <td className="px-3 py-2.5 text-right font-bold">
