@@ -8,6 +8,7 @@ import { useDevoluciones } from '@/hooks/useDevoluciones';
 import { useAuth } from '@/context/AuthContext';
 import { hasPermission } from '@/lib/permissionsStore';
 import PosReturnModal from '@/pages/point-of-sale-pos/components/PosReturnModal';
+import { syncInvoiceSettingsFromSupabase } from '@/lib/invoiceSettingsStore';
 
 import type { SalesTab } from './sales/types';
 import { SaleDetailView } from './sales/components/SaleDetailView';
@@ -43,6 +44,10 @@ export default function SalesPage() {
   const canCreateSales = hasPermission(user?.role ?? 'Cajero', 'ventas', 'crear');
   const canExportSales = hasPermission(user?.role ?? 'Cajero', 'ventas', 'exportar');
   const ownCajeroId = !canSeeAllSales ? user?.id : undefined;
+
+  useEffect(() => {
+    void syncInvoiceSettingsFromSupabase();
+  }, []);
 
   useEffect(() => {
     const q = searchParams.get('q');

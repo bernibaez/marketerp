@@ -17,7 +17,7 @@ import PermissionsSettingsTab from './settings/PermissionsSettingsTab';
 import InvoiceSettingsTab from './settings/InvoiceSettingsTab';
 import { obtenerConfiguracionEmpresa, guardarConfiguracionEmpresa } from '@/services/empresa.service';
 import { obtenerSucursales } from '@/services/transferencias.service';
-import { saveInvoiceSettings } from '@/lib/invoiceSettingsStore';
+import { getInvoiceSettings, saveInvoiceSettings } from '@/lib/invoiceSettingsStore';
 
 const settingsSections = [
   { id: 'company', label: 'Empresa', icon: <Building2 size={18} /> },
@@ -127,6 +127,15 @@ export default function SettingsPage() {
   const handleSaveEmpresa = async () => {
     setSavingEmpresa(true);
     try {
+      const invoiceCfg = getInvoiceSettings();
+      const updatedInvoiceCfg = {
+        ...invoiceCfg,
+        companyName: empresaNombre,
+        companyRnc: empresaRnc,
+        companyPhone: empresaTelefono,
+        companyEmail: empresaCorreo,
+        companyAddress: empresaDireccion,
+      };
       await guardarConfiguracionEmpresa({
         nombre_comercial: empresaNombre,
         rnc: empresaRnc,
@@ -135,14 +144,9 @@ export default function SettingsPage() {
         direccion: empresaDireccion,
         moneda: empresaMoneda,
         itbis_porcentaje: parseFloat(empresaItbis) || 18,
+        configuracion_factura: updatedInvoiceCfg,
       });
-      saveInvoiceSettings({
-        companyName: empresaNombre,
-        companyRnc: empresaRnc,
-        companyPhone: empresaTelefono,
-        companyEmail: empresaCorreo,
-        companyAddress: empresaDireccion,
-      });
+      saveInvoiceSettings(updatedInvoiceCfg);
       toast.success('Datos de empresa guardados y sincronizados');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo guardar');

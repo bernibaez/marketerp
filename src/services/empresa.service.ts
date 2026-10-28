@@ -5,15 +5,57 @@ export async function obtenerConfiguracionEmpresa(): Promise<ConfiguracionEmpres
   const sb = tryGetSupabase();
   if (!sb) return null;
 
-  const { data, error } = await sb
+  const columnsWithInvoice =
+    'id, nombre_comercial, razon_social, rnc, telefono, correo, direccion, logo_url, moneda, itbis_porcentaje, configuracion_factura, actualizado_en';
+  const columnsBase =
+    'id, nombre_comercial, razon_social, rnc, telefono, correo, direccion, logo_url, moneda, itbis_porcentaje, actualizado_en';
+
+  let data: any = null;
+  let error: any = null;
+
+  const res1 = await sb
     .from('configuracion_empresa')
-    .select(
-      'id, nombre_comercial, razon_social, rnc, telefono, correo, direccion, logo_url, moneda, itbis_porcentaje, actualizado_en'
-    )
+    .select(columnsWithInvoice)
     .order('actualizado_en', { ascending: false })
     .limit(1)
     .maybeSingle();
+
+  if (
+    res1.error &&
+    (res1.error.code === '42703' ||
+      String(res1.error.message || '').includes('configuracion_factura') ||
+      String(res1.error.details || '').includes('configuracion_factura'))
+  ) {
+    const res2 = await sb
+      .from('configuracion_empresa')
+      .select(columnsBase)
+      .order('actualizado_en', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    data = res2.data;
+    error = res2.error;
+  } else {
+    data = res1.data;
+    error = res1.error;
+  }
+
   if (error) throw error;
+  if (!data) return null;
+
+  // Fallback: si aún no tiene la columna configuracion_factura pero se guardó en razon_social
+  if (
+    !data.configuracion_factura &&
+    typeof data.razon_social === 'string' &&
+    data.razon_social.startsWith('{') &&
+    data.razon_social.includes('printFormat')
+  ) {
+    try {
+      data.configuracion_factura = JSON.parse(data.razon_social);
+    } catch {
+      /* ignore */
+    }
+  }
+
   return (data as ConfiguracionEmpresa) ?? null;
 }
 
@@ -56,6 +98,7 @@ export type DatosEmpresaInput = {
   direccion?: string | null;
   moneda?: string | null;
   itbis_porcentaje?: number | null;
+  configuracion_factura?: Record<string, any> | null;
 };
 
 export async function guardarConfiguracionEmpresa(datos: DatosEmpresaInput): Promise<void> {
@@ -68,7 +111,7 @@ export async function guardarConfiguracionEmpresa(datos: DatosEmpresaInput): Pro
 
   const sb = getSupabase();
   const existing = await obtenerConfiguracionEmpresa();
-  const payload = {
+  const payloadBase: Record<string, any> = {
     nombre_comercial: datos.nombre_comercial.trim(),
     razon_social: datos.razon_social?.trim() || null,
     rnc: datos.rnc?.trim() || null,
@@ -80,15 +123,52 @@ export async function guardarConfiguracionEmpresa(datos: DatosEmpresaInput): Pro
     actualizado_en: new Date().toISOString(),
   };
 
+  const payloadWithInvoice: Record<string, any> = {
+    ...payloadBase,
+    ...(datos.configuracion_factura !== undefined
+      ? { configuracion_factura: datos.configuracion_factura }
+      : {}),
+  };
+
+  let writeError: any = null;
+
+  // 1. Intentar actualizar o insertar con columna configuracion_factura
   if (existing?.id) {
-    const { error } = await sb.from('configuracion_empresa').update(payload).eq('id', existing.id);
-    if (error) throw error;
-    return;
+    const res = await sb.from('configuracion_empresa').update(payloadWithInvoice).eq('id', existing.id);
+    writeError = res.error;
+  } else {
+    const res = await sb.from('configuracion_empresa').insert({
+      ...payloadWithInvoice,
+      logo_url: null,
+    });
+    writeError = res.error;
   }
 
-  const { error } = await sb.from('configuracion_empresa').insert({
-    ...payload,
-    logo_url: null,
-  });
-  if (error) throw error;
+  // 2. Si la columna configuracion_factura no existe aún en Postgres, guardar el JSON en razon_social como respaldo
+  if (
+    writeError &&
+    (writeError.code === '42703' ||
+      String(writeError.message || '').includes('configuracion_factura') ||
+      String(writeError.details || '').includes('configuracion_factura'))
+  ) {
+    const fallbackPayload = {
+      ...payloadBase,
+      razon_social:
+        payloadBase.razon_social ||
+        (datos.configuracion_factura ? JSON.stringify(datos.configuracion_factura) : null),
+    };
+
+    if (existing?.id) {
+      const res = await sb.from('configuracion_empresa').update(fallbackPayload).eq('id', existing.id);
+      writeError = res.error;
+    } else {
+      const res = await sb.from('configuracion_empresa').insert({
+        ...fallbackPayload,
+        logo_url: null,
+      });
+      writeError = res.error;
+    }
+  }
+
+  if (writeError) throw writeError;
 }

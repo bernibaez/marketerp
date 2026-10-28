@@ -22,6 +22,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useProductos } from '@/hooks/useProductos';
 import { useCombos } from '@/hooks/useCombos';
+import { syncInvoiceSettingsFromSupabase } from '@/lib/invoiceSettingsStore';
 
 const ADMIN_OWN_CASH: CashRegisterId = '1';
 const DEFAULT_CASHIER_CASH: CashRegisterId = '2';
@@ -115,6 +116,10 @@ export default function POSTerminal() {
   );
   const [shiftOpenedLocally, setShiftOpenedLocally] = useState(false);
   const [shiftClosedLocally, setShiftClosedLocally] = useState(false);
+
+  useEffect(() => {
+    void syncInvoiceSettingsFromSupabase();
+  }, []);
 
   useEffect(() => {
     if (registers.length === 0) return;

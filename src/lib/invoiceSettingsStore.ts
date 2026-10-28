@@ -1,3 +1,7 @@
+import { isSupabaseConfigured } from '@/services/clienteSupabase';
+import { obtenerConfiguracionEmpresa, guardarConfiguracionEmpresa } from '@/services/empresa.service';
+import { syncCompanyLogoFromDb } from './companyLogo';
+
 export type PrintFormat = 'ticket_80mm' | 'ticket_58mm' | 'full_page' | 'half_page';
 export type TemplateStyle = 'modern' | 'classic' | 'minimal' | 'bold';
 export type FontFamily = 'courier' | 'sans' | 'mono' | 'condensed' | 'consolas' | 'serif';
@@ -179,4 +183,61 @@ export function subscribeInvoiceSettings(callback: () => void): () => void {
   return () => {
     LISTENERS.delete(callback);
   };
+}
+
+/**
+ * Sincroniza la configuración de factura desde Supabase si está disponible.
+ * Actualiza el store local y notifica a todos los componentes escuchando (POS, Ventas, etc.).
+ */
+export async function syncInvoiceSettingsFromSupabase(): Promise<InvoiceSettings> {
+  if (!isSupabaseConfigured()) {
+    return getInvoiceSettings();
+  }
+  try {
+    const cfg = await obtenerConfiguracionEmpresa();
+    void syncCompanyLogoFromDb().catch(() => {});
+    if (!cfg) return getInvoiceSettings();
+
+    const fromDb: Partial<InvoiceSettings> = {
+      companyName: cfg.nombre_comercial?.trim() || undefined,
+      companyRnc: cfg.rnc?.trim() || undefined,
+      companyPhone: cfg.telefono?.trim() || undefined,
+      companyEmail: cfg.correo?.trim() || undefined,
+      companyAddress: cfg.direccion?.trim() || undefined,
+      ...(cfg.configuracion_factura && typeof cfg.configuracion_factura === 'object'
+        ? cfg.configuracion_factura
+        : {}),
+    };
+
+    const clean: Partial<InvoiceSettings> = {};
+    for (const [k, v] of Object.entries(fromDb)) {
+      if (v !== undefined) {
+        (clean as any)[k] = v;
+      }
+    }
+    return saveInvoiceSettings(clean);
+  } catch (err) {
+    console.warn('[invoiceSettingsStore] Error al sincronizar desde Supabase:', err);
+    return getInvoiceSettings();
+  }
+}
+
+/**
+ * Guarda la configuración de factura en localStorage y la persiste en Supabase.
+ */
+export async function saveInvoiceSettingsToSupabase(
+  settings: Partial<InvoiceSettings>
+): Promise<InvoiceSettings> {
+  const updated = saveInvoiceSettings(settings);
+  if (isSupabaseConfigured()) {
+    await guardarConfiguracionEmpresa({
+      nombre_comercial: updated.companyName,
+      rnc: updated.companyRnc,
+      telefono: updated.companyPhone,
+      correo: updated.companyEmail,
+      direccion: updated.companyAddress,
+      configuracion_factura: updated,
+    });
+  }
+  return updated;
 }

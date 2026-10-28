@@ -620,7 +620,27 @@ export async function actualizarProducto(id: string, datos: Partial<Producto>): 
   }
 
   if (!esUuid(id)) {
-    throw new Error('Este producto aún no está en Supabase (id local). Créalo de nuevo para sincronizarlo.');
+    // Si el ID no es un UUID válido (es id local o demo) y Supabase está activo:
+    // 1. Buscamos si ya existe en Supabase por PLU, código de barras o SKU
+    const existingInDb = await buscarProductoExistenteParaImport(datos);
+    if (existingInDb && esUuid(existingInDb.id)) {
+      markProductAsDeleted(id);
+      return actualizarProducto(existingInDb.id, datos);
+    }
+
+    // 2. Si no existe en Supabase, lo creamos para que quede sincronizado en la nube
+    const demoOrLocal =
+      localAsProductos().find((p) => p.id === id) ||
+      demoAsProductos().find((p) => p.id === id);
+
+    const merged = {
+      ...(demoOrLocal ? demoOrLocal : {}),
+      ...datos,
+      nombre: datos.nombre || demoOrLocal?.nombre || 'Producto',
+    };
+    const nuevo = await crearProducto(merged);
+    markProductAsDeleted(id);
+    return nuevo;
   }
   const { id: _omitId, creado_en: _c, ...rest } = datos;
   const updatePayload = sanitizePayloadForPostgres({

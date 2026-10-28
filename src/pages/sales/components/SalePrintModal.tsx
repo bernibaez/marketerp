@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Printer, Receipt, FileText, X, Download } from 'lucide-react';
 import type { Cliente } from '@/types/database';
 import type { VentaConDetalle } from '@/services/ventas.service';
 import PrintableInvoice from '@/components/PrintableInvoice';
-import { getInvoiceSettings, type PrintFormat } from '@/lib/invoiceSettingsStore';
+import { getInvoiceSettings, syncInvoiceSettingsFromSupabase, type PrintFormat } from '@/lib/invoiceSettingsStore';
 import { exportTableToPdf, formatMoneyPdf } from '@/lib/exportPdf';
 
 interface SalePrintModalProps {
@@ -23,6 +23,12 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
   const [printFormat, setPrintFormat] = useState<PrintFormat>(() => {
     return getInvoiceSettings().printFormat;
   });
+
+  useEffect(() => {
+    void syncInvoiceSettingsFromSupabase().then((s) => {
+      setPrintFormat(s.printFormat);
+    });
+  }, []);
 
   return createPortal(
     <div

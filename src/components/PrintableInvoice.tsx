@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   getInvoiceSettings,
   subscribeInvoiceSettings,
+  syncInvoiceSettingsFromSupabase,
   type InvoiceSettings,
   type PrintFormat,
   type FontFamily,
@@ -110,6 +111,10 @@ export default function PrintableInvoice({
   const [logoUrl, setLogoUrl] = useState<string | null>(() => getCompanyLogo());
 
   useEffect(() => {
+    void syncInvoiceSettingsFromSupabase().then((synced) => {
+      setStoreSettings(synced);
+      setLogoUrl(getCompanyLogo());
+    });
     return subscribeInvoiceSettings(() => {
       setStoreSettings(getInvoiceSettings());
       setLogoUrl(getCompanyLogo());

@@ -275,6 +275,8 @@ export interface ConfiguracionEmpresa {
   logo_url: string | null;
   moneda: string;
   itbis_porcentaje: number;
+  configuracion_factura?: Record<string, any> | null;
+  actualizado_en?: string;
 }
 
 export interface Caja {

@@ -3,6 +3,8 @@ import {
   getInvoiceSettings,
   saveInvoiceSettings,
   DEFAULT_INVOICE_SETTINGS,
+  syncInvoiceSettingsFromSupabase,
+  saveInvoiceSettingsToSupabase,
   type InvoiceSettings,
 } from '@/lib/invoiceSettingsStore';
 import { getCompanyLogo, setCompanyLogo, clearCompanyLogo } from '@/lib/companyLogo';
@@ -25,17 +27,9 @@ export default function InvoiceSettingsTab({ onBack, showBackButton = false }: I
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    void obtenerConfiguracionEmpresa()
-      .then((cfg) => {
-        if (!cfg) return;
-        setSettings((prev) => ({
-          ...prev,
-          companyName: cfg.nombre_comercial?.trim() || prev.companyName,
-          companyRnc: cfg.rnc?.trim() || prev.companyRnc,
-          companyPhone: cfg.telefono?.trim() || prev.companyPhone,
-          companyEmail: cfg.correo?.trim() || prev.companyEmail,
-          companyAddress: cfg.direccion?.trim() || prev.companyAddress,
-        }));
+    void syncInvoiceSettingsFromSupabase()
+      .then((synced) => {
+        setSettings(synced);
       })
       .catch(() => {});
   }, []);
@@ -78,28 +72,25 @@ export default function InvoiceSettingsTab({ onBack, showBackButton = false }: I
   const handleSave = async () => {
     setSaving(true);
     try {
-      saveInvoiceSettings(settings);
-      if (isSupabaseConfigured()) {
-        await guardarConfiguracionEmpresa({
-          nombre_comercial: settings.companyName,
-          rnc: settings.companyRnc,
-          telefono: settings.companyPhone,
-          correo: settings.companyEmail,
-          direccion: settings.companyAddress,
-        });
-      }
-      toast.success('Configuración guardada correctamente');
-    } catch {
-      toast.error('Error al guardar la configuración');
+      const saved = await saveInvoiceSettingsToSupabase(settings);
+      setSettings(saved);
+      toast.success('Configuración de factura guardada en Supabase y aplicada al POS y Ventas');
+    } catch (e) {
+      toast.error('Error al guardar la configuración: ' + (e instanceof Error ? e.message : ''));
     } finally {
       setSaving(false);
     }
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     setSettings(DEFAULT_INVOICE_SETTINGS);
-    saveInvoiceSettings(DEFAULT_INVOICE_SETTINGS);
-    toast.info('Valores restablecidos a predeterminados');
+    try {
+      await saveInvoiceSettingsToSupabase(DEFAULT_INVOICE_SETTINGS);
+      toast.info('Valores restablecidos y guardados en Supabase');
+    } catch {
+      saveInvoiceSettings(DEFAULT_INVOICE_SETTINGS);
+      toast.info('Valores restablecidos a predeterminados');
+    }
   };
 
   const handlePrintTest = () => {
