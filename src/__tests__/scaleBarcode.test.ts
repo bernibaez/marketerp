@@ -5,6 +5,7 @@ import {
   normalizePlu,
   isVariableWeightBarcode,
   digitsOnly,
+  productMatchesScanCode,
 } from '@/lib/scaleBarcode';
 
 describe('scaleBarcode (Decodificación de Códigos de Balanza mscale)', () => {
@@ -61,5 +62,29 @@ describe('scaleBarcode (Decodificación de Códigos de Balanza mscale)', () => {
     const decoded = decodeVariableWeightBarcode('7460013201455');
     expect(decoded.isVariableWeight).toBe(false);
     expect(decoded.error).toContain('no corresponde al prefijo de balanza');
+  });
+
+  describe('productMatchesScanCode', () => {
+    it('coincide código exacto por barcode y sku', () => {
+      expect(productMatchesScanCode({ barcode: '750103131130' }, '750103131130')).toBe(true);
+      expect(productMatchesScanCode({ sku: 'PROD-001' }, 'prod-001')).toBe(true);
+    });
+
+    it('coincide UPC-12 con EAN-13 que tiene 0 inicial (ambas direcciones)', () => {
+      // Barcode guardado con 13 dígitos y escaneo con 12
+      expect(productMatchesScanCode({ barcode: '0750103131130' }, '750103131130')).toBe(true);
+      // Barcode guardado con 12 dígitos y escaneo con 13 (lector añade 0)
+      expect(productMatchesScanCode({ barcode: '750103131130' }, '0750103131130')).toBe(true);
+    });
+
+    it('coincide códigos numéricos con y sin ceros a la izquierda', () => {
+      expect(productMatchesScanCode({ barcode: '001234' }, '1234')).toBe(true);
+      expect(productMatchesScanCode({ barcode: '1234' }, '001234')).toBe(true);
+    });
+
+    it('coincide por PLU y código de balanza variable', () => {
+      expect(productMatchesScanCode({ plu: '132' }, '00132')).toBe(true);
+      expect(productMatchesScanCode({ plu: '00132' }, '2000132014558')).toBe(true);
+    });
   });
 });

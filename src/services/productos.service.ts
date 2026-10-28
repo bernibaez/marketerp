@@ -829,6 +829,24 @@ export async function buscarProductoPorCodigoEscaneado(
   }
 
   const orParts = new Set<string>([`codigo_barras.eq.${clean}`, `sku.eq.${clean}`]);
+
+  // Soporte para equivalencias UPC (12 dígitos) y EAN-13 (13 dígitos) y ceros iniciales
+  const digits = clean.replace(/\D/g, '');
+  if (digits.length >= 2) {
+    if (digits.length === 12) {
+      orParts.add(`codigo_barras.eq.0${digits}`);
+      orParts.add(`sku.eq.0${digits}`);
+    } else if (digits.length === 13 && digits.startsWith('0')) {
+      orParts.add(`codigo_barras.eq.${digits.slice(1)}`);
+      orParts.add(`sku.eq.${digits.slice(1)}`);
+    }
+    const noZeros = digits.replace(/^0+/, '');
+    if (noZeros.length >= 3 && noZeros !== digits) {
+      orParts.add(`codigo_barras.eq.${noZeros}`);
+      orParts.add(`sku.eq.${noZeros}`);
+    }
+  }
+
   if (plu) {
     for (const v of variants) {
       orParts.add(`plu.eq.${v}`);
@@ -852,5 +870,23 @@ export async function buscarProductoPorCodigoEscaneado(
   if (error) throw errorSupabase(error);
 
   const rows = (data ?? []) as Producto[];
-  return matchesLocal(rows);
+  const found = matchesLocal(rows);
+  if (found) return found;
+
+  // Fallback con búsqueda ilike por si hay espacios o variaciones guardadas en BD
+  if (clean.length >= 3) {
+    const sanitized = sanitizarBusquedaPostgrest(clean);
+    if (sanitized) {
+      const fallbackQuery = await sb
+        .from('productos')
+        .select('*')
+        .or(`codigo_barras.ilike.%${sanitized}%,sku.ilike.%${sanitized}%`)
+        .limit(10);
+      if (!fallbackQuery.error && fallbackQuery.data && fallbackQuery.data.length > 0) {
+        return matchesLocal(fallbackQuery.data as Producto[]);
+      }
+    }
+  }
+
+  return null;
 }

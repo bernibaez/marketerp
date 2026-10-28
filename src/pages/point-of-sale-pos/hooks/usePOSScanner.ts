@@ -315,6 +315,33 @@ export function usePOSScanner({
           }
         }
 
+        // Si no se encontró en memoria local para quitar, buscar en Supabase
+        try {
+          const fromDb = await buscarProductoPorCodigoEscaneado(q);
+          if (fromDb) {
+            const ui = productoAUi(fromDb);
+            const inCart = cart.find(
+              (i) => i.productId === ui.id || i.sku.toLowerCase() === ui.sku.toLowerCase()
+            );
+            if (inCart) {
+              deductOrRemoveFromCart({
+                productId: ui.id,
+                sku: ui.sku,
+                barcode: ui.barcode || '',
+                name: ui.name,
+              });
+              setSearchQuery('');
+              focusPosBarcodeInput();
+              return true;
+            } else {
+              toast.error(`"${ui.name}" no está en el carrito de compras`);
+              return keepCodeSelected();
+            }
+          }
+        } catch {
+          // continuar
+        }
+
         const activeCombos = combos.filter((c) => c.active);
         let matchedCombo = activeCombos.find(
           (c) =>
@@ -529,6 +556,48 @@ export function usePOSScanner({
         setSearchQuery('');
         focusPosBarcodeInput();
         return true;
+      }
+
+      // Si no se encontró en la memoria local, buscar directamente en Supabase / BD
+      try {
+        const fromDb = await buscarProductoPorCodigoEscaneado(q);
+        if (fromDb) {
+          const ui = productoAUi(fromDb);
+          if (ui.stockStatus === 'out' || ui.currentStock <= 0) {
+            toast.error(`Producto sin stock disponible: ${ui.name}`);
+            return keepCodeSelected();
+          }
+
+          const isWeighted =
+            ui.isWeightProduct ||
+            ui.saleType === 'weight' ||
+            ui.saleType === 'both' ||
+            ui.unit?.toLowerCase().includes('lb') ||
+            ui.unit?.toLowerCase().includes('kg');
+
+          addToCart({
+            id: `cart-${ui.id}-${Date.now()}`,
+            productId: ui.id,
+            name: ui.name,
+            sku: ui.sku,
+            barcode: ui.barcode || '',
+            price: ui.salePrice,
+            regularPrice: ui.salePrice,
+            wholesalePrice: ui.wholesalePrice ? Number(ui.wholesalePrice) : undefined,
+            isWholesale: false,
+            cost: ui.costPrice,
+            tax: ui.tax,
+            image: ui.image || '',
+            unit: ui.unit || 'ud',
+            isWeighted,
+          });
+          toast.success(`Producto agregado: ${ui.name}`);
+          setSearchQuery('');
+          focusPosBarcodeInput();
+          return true;
+        }
+      } catch (err) {
+        console.warn('Error consultando producto escaneado en Supabase:', err);
       }
 
       const activeCombos = combos.filter((c) => c.active);

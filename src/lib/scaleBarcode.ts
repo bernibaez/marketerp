@@ -172,12 +172,50 @@ export function productMatchesScanCode(product: ScalePluIdentity, rawCode: strin
   const sku = String(product.sku ?? '').trim();
   const plu = String(product.plu ?? '').trim();
 
+  // 1. Coincidencia exacta (insensible a mayúsculas)
   if (barcode && barcode.toUpperCase() === upper) return true;
   if (sku && sku.toUpperCase() === upper) return true;
   if (plu && (plu.toUpperCase() === upper || normalizePlu(plu) === normalizePlu(clean))) return true;
 
+  // 2. Coincidencia por PLU o código de balanza
   const extracted = extractPluFromCode(clean);
   if (extracted && productMatchesPlu(product, extracted)) return true;
+
+  // 3. Normalización de códigos numéricos (UPC-A de 12 dígitos vs EAN-13 de 13 dígitos y ceros a la izquierda)
+  const cleanDigits = digitsOnly(clean);
+  if (cleanDigits && cleanDigits.length >= 2) {
+    const cleanNoZeros = cleanDigits.replace(/^0+/, '');
+
+    // Comparar contra barcode numérico
+    const barcodeDigits = digitsOnly(barcode);
+    if (barcodeDigits && barcodeDigits.length >= 2) {
+      // UPC (12 dígitos) vs EAN (13 dígitos con 0 inicial)
+      if (
+        (cleanDigits.length === 12 && barcodeDigits === '0' + cleanDigits) ||
+        (barcodeDigits.length === 12 && cleanDigits === '0' + barcodeDigits)
+      ) {
+        return true;
+      }
+      // Mismos dígitos significativos (ej. "00123" vs "123") si tienen al menos 3 dígitos
+      if (cleanNoZeros.length >= 3 && cleanNoZeros === barcodeDigits.replace(/^0+/, '')) {
+        return true;
+      }
+    }
+
+    // Comparar contra SKU si el SKU es numérico
+    const skuDigits = digitsOnly(sku);
+    if (skuDigits && skuDigits.length >= 2) {
+      if (
+        (cleanDigits.length === 12 && skuDigits === '0' + cleanDigits) ||
+        (skuDigits.length === 12 && cleanDigits === '0' + skuDigits)
+      ) {
+        return true;
+      }
+      if (cleanNoZeros.length >= 3 && cleanNoZeros === skuDigits.replace(/^0+/, '')) {
+        return true;
+      }
+    }
+  }
 
   return false;
 }

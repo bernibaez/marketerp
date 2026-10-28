@@ -18,6 +18,7 @@ import type { CartItem, Customer } from './POSTerminal';
 import { useClientes } from '@/hooks/useClientes';
 import { useProductos } from '@/hooks/useProductos';
 import { initialProducts } from '@/lib/initialProducts';
+import { productMatchesScanCode } from '@/lib/scaleBarcode';
 import PosAddCustomerModal from './PosAddCustomerModal';
 import { toast } from '@/lib/toast';
 import type { NCFType } from '@/lib/ncfStore';
@@ -87,7 +88,7 @@ export default function CartPanel({
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
-  const { productosUi } = useProductos({ pagina: 1, limite: 200, estado: 'todos' });
+  const { productosUi } = useProductos({ pagina: 1, limite: 500, estado: 'todos' });
 
   // Merge store products and initialProducts for comprehensive local search matching
   const allProducts = useMemo(() => {
@@ -109,7 +110,8 @@ export default function CartPanel({
       const name = (p.name || '').toLowerCase();
       const sku = (p.sku || '').toLowerCase();
       const barcode = (p.barcode || '').toLowerCase();
-      return name.includes(q) || sku.includes(q) || barcode.includes(q);
+      const plu = (p.plu || '').toLowerCase();
+      return name.includes(q) || sku.includes(q) || barcode.includes(q) || plu.includes(q);
     }).slice(0, 15);
   }, [searchQuery, allProducts]);
 
@@ -173,22 +175,35 @@ export default function CartPanel({
     if (e.key === 'Enter') {
       e.preventDefault();
       e.stopPropagation();
-      if (searchResults.length > 0) {
-        const qTrim = searchQuery.trim().toLowerCase();
-        const exact = searchResults.find(
-          (p) =>
-            (p.barcode && p.barcode.toLowerCase() === qTrim) ||
-            (p.sku && p.sku.toLowerCase() === qTrim)
-        );
-        handleSelectProduct(exact || searchResults[0]);
-        return;
-      }
       const valueToSubmit = searchQuery.trim();
       if (!valueToSubmit) return;
-      if (onSearchChange) onSearchChange('');
-      setDropdownOpen(false);
+
+      // 1. Si hay coincidencia exacta por código de barras, SKU o PLU en la lista en memoria:
+      const exact = searchResults.find((p) => productMatchesScanCode(p, valueToSubmit));
+      if (exact) {
+        handleSelectProduct(exact);
+        return;
+      }
+
+      // 2. Si no hay coincidencia exacta local, delegar al procesador de escáner global
+      // que incluye decodificación de balanza, consulta a Supabase y combos.
       if (onSearchSubmit) {
-        void onSearchSubmit(valueToSubmit);
+        if (onSearchChange) onSearchChange('');
+        setDropdownOpen(false);
+        const res = onSearchSubmit(valueToSubmit);
+        if (res && typeof (res as Promise<any>).then === 'function') {
+          void (res as Promise<any>).then((added) => {
+            // Si el escáner no encontró coincidencia exacta y fue un término de búsqueda general (ej. "arroz")
+            if (!added && searchResults.length > 0) {
+              handleSelectProduct(searchResults[0]);
+            }
+          });
+        }
+        return;
+      }
+
+      if (searchResults.length > 0) {
+        handleSelectProduct(searchResults[0]);
       }
     } else if (e.key === 'Escape') {
       setDropdownOpen(false);
