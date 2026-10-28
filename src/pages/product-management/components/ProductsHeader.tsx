@@ -1,10 +1,12 @@
 import React from 'react';
-import { Package, Download, Plus, FileText } from 'lucide-react';
+import { Package, Download, Plus, FileText, Tag, Award } from 'lucide-react';
 
 interface ProductsHeaderProps {
   onAdd: () => void;
   onExport: () => void;
   onImport?: () => void;
+  onManageCategories?: () => void;
+  onManageBrands?: () => void;
   totalProducts: number;
   activeProducts: number;
   lowStockCount: number;
@@ -14,6 +16,8 @@ export default function ProductsHeader({
   onAdd,
   onExport,
   onImport,
+  onManageCategories,
+  onManageBrands,
 }: ProductsHeaderProps) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -27,6 +31,26 @@ export default function ProductsHeader({
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        {onManageCategories && (
+          <button
+            type="button"
+            onClick={onManageCategories}
+            className="btn-secondary flex items-center gap-1.5 text-xs font-semibold hover:border-primary/50 transition-colors"
+            title="Administrar categorías reales de productos"
+          >
+            <Tag size={14} className="text-primary" /> Categorías
+          </button>
+        )}
+        {onManageBrands && (
+          <button
+            type="button"
+            onClick={onManageBrands}
+            className="btn-secondary flex items-center gap-1.5 text-xs font-semibold hover:border-primary/50 transition-colors"
+            title="Administrar marcas registradas de productos"
+          >
+            <Award size={14} className="text-primary" /> Marcas
+          </button>
+        )}
         <button type="button" onClick={onExport} className="btn-secondary flex items-center gap-1.5 text-xs font-semibold">
           <Download size={14} /> Exportar PDF
         </button>
@@ -40,3 +64,4 @@ export default function ProductsHeader({
     </div>
   );
 }
+

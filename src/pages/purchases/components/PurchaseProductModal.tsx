@@ -39,6 +39,8 @@ interface PurchaseProductModalProps {
   setModalPrice: (v: number) => void;
   modalSalePrice: number;
   setModalSalePrice: (v: number) => void;
+  modalWholesalePrice: number;
+  setModalWholesalePrice: (v: number) => void;
   newName: string;
   setNewName: (v: string) => void;
   newSku: string;
@@ -81,6 +83,8 @@ export function PurchaseProductModal({
   setModalPrice,
   modalSalePrice,
   setModalSalePrice,
+  modalWholesalePrice,
+  setModalWholesalePrice,
   newName,
   setNewName,
   newSku,
@@ -300,6 +304,7 @@ export function PurchaseProductModal({
                               setSelectedProduct(p);
                               setModalPrice(p.costPrice || 0);
                               setModalSalePrice(p.salePrice || 0);
+                              setModalWholesalePrice(p.wholesalePrice || p.salePrice || 0);
                             }}
                             className={`px-4 py-3 flex items-center justify-between cursor-pointer transition-all gap-3 ${
                               isSelected
@@ -328,6 +333,9 @@ export function PurchaseProductModal({
                               </p>
                               <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold tabular-nums">
                                 Venta: RD$ {(p.salePrice || 0).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                              </p>
+                              <p className="text-[10px] text-amber-600 dark:text-amber-400 font-bold tabular-nums">
+                                Mayor: RD$ {(p.wholesalePrice || 0).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                               </p>
                             </div>
                           </div>
@@ -454,7 +462,7 @@ export function PurchaseProductModal({
             <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
               Cantidad y precios (editables)
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
                 <label className="block text-sm font-bold text-foreground mb-1.5">
                   Cantidad <span className="text-danger">*</span>
@@ -543,6 +551,31 @@ export function PurchaseProductModal({
                 {selectedProduct && (
                   <span className="text-xs text-muted-foreground mt-1.5 block text-right">
                     Catálogo: RD$ {(selectedProduct.salePrice || 0).toLocaleString('es-DO')}
+                  </span>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-amber-600 dark:text-amber-400 mb-1.5">
+                  Precio al por mayor <span className="text-danger">*</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-amber-600/70">
+                    RD$
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={modalWholesalePrice || ''}
+                    onChange={(e) => setModalWholesalePrice(Number(e.target.value))}
+                    placeholder="0.00"
+                    className="input-field text-base font-black text-right h-12 tabular-nums pl-14 border-amber-500/40 text-amber-600 dark:text-amber-400"
+                  />
+                </div>
+                {selectedProduct && (
+                  <span className="text-xs text-muted-foreground mt-1.5 block text-right">
+                    Catálogo: RD$ {(selectedProduct.wholesalePrice || 0).toLocaleString('es-DO')}
                   </span>
                 )}
               </div>

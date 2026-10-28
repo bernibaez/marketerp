@@ -88,7 +88,15 @@ export function usePOSCart() {
   );
 
   const addToCart = useCallback(
-    (product: Omit<CartItem, 'qty' | 'discount'>, qty = 1) => {
+    (
+      product: Omit<CartItem, 'qty' | 'discount'> & {
+        discount?: number;
+        discountType?: 'fixed' | 'percentage';
+        discountValue?: number;
+        professionalDiscount?: number;
+      },
+      qty = 1
+    ) => {
       if (
         product.sku.toUpperCase() === DELETE_SKU ||
         product.sku.toUpperCase() === 'ELIMINAR' ||
@@ -115,7 +123,15 @@ export function usePOSCart() {
         if (existing) {
           return prev.map((item) =>
             item.productId === product.productId || item.sku === product.sku
-              ? { ...item, qty: Math.round((item.qty + qty) * 100) / 100 }
+              ? {
+                  ...item,
+                  qty: Math.round((item.qty + qty) * 100) / 100,
+                  price: product.price ?? item.price,
+                  discount: product.discount !== undefined ? product.discount : item.discount,
+                  discountType: product.discountType ?? item.discountType,
+                  discountValue: product.discountValue ?? item.discountValue,
+                  professionalDiscount: product.professionalDiscount ?? item.professionalDiscount,
+                }
               : item
           );
         }
@@ -132,13 +148,17 @@ export function usePOSCart() {
             wholesalePrice,
             isWholesale: product.isWholesale ?? false,
             qty,
-            discount: 0,
+            discount: product.discount ?? 0,
+            discountType: product.discountType ?? 'fixed',
+            discountValue: product.discountValue ?? (product.discount ? (product.discount * product.price) / 100 : 0),
+            professionalDiscount: product.professionalDiscount ?? 0,
           },
         ];
       });
     },
     [awaitingDeleteScan, deductOrRemoveFromCart, toggleDeleteMode]
   );
+
 
   const toggleWholesalePrice = useCallback((cartId: string) => {
     setCart((prev) =>
@@ -217,6 +237,47 @@ export function usePOSCart() {
     );
   }, []);
 
+  const updateItemDiscountAndPrice = useCallback(
+    (
+      cartId: string,
+      details: {
+        price?: number;
+        qty?: number;
+        discountType: 'fixed' | 'percentage';
+        discountValue: number;
+        professionalDiscount?: number;
+      }
+    ) => {
+      setCart((prev) =>
+        prev.map((item) => {
+          if (item.id !== cartId) return item;
+          const price = details.price !== undefined ? Math.max(0, details.price) : item.price;
+          const qty = details.qty !== undefined ? Math.max(0, details.qty) : item.qty;
+          const discountValue = Math.max(0, details.discountValue || 0);
+          const professionalDiscount = Math.max(0, details.professionalDiscount || 0);
+
+          let effectivePct = 0;
+          if (details.discountType === 'percentage') {
+            effectivePct = Math.min(100, Math.max(0, discountValue));
+          } else {
+            effectivePct = price > 0 ? Math.min(100, Math.max(0, (discountValue / price) * 100)) : 0;
+          }
+
+          return {
+            ...item,
+            price,
+            qty,
+            discount: effectivePct,
+            discountType: details.discountType,
+            discountValue,
+            professionalDiscount,
+          };
+        })
+      );
+    },
+    []
+  );
+
   const removeFromCart = useCallback((cartId: string) => {
     setCart((prev) => prev.filter((item) => item.id !== cartId));
   }, []);
@@ -257,6 +318,7 @@ export function usePOSCart() {
     deductOrRemoveFromCart,
     updateQty,
     updateDiscount,
+    updateItemDiscountAndPrice,
     removeFromCart,
     clearCart,
     toggleWholesalePrice,

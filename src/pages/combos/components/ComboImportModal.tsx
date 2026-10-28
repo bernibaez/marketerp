@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Upload, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Combo, DEFAULT_COMBOS, saveCombos, getCombos } from '@/lib/comboStore';
 import { toast } from '@/lib/toast';
@@ -60,8 +61,8 @@ export default function ComboImportModal({
     onClose();
   };
 
-  return (
-    <div className="dialog-inline-host">
+  const modalContent = (
+    <div className="dialog-inline-host !z-[9999]">
       <div className="bg-card w-full max-w-lg rounded-3xl border border-border/80 shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <div className="flex items-center justify-between p-6 border-b border-border/80 bg-secondary/30">
           <div className="flex items-center gap-3">
@@ -153,4 +154,6 @@ export default function ComboImportModal({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }

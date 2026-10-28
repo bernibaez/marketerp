@@ -22,6 +22,9 @@ import type { Product } from '@/lib/initialProducts';
 export type { Product };
 import { ProductDetailModal } from './ProductDetailModal';
 import OperationProgressModal, { type OperationProgressState } from './OperationProgressModal';
+import CategoryManagementModal from './CategoryManagementModal';
+import BrandManagementModal from './BrandManagementModal';
+import { useCategorias } from '@/hooks/useCategorias';
 
 export default function ProductManagementScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -41,6 +44,10 @@ export default function ProductManagementScreen() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [labelModalProducts, setLabelModalProducts] = useState<Product[] | null>(null);
   const [operationProgress, setOperationProgress] = useState<OperationProgressState | null>(null);
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [brandModalOpen, setBrandModalOpen] = useState(false);
+
+  const { categorias } = useCategorias();
 
   const estadoDb =
     filterStatus === 'active'
@@ -473,6 +480,8 @@ export default function ProductManagementScreen() {
           setImportIsScaleMode(true);
           setImportModalOpen(true);
         }}
+        onManageCategories={() => setCategoryModalOpen(true)}
+        onManageBrands={() => setBrandModalOpen(true)}
         totalProducts={products.length}
         activeProducts={products.filter((p) => p.status === 'active').length}
         lowStockCount={products.filter((p) => p.stockStatus === 'low' || p.stockStatus === 'out').length}
@@ -558,6 +567,7 @@ export default function ProductManagementScreen() {
         onSearch={setSearch}
         filterCategory={filterCategory}
         onFilterCategory={setFilterCategory}
+        categoriesList={categorias.map((c) => c.nombre)}
         filterStatus={filterStatus}
         onFilterStatus={setFilterStatus}
         filterStock={filterStock}
@@ -635,6 +645,20 @@ export default function ProductManagementScreen() {
         <OperationProgressModal
           {...operationProgress}
           onClose={() => setOperationProgress(null)}
+        />
+      )}
+
+      {categoryModalOpen && (
+        <CategoryManagementModal
+          open={categoryModalOpen}
+          onClose={() => setCategoryModalOpen(false)}
+        />
+      )}
+
+      {brandModalOpen && (
+        <BrandManagementModal
+          open={brandModalOpen}
+          onClose={() => setBrandModalOpen(false)}
         />
       )}
     </div>

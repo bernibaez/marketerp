@@ -6,6 +6,7 @@ interface ProductsToolbarProps {
   onSearch: (v: string) => void;
   filterCategory: string;
   onFilterCategory: (v: string) => void;
+  categoriesList?: string[];
   filterStatus: string;
   onFilterStatus: (v: string) => void;
   filterStock: string;
@@ -19,7 +20,8 @@ interface ProductsToolbarProps {
   onExportExcel?: () => void;
 }
 
-const categories = ['all', 'Granos', 'Lácteos', 'Carnes', 'Bebidas', 'Limpieza', 'Panadería', 'Frutas', 'Snacks'];
+const DEFAULT_CATEGORIES = ['all', 'Abarrotes y Granos', 'Lácteos y Huevos', 'Carnes y Embutidos', 'Bebidas y Refrescos', 'Limpieza y Hogar', 'Panadería y Repostería', 'Frutas y Vegetales', 'Snacks y Golosinas', 'Cuidado Personal'];
+
 const statuses = [
   { value: 'all', label: 'Todos los estados' },
   { value: 'active', label: 'Activo' },
@@ -34,12 +36,16 @@ const stockStatuses = [
 ];
 
 export default function ProductsToolbar({
-  search, onSearch, filterCategory, onFilterCategory,
+  search, onSearch, filterCategory, onFilterCategory, categoriesList,
   filterStatus, onFilterStatus, filterStock, onFilterStock,
   selectedCount, onBulkDelete, onPrintSelectedLabels, totalFiltered,
   onExportPdf, onExportExcel,
 }: ProductsToolbarProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const availableCategories = categoriesList && categoriesList.length > 0
+    ? ['all', ...categoriesList.filter((c) => c !== 'all')]
+    : DEFAULT_CATEGORIES;
 
   const activeFilters = [
     filterCategory !== 'all' && filterCategory,
@@ -80,7 +86,7 @@ export default function ProductsToolbar({
               onChange={(e) => onFilterCategory(e.target.value)}
               className="input-field pr-8 appearance-none"
             >
-              {categories.map((cat) => (
+              {availableCategories.map((cat) => (
                 <option key={`cat-filter-${cat}`} value={cat}>
                   {cat === 'all' ? 'Todas las categorías' : cat}
                 </option>

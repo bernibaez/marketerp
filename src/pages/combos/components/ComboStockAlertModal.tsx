@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { AlertOctagon, X, PackageX, Lock } from 'lucide-react';
 
 interface MissingStockItem {
@@ -24,9 +25,12 @@ export default function ComboStockAlertModal({
 }: ComboStockAlertModalProps) {
   if (!isOpen) return null;
 
-  return (
-    <div className="dialog-inline-host">
-      <div className="bg-card w-full max-w-md rounded-3xl border border-danger/40 shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+  const modalContent = (
+    <div className="dialog-inline-host !z-[9999]" onClick={onClose}>
+      <div
+        className="bg-card w-full max-w-md rounded-3xl border border-danger/40 shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Modal Top Header */}
         <div className="bg-danger/10 p-6 border-b border-danger/20 text-center space-y-2">
           <div className="w-14 h-14 rounded-full bg-danger/20 text-danger flex items-center justify-center mx-auto shadow-xs">
@@ -86,4 +90,6 @@ export default function ComboStockAlertModal({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }

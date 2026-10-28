@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X, Printer, Download, FileText, CheckCircle2, Building2, Copy, Check,
   Receipt, ShieldCheck, Calendar, User, ArrowRight, Sparkles
@@ -50,8 +51,8 @@ export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceMo
     });
   };
 
-  return (
-    <div className="dialog-inline-host print:p-0 print:bg-white print:static">
+  const modalContent = (
+    <div className="dialog-inline-host !z-[9999] print:p-0 print:bg-white print:static">
       <div
         ref={modalRef}
         className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-800 overflow-hidden flex flex-col max-h-[95vh] print:max-h-none print:shadow-none print:border-none print:w-full text-slate-800 dark:text-slate-200"
@@ -182,4 +183,6 @@ export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceMo
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }

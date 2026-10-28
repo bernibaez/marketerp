@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { X, Layers, Package } from 'lucide-react';
 import { Combo } from '@/lib/comboStore';
 
@@ -23,8 +24,8 @@ export default function ComboDetailModal({
   const costVal = combo.totalCost ?? combo.items.reduce((s, i) => s + (i.costPrice || 0) * i.quantity, 0);
   const profitVal = combo.price - costVal;
 
-  return (
-    <div className="dialog-inline-host">
+  const modalContent = (
+    <div className="dialog-inline-host !z-[9999]" onClick={onClose}>
       <div
         className="card w-full max-w-xl my-auto max-h-[90vh] overflow-y-auto p-6 space-y-4 shadow-2xl border-primary/20"
         onClick={(e) => e.stopPropagation()}
@@ -166,4 +167,6 @@ export default function ComboDetailModal({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }

@@ -170,6 +170,13 @@ export interface AjusteStock {
   motivo: string;
   responsable_id: string | null;
   creado_en: string;
+  productos?: {
+    id: string;
+    nombre: string;
+    sku: string;
+    categoria?: string;
+    unidad?: string;
+  } | null;
 }
 
 export interface CierreCaja {

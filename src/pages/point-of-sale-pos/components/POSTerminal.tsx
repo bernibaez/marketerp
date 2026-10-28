@@ -8,6 +8,7 @@ import PaymentPanel from './PaymentPanel';
 import { POSBottomBar } from './POSBottomBar';
 import { POSModals } from './POSModals';
 import PosCashOpenModal from './PosCashOpenModal';
+import PosProductDiscountModal, { type PosProductDiscountData } from './PosProductDiscountModal';
 
 import { usePOSCart } from '../hooks/usePOSCart';
 import { usePOSHeldSales } from '../hooks/usePOSHeldSales';
@@ -38,6 +39,9 @@ export interface CartItem {
   cost: number;
   qty: number;
   discount: number;
+  discountType?: 'fixed' | 'percentage';
+  discountValue?: number;
+  professionalDiscount?: number;
   tax: number;
   image: string;
   unit: string;
@@ -88,6 +92,7 @@ export default function POSTerminal() {
     deductOrRemoveFromCart,
     updateQty,
     updateDiscount,
+    updateItemDiscountAndPrice,
     removeFromCart,
     clearCart,
     toggleWholesalePrice,
@@ -235,6 +240,30 @@ export default function POSTerminal() {
   const [closeCashModalOpen, setCloseCashModalOpen] = useState(false);
   const [weightScanOpen, setWeightScanOpen] = useState(false);
 
+  // Modal de Descuento Manual para producto en carrito
+  const [discountModalOpen, setDiscountModalOpen] = useState(false);
+  const [discountTargetProduct, setDiscountTargetProduct] = useState<CartItem | null>(null);
+
+  const handleOpenCartItemDiscount = (item: CartItem) => {
+    setDiscountTargetProduct(item);
+    setDiscountModalOpen(true);
+  };
+
+  const handleConfirmDiscount = (data: PosProductDiscountData) => {
+    if (!discountTargetProduct) return;
+
+    updateItemDiscountAndPrice(discountTargetProduct.id, {
+      price: data.price,
+      qty: data.qty,
+      discountType: data.discountType,
+      discountValue: data.discountValue,
+      professionalDiscount: data.professionalDiscount,
+    });
+    toast.success(`Descuento actualizado para "${discountTargetProduct.name}"`);
+    setDiscountModalOpen(false);
+    setDiscountTargetProduct(null);
+  };
+
   const handleOpenScale = (productId?: string, weight?: number) => {
     setScaleParams(productId || weight ? { productId, weight } : null);
     setScaleOpen(true);
@@ -251,6 +280,7 @@ export default function POSTerminal() {
     openCashModalOpen ||
     closeCashModalOpen ||
     weightScanOpen ||
+    discountModalOpen ||
     Boolean(lastFiscalInvoice);
 
   return (
@@ -326,6 +356,7 @@ export default function POSTerminal() {
               onCancelDelete={handleCancelDeleteMode}
               onToggleWholesale={toggleWholesalePrice}
               onToggleAllWholesale={toggleAllWholesale}
+              onOpenDiscountModal={handleOpenCartItemDiscount}
             />
           </div>
 
@@ -524,6 +555,18 @@ export default function POSTerminal() {
           );
         }}
       />
+
+      <PosProductDiscountModal
+        open={discountModalOpen}
+        onClose={() => {
+          setDiscountModalOpen(false);
+          setDiscountTargetProduct(null);
+        }}
+        product={discountTargetProduct}
+        onConfirm={handleConfirmDiscount}
+        isExistingCartItem={true}
+      />
     </div>
   );
 }
+

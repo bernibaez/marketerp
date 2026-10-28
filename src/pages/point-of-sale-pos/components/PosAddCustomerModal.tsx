@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, UserPlus, Building2, Check, FileText } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { crearCliente } from '@/services/clientes.service';
@@ -89,8 +90,8 @@ export default function PosAddCustomerModal({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4" onClick={onClose}>
+  const modalContent = (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
       <div
         className="card w-full max-w-lg p-6 sm:p-7 space-y-4 modal-panel shadow-2xl max-h-[95vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
@@ -241,4 +242,6 @@ export default function PosAddCustomerModal({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }

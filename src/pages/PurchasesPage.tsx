@@ -64,6 +64,7 @@ export default function PurchasesPage() {
     handleUpdateLineQty,
     handleUpdateLinePrice,
     handleUpdateLineSalePrice,
+    handleUpdateLineWholesalePrice,
     handleRemoveLine,
     addProductDirectlyToPurchase,
     clearItems,
@@ -93,6 +94,8 @@ export default function PurchasesPage() {
     setModalPrice,
     modalSalePrice,
     setModalSalePrice,
+    modalWholesalePrice,
+    setModalWholesalePrice,
     lastAddedNotice,
     setLastAddedNotice,
     newName,
@@ -244,6 +247,7 @@ export default function PurchasesPage() {
           cantidad: item.qty,
           precio_costo: item.price,
           precio_venta: item.salePrice,
+          precio_mayorista: item.wholesalePrice,
           porcentaje_impuesto: item.taxPercent,
         })),
       });
@@ -359,6 +363,7 @@ export default function PurchasesPage() {
           onUpdateLineQty={handleUpdateLineQty}
           onUpdateLinePrice={handleUpdateLinePrice}
           onUpdateLineSalePrice={handleUpdateLineSalePrice}
+          onUpdateLineWholesalePrice={handleUpdateLineWholesalePrice}
           onRemoveLine={handleRemoveLine}
           onSavePurchase={handleSavePurchase}
           saving={saving}
@@ -399,6 +404,8 @@ export default function PurchasesPage() {
           setModalPrice={setModalPrice}
           modalSalePrice={modalSalePrice}
           setModalSalePrice={setModalSalePrice}
+          modalWholesalePrice={modalWholesalePrice}
+          setModalWholesalePrice={setModalWholesalePrice}
           newName={newName}
           setNewName={setNewName}
           newSku={newSku}

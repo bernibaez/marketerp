@@ -78,6 +78,17 @@ export async function procesarAjusteStockBloque(
     });
   }
 
+  // Sincronizar el store local de productos para mantener la UI al día
+  items.forEach((it) => {
+    if (it.cantidad_nueva != null) {
+      const stored = getStoredProducts().find((p) => p.id === it.producto_id || p.sku === it.producto_id);
+      if (stored) {
+        const delta = it.cantidad_nueva - stored.currentStock;
+        updateProductStockInStore(stored.id, delta);
+      }
+    }
+  });
+
   return { ajustes: dbCount + nonUuidItems.length, ids: dbIds };
 }
 
@@ -103,15 +114,27 @@ export async function obtenerHistorialAjustes(params: {
         tipo_ajuste: a.type,
         cantidad_anterior: a.previousQty,
         cantidad_nueva: a.newQty,
-        cantidad_variacion: a.qty,
+        cantidad_variacion: a.type === 'entrada' ? a.qty : -Math.abs(a.qty),
         motivo: a.reason,
         responsable_id: null,
         creado_en: a.date,
+        productos: {
+          id: a.productId,
+          nombre: a.productName,
+          sku: a.sku,
+          categoria: a.category,
+        },
       })
     );
     if (params.busqueda?.trim()) {
       const q = params.busqueda.trim().toLowerCase();
-      list = list.filter((a) => a.codigo.toLowerCase().includes(q) || a.motivo.toLowerCase().includes(q));
+      list = list.filter(
+        (a) =>
+          a.codigo.toLowerCase().includes(q) ||
+          a.motivo.toLowerCase().includes(q) ||
+          (a.productos?.nombre && a.productos.nombre.toLowerCase().includes(q)) ||
+          (a.productos?.sku && a.productos.sku.toLowerCase().includes(q))
+      );
     }
     if (params.tipo && params.tipo !== 'todos') {
       list = list.filter((a) => a.tipo_ajuste === params.tipo);
@@ -121,7 +144,13 @@ export async function obtenerHistorialAjustes(params: {
 
   let query = sb
     .from('ajustes_stock')
-    .select(AJUSTE_COLUMNS, { count: 'exact' })
+    .select(
+      `
+      id, codigo, producto_id, tipo_ajuste, cantidad_anterior, cantidad_nueva, cantidad_variacion, motivo, responsable_id, creado_en,
+      productos ( id, nombre, sku, categoria, unidad )
+    `,
+      { count: 'exact' }
+    )
     .order('creado_en', { ascending: false })
     .range(desde, hasta);
 
@@ -135,6 +164,49 @@ export async function obtenerHistorialAjustes(params: {
   if (params.signal) query = query.abortSignal(params.signal);
 
   const { data, error, count } = await query;
-  if (error) throw error;
-  return { datos: (data ?? []) as AjusteStock[], total: count ?? 0 };
+  if (error) {
+    // Si falla el join por restricciones de RLS, reintentar con columnas simples
+    const fallbackQuery = sb
+      .from('ajustes_stock')
+      .select(AJUSTE_COLUMNS, { count: 'exact' })
+      .order('creado_en', { ascending: false })
+      .range(desde, hasta);
+    if (params.busqueda?.trim()) {
+      const q = params.busqueda.trim();
+      fallbackQuery.or(`codigo.ilike.%${q}%,motivo.ilike.%${q}%`);
+    }
+    if (params.tipo && params.tipo !== 'todos') {
+      fallbackQuery.eq('tipo_ajuste', params.tipo);
+    }
+    const { data: fbData, error: fbErr, count: fbCount } = await fallbackQuery;
+    if (fbErr) throw fbErr;
+    return { datos: (fbData ?? []) as AjusteStock[], total: fbCount ?? 0 };
+  }
+
+  const datos = (data ?? []).map((row: any): AjusteStock => {
+    const prod = Array.isArray(row.productos) ? row.productos[0] : row.productos;
+    return {
+      id: row.id,
+      codigo: row.codigo,
+      producto_id: row.producto_id,
+      tipo_ajuste: row.tipo_ajuste,
+      cantidad_anterior: Number(row.cantidad_anterior ?? 0),
+      cantidad_nueva: Number(row.cantidad_nueva ?? 0),
+      cantidad_variacion: Number(row.cantidad_variacion ?? 0),
+      motivo: row.motivo ?? '',
+      responsable_id: row.responsable_id ?? null,
+      creado_en: row.creado_en,
+      productos: prod
+        ? {
+            id: prod.id,
+            nombre: prod.nombre,
+            sku: prod.sku,
+            categoria: prod.categoria,
+            unidad: prod.unidad,
+          }
+        : null,
+    };
+  });
+
+  return { datos, total: count ?? 0 };
 }

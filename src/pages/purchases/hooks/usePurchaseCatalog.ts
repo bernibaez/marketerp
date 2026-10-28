@@ -10,7 +10,8 @@ interface UsePurchaseCatalogOptions {
     qty?: number,
     customPrice?: number,
     customSalePrice?: number,
-    customTax?: number
+    customTax?: number,
+    customWholesalePrice?: number
   ) => void;
 }
 
@@ -31,6 +32,7 @@ export function usePurchaseCatalog({ onAddProductDirectly }: UsePurchaseCatalogO
   const [modalQty, setModalQty] = useState<number>(1);
   const [modalPrice, setModalPrice] = useState<number>(0);
   const [modalSalePrice, setModalSalePrice] = useState<number>(0);
+  const [modalWholesalePrice, setModalWholesalePrice] = useState<number>(0);
   const [lastAddedNotice, setLastAddedNotice] = useState<string | null>(null);
 
   // New Product Form State
@@ -205,6 +207,7 @@ export function usePurchaseCatalog({ onAddProductDirectly }: UsePurchaseCatalogO
     setModalQty(1);
     setModalPrice(0);
     setModalSalePrice(0);
+    setModalWholesalePrice(0);
     setModalSearch('');
     setDebouncedSearch('');
     setNewName('');
@@ -258,12 +261,20 @@ export function usePurchaseCatalog({ onAddProductDirectly }: UsePurchaseCatalogO
         toast.error('Selecciona un producto del catálogo');
         return;
       }
-      onAddProductDirectly(selectedProduct, modalQty, modalPrice, modalSalePrice);
+      onAddProductDirectly(
+        selectedProduct,
+        modalQty,
+        modalPrice,
+        modalSalePrice,
+        undefined,
+        modalWholesalePrice > 0 ? modalWholesalePrice : (selectedProduct.wholesalePrice || modalSalePrice)
+      );
       setLastAddedNotice(`¡"${selectedProduct.name}" añadido exitosamente!`);
       setSelectedProduct(null);
       setModalQty(1);
       setModalPrice(0);
       setModalSalePrice(0);
+      setModalWholesalePrice(0);
 
       if (closeModal) {
         setShowProductModal(false);
@@ -285,6 +296,7 @@ export function usePurchaseCatalog({ onAddProductDirectly }: UsePurchaseCatalogO
     }
 
     try {
+      const wholesaleFinal = modalWholesalePrice > 0 ? modalWholesalePrice : modalSalePrice;
       const nuevoProductoInsert = uiAProductoInsert({
         name: newName.trim(),
         sku: newSku.trim().toUpperCase(),
@@ -295,7 +307,7 @@ export function usePurchaseCatalog({ onAddProductDirectly }: UsePurchaseCatalogO
         supplier: '',
         costPrice: modalPrice,
         salePrice: modalSalePrice,
-        wholesalePrice: modalSalePrice,
+        wholesalePrice: wholesaleFinal,
         tax: newTax,
         currentStock: 0,
         minStock: 5,
@@ -309,7 +321,7 @@ export function usePurchaseCatalog({ onAddProductDirectly }: UsePurchaseCatalogO
       const pCreado = await crearProducto(nuevoProductoInsert);
       const uiProduct = productoAUi(pCreado) as ProductItem;
 
-      onAddProductDirectly(uiProduct, modalQty, modalPrice, modalSalePrice, newTax);
+      onAddProductDirectly(uiProduct, modalQty, modalPrice, modalSalePrice, newTax, wholesaleFinal);
       setLastAddedNotice(`¡"${uiProduct.name}" registrado en catálogo y añadido a la compra!`);
       toast.success(`Producto "${uiProduct.name}" creado en catálogo y agregado a la orden`);
 
@@ -345,6 +357,8 @@ export function usePurchaseCatalog({ onAddProductDirectly }: UsePurchaseCatalogO
     setModalPrice,
     modalSalePrice,
     setModalSalePrice,
+    modalWholesalePrice,
+    setModalWholesalePrice,
     lastAddedNotice,
     setLastAddedNotice,
     newName,

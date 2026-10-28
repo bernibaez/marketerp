@@ -51,6 +51,7 @@ interface CartPanelProps {
   onCancelDelete?: () => void;
   onToggleWholesale?: (id: string) => void;
   onToggleAllWholesale?: () => void;
+  onOpenDiscountModal?: (item: CartItem) => void;
 }
 
 export default function CartPanel({
@@ -76,6 +77,7 @@ export default function CartPanel({
   onCancelDelete,
   onToggleWholesale,
   onToggleAllWholesale,
+  onOpenDiscountModal,
 }: CartPanelProps) {
   const { clientes, refetch } = useClientes('');
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -431,6 +433,12 @@ export default function CartPanel({
             const hasWholesale = Boolean(item.wholesalePrice && item.wholesalePrice > 0);
             const isWholesaleActive = Boolean(item.isWholesale);
 
+            const hasDiscount = Boolean(
+              (item.discount && item.discount > 0) ||
+              (item.discountValue && item.discountValue > 0) ||
+              (item.professionalDiscount && item.professionalDiscount > 0)
+            );
+
             return (
               <div
                 key={item.id}
@@ -438,9 +446,41 @@ export default function CartPanel({
               >
                 <div className="col-span-6 min-w-0 pr-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-[16px] sm:text-[17px] font-black text-slate-900 dark:text-slate-100 truncate leading-snug">
+                    <button
+                      type="button"
+                      onClick={() => onOpenDiscountModal && onOpenDiscountModal(item)}
+                      className="text-left text-[16px] sm:text-[17px] font-black text-slate-900 dark:text-slate-100 hover:text-primary truncate leading-snug cursor-pointer transition-colors"
+                      title="Clic para modificar precio o agregar descuento"
+                    >
                       {item.name}
-                    </p>
+                    </button>
+
+                    {hasDiscount ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenDiscountModal && onOpenDiscountModal(item)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-all cursor-pointer shadow-2xs"
+                        title="Descuento aplicado. Clic para editar"
+                      >
+                        <Tag size={11} />
+                        <span>
+                          Desc: -{item.discountType === 'percentage'
+                            ? `${(item.discountValue !== undefined ? item.discountValue : item.discount).toFixed(0)}%`
+                            : `RD$ ${(item.discountValue || 0).toFixed(2)}`}
+                        </span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onOpenDiscountModal && onOpenDiscountModal(item)}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold text-slate-400 hover:text-primary hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                        title="Agregar descuento a este producto"
+                      >
+                        <Tag size={10} />
+                        <span>+ Descuento</span>
+                      </button>
+                    )}
+
                     {hasWholesale && (
                       <button
                         type="button"
@@ -528,6 +568,11 @@ export default function CartPanel({
                 </div>
 
                 <div className="col-span-2 text-right">
+                  {hasDiscount && (
+                    <p className="text-[11px] text-slate-400 line-through tabular-nums font-semibold">
+                      {fmt(item.price * item.qty)}
+                    </p>
+                  )}
                   <p className="text-sm sm:text-base font-black tabular-nums text-slate-900 dark:text-white">
                     {fmt(item.price * item.qty * (1 - item.discount / 100))}
                   </p>

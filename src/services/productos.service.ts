@@ -366,11 +366,37 @@ function localAsProductos(): Producto[] {
   });
 }
 
+const PRODUCTOS_CACHE_TTL = 30_000; // 30 segundos de cache para navegación instantánea
+const productosCache = new Map<string, { timestamp: number; result: ProductosResultado }>();
+
+export function invalidarCacheProductos(): void {
+  productosCache.clear();
+}
+
 export async function obtenerProductos(params: ProductosFiltro = {}): Promise<ProductosResultado> {
   const pagina = params.pagina ?? 1;
   const limite = params.limite ?? 20;
   const desde = (pagina - 1) * limite;
   const hasta = desde + limite - 1;
+
+  // Cache hit para navegación instantánea entre módulos sin recargar de red
+  const cacheKey = JSON.stringify({
+    p: pagina,
+    l: limite,
+    b: (params.busqueda || '').trim().toLowerCase(),
+    c: params.categoria || '',
+    e: params.estado || '',
+  });
+
+  if (!params.signal) {
+    const cached = productosCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < PRODUCTOS_CACHE_TTL) {
+      return {
+        ...cached.result,
+        datos: [...cached.result.datos],
+      };
+    }
+  }
 
   const sb = tryGetSupabase();
   let dbProducts: Producto[] = [];
@@ -480,12 +506,18 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
   const combined = [...dbProducts, ...missingFromDb];
   const total = dbCount + missingFromDb.length;
 
-  return {
+  const result: ProductosResultado = {
     datos: combined.slice(0, limite),
     total,
     pagina,
     limite,
   };
+
+  if (!params.signal) {
+    productosCache.set(cacheKey, { timestamp: Date.now(), result });
+  }
+
+  return result;
 }
 
 
@@ -514,6 +546,7 @@ export async function crearProducto(datos: Partial<Producto>): Promise<Producto>
       estado: (datos.estado as EstadoProducto) ?? 'activo',
     });
     saveStoredProducts([ui, ...products]);
+    invalidarCacheProductos();
     return localAsProductos().find((p) => p.sku === datos.sku)!;
   }
 
@@ -540,6 +573,7 @@ export async function crearProducto(datos: Partial<Producto>): Promise<Producto>
   });
   const { data, error } = await writeProducto('insert', payload as Record<string, any>);
   if (error) throw errorSupabase(error);
+  invalidarCacheProductos();
   return data as Producto;
 }
 
@@ -581,6 +615,7 @@ export async function actualizarProducto(id: string, datos: Partial<Producto>): 
     const nextList = [...products];
     nextList[idx] = uiNext;
     saveStoredProducts(nextList);
+    invalidarCacheProductos();
     return localAsProductos().find((p) => p.id === id)!;
   }
 
@@ -595,6 +630,7 @@ export async function actualizarProducto(id: string, datos: Partial<Producto>): 
   });
   const { data, error } = await writeProducto('update', updatePayload as Record<string, any>, id);
   if (error) throw errorSupabase(error);
+  invalidarCacheProductos();
   return data as Producto;
 }
 
@@ -699,6 +735,7 @@ export async function eliminarProducto(id: string): Promise<void> {
   }
 
   saveStoredProducts(getStoredProducts().filter((p) => p.id !== cleanId && p.sku !== cleanId));
+  invalidarCacheProductos();
 
   if (!isUuid || !isSupabaseConfigured()) {
     return;

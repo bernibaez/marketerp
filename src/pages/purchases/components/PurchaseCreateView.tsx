@@ -12,6 +12,7 @@ export interface PurchaseLineItem {
   qty: number;
   price: number;
   salePrice: number;
+  wholesalePrice: number;
   taxPercent: number;
 }
 
@@ -43,6 +44,7 @@ interface PurchaseCreateViewProps {
   onUpdateLineQty: (id: string, qty: number) => void;
   onUpdateLinePrice: (id: string, price: number) => void;
   onUpdateLineSalePrice: (id: string, salePrice: number) => void;
+  onUpdateLineWholesalePrice: (id: string, wholesalePrice: number) => void;
   onRemoveLine: (id: string) => void;
   onSavePurchase: () => Promise<void>;
   saving: boolean;
@@ -80,6 +82,7 @@ export function PurchaseCreateView({
   onUpdateLineQty,
   onUpdateLinePrice,
   onUpdateLineSalePrice,
+  onUpdateLineWholesalePrice,
   onRemoveLine,
   onSavePurchase,
   saving,
@@ -282,6 +285,9 @@ export function PurchaseCreateView({
                                   <p className="text-[10px] text-emerald-600 font-semibold font-mono">
                                     Venta: RD$ {(p.salePrice || 0).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                                   </p>
+                                  <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold font-mono">
+                                    Mayor: RD$ {(p.wholesalePrice || 0).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                                  </p>
                                 </div>
                                 <button
                                   type="button"
@@ -314,6 +320,10 @@ export function PurchaseCreateView({
                         Precio venta
                         <span className="block text-[10px] font-normal normal-case text-emerald-600">editable</span>
                       </th>
+                      <th className="text-right py-2.5 px-3 text-muted-foreground font-semibold">
+                        Al por mayor
+                        <span className="block text-[10px] font-normal normal-case text-amber-600 dark:text-amber-400">editable</span>
+                      </th>
                       <th className="text-center py-2.5 px-3 text-muted-foreground font-semibold">Margen</th>
                       <th className="text-right py-2.5 px-3 text-muted-foreground font-semibold">Subtotal</th>
                       <th className="text-center py-2.5 px-3"></th>
@@ -322,7 +332,7 @@ export function PurchaseCreateView({
                   <tbody className="divide-y divide-border/60">
                     {purchaseItems.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="text-center py-8 text-muted-foreground">
+                        <td colSpan={8} className="text-center py-8 text-muted-foreground">
                           No has agregado ningún producto a esta compra. Escribe en el buscador superior o haz clic en{' '}
                           <strong>Agregar producto</strong>.
                         </td>
@@ -373,6 +383,20 @@ export function PurchaseCreateView({
                                   onChange={(e) => onUpdateLineSalePrice(item.id, Number(e.target.value))}
                                   className="input-field w-28 text-right py-1.5 font-bold tabular-nums text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
                                   title="Precio de venta"
+                                />
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 text-right">
+                              <div className="inline-flex items-center gap-1 justify-end">
+                                <span className="text-[10px] text-amber-600 font-semibold">RD$</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={item.wholesalePrice || 0}
+                                  onChange={(e) => onUpdateLineWholesalePrice(item.id, Number(e.target.value))}
+                                  className="input-field w-28 text-right py-1.5 font-bold tabular-nums text-amber-600 dark:text-amber-400 border-amber-500/30"
+                                  title="Precio de venta al por mayor"
                                 />
                               </div>
                             </td>

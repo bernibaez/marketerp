@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Scale, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import type { WeightUnit } from '@/types/database';
@@ -87,9 +88,9 @@ export default function WeightInputModal({
     }
   };
 
-  return (
+  const modalContent = (
     <div
-      className="dialog-inline-host"
+      className="dialog-inline-host !z-[9999]"
       onClick={onClose}
       onKeyDown={handleKeyDown}
     >
@@ -222,4 +223,6 @@ export default function WeightInputModal({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }

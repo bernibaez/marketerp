@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import BusyOverlay, { type BusyVariant } from './BusyOverlay';
 
@@ -52,9 +53,9 @@ export default function Modal({
 
   if (!open) return null;
 
-  return (
+  const content = (
     <div
-      className="fixed inset-0 !z-[999]"
+      className="fixed inset-0 !z-[9999]"
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -111,4 +112,6 @@ export default function Modal({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(content, document.body) : content;
 }

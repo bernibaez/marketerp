@@ -42,6 +42,12 @@ export function usePurchaseItems() {
     );
   };
 
+  const handleUpdateLineWholesalePrice = (id: string, wholesalePrice: number) => {
+    setPurchaseItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, wholesalePrice: Math.max(0, wholesalePrice) } : item))
+    );
+  };
+
   const handleRemoveLine = (id: string) => {
     setPurchaseItems((prev) => prev.filter((item) => item.id !== id));
     toast.info('Producto removido de la orden');
@@ -52,11 +58,16 @@ export function usePurchaseItems() {
     qty = 1,
     customPrice?: number,
     customSalePrice?: number,
-    customTax?: number
+    customTax?: number,
+    customWholesalePrice?: number
   ) => {
     const costPrice = customPrice !== undefined && customPrice > 0 ? customPrice : product.costPrice || 0;
     const salePrice =
       customSalePrice !== undefined && customSalePrice > 0 ? customSalePrice : product.salePrice || 0;
+    const wholesalePrice =
+      customWholesalePrice !== undefined && customWholesalePrice > 0
+        ? customWholesalePrice
+        : (product.wholesalePrice && product.wholesalePrice > 0 ? product.wholesalePrice : salePrice);
     const taxPercent = customTax !== undefined ? customTax : product.tax ?? 18;
 
     setPurchaseItems((prev) => {
@@ -71,6 +82,7 @@ export function usePurchaseItems() {
           qty: newQty,
           price: costPrice > 0 ? costPrice : copy[existingIdx].price,
           salePrice: salePrice > 0 ? salePrice : copy[existingIdx].salePrice,
+          wholesalePrice: wholesalePrice > 0 ? wholesalePrice : copy[existingIdx].wholesalePrice,
           taxPercent,
         };
         toast.success(`+${qty} "${product.name}" (Total en orden: ${newQty})`);
@@ -85,6 +97,7 @@ export function usePurchaseItems() {
         qty,
         price: costPrice,
         salePrice: salePrice,
+        wholesalePrice: wholesalePrice,
         taxPercent,
       };
       toast.success(`"${product.name}" agregado a la compra`);
@@ -103,6 +116,7 @@ export function usePurchaseItems() {
     handleUpdateLineQty,
     handleUpdateLinePrice,
     handleUpdateLineSalePrice,
+    handleUpdateLineWholesalePrice,
     handleRemoveLine,
     addProductDirectlyToPurchase,
     clearItems,

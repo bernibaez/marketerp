@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { X, XCircle } from 'lucide-react';
 import type { PosReturn } from '@/lib/posStore';
 
@@ -25,8 +26,8 @@ export default function ReturnRejectModal({
   onClose,
   onConfirm,
 }: ReturnRejectModalProps) {
-  return (
-    <div className="dialog-inline-host" onClick={onClose}>
+  const modalContent = (
+    <div className="dialog-inline-host !z-[9999]" onClick={onClose}>
       <form
         onSubmit={onConfirm}
         className="card w-full max-w-md p-6 space-y-4 shadow-2xl border-rose-500/30"
@@ -104,4 +105,6 @@ export default function ReturnRejectModal({
       </form>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }

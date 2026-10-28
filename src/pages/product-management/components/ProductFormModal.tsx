@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useForm } from 'react-hook-form';
 import type { Product } from './ProductManagementScreen';
 import { Package, Printer, Sparkles } from 'lucide-react';
@@ -8,6 +9,10 @@ import { logAuditEvent } from '@/lib/auditStore';
 import { toast } from '@/lib/toast';
 import WeightProductForm, { type WeightFormState } from '@/components/weight/WeightProductForm';
 import type { SaleType, WeightUnit } from '@/types/database';
+
+import { useCategorias } from '@/hooks/useCategorias';
+import { useMarcas } from '@/hooks/useMarcas';
+import { useProveedores } from '@/hooks/useProveedores';
 
 interface ProductFormModalProps {
   open: boolean;
@@ -21,11 +26,9 @@ interface ProductFormModalProps {
 
 type FormValues = Omit<Product, 'id' | 'stockStatus'>;
 
-const categories = ['Granos', 'Lácteos', 'Carnes', 'Bebidas', 'Limpieza', 'Panadería', 'Frutas', 'Snacks'];
-const brands = ['Molinos Modernos', 'Mazola', 'Pollo Rey', 'Carnation', 'Central Romana', 'Goya', 'Del Valle', 'Fabuloso', 'Chobani', 'Otra'];
 const units = ['Unidad', 'Libra', 'Kilogramo', 'Litro', 'Cartón', 'Paquete', 'Caja', 'Bolsa'];
-const suppliers = ['Distribuidora El Caribe', 'Importadora Pérez', 'Nestlé Dominicana', 'Pollo Rey SRL', 'Central Romana Corp.', 'Avícola Rondón SRL', 'Lechería Macoris SA', 'Colgate-Palmolive DO', 'Panadería La Fe'];
 const taxOptions = [0, 18];
+
 
 function FormField({
   label,
@@ -58,6 +61,39 @@ function FormField({
 export default function ProductFormModal({ open, onClose, product, allProducts = [], onSave, onPrintLabel, defaultIsScaleProduct = false }: ProductFormModalProps) {
   const isEdit = !!product;
 
+  const { categorias, crear: crearCatDirecto } = useCategorias();
+  const { marcas, crear: crearMarcaDirecto } = useMarcas();
+  const { proveedores, crear: crearProvDirecto } = useProveedores();
+
+  const [quickAddType, setQuickAddType] = useState<'category' | 'brand' | 'supplier' | null>(null);
+  const [quickAddName, setQuickAddName] = useState('');
+  const [quickAddExtra, setQuickAddExtra] = useState('');
+  const [quickAddLoading, setQuickAddLoading] = useState(false);
+
+  const categoryOptions = React.useMemo(() => {
+    const names = new Set(categorias.map((c) => c.nombre));
+    if (product?.category && !names.has(product.category)) {
+      return [product.category, ...Array.from(names)];
+    }
+    return Array.from(names);
+  }, [categorias, product?.category]);
+
+  const brandOptions = React.useMemo(() => {
+    const names = new Set(marcas.map((m) => m.nombre));
+    if (product?.brand && !names.has(product.brand)) {
+      return [product.brand, ...Array.from(names)];
+    }
+    return Array.from(names);
+  }, [marcas, product?.brand]);
+
+  const supplierOptions = React.useMemo(() => {
+    const names = new Set(proveedores.map((p) => p.nombre));
+    if (product?.supplier && !names.has(product.supplier)) {
+      return [product.supplier, ...Array.from(names)];
+    }
+    return Array.from(names);
+  }, [proveedores, product?.supplier]);
+
   const [weightState, setWeightState] = useState<WeightFormState>({
     saleType: defaultIsScaleProduct ? 'weight' : 'unit',
     weightUnit: 'lb',
@@ -81,10 +117,10 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
       barcode: '',
       sku: '',
       name: '',
-      category: 'Granos',
-      brand: 'Molinos Modernos',
+      category: product?.category || categoryOptions[0] || 'Abarrotes y Granos',
+      brand: product?.brand || brandOptions[0] || 'Molinos Modernos',
       unit: defaultIsScaleProduct ? 'Libra' : 'Unidad',
-      supplier: 'Distribuidora El Caribe',
+      supplier: product?.supplier || supplierOptions[0] || 'Sin proveedor',
       costPrice: 0,
       salePrice: 0,
       wholesalePrice: 0,
@@ -135,10 +171,10 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
         sku: '',
         plu: '',
         name: '',
-        category: 'Granos',
-        brand: 'Molinos Modernos',
+        category: categoryOptions[0] || 'Abarrotes y Granos',
+        brand: brandOptions[0] || 'Molinos Modernos',
         unit: defaultIsScaleProduct ? 'Libra' : 'Unidad',
-        supplier: 'Distribuidora El Caribe',
+        supplier: supplierOptions[0] || 'Distribuidora El Caribe',
         costPrice: 0,
         salePrice: 0,
         wholesalePrice: 0,
@@ -161,6 +197,40 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
       });
     }
   }, [product, reset, open, defaultIsScaleProduct]);
+
+  const handleQuickAddSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = quickAddName.trim();
+    if (!cleanName) {
+      toast.error('El nombre es obligatorio');
+      return;
+    }
+
+    setQuickAddLoading(true);
+    try {
+      if (quickAddType === 'category') {
+        const cat = await crearCatDirecto({ nombre: cleanName, descripcion: quickAddExtra.trim() || null });
+        setValue('category', cat.nombre, { shouldValidate: true, shouldDirty: true });
+        toast.success(`Categoría "${cat.nombre}" creada y seleccionada`);
+      } else if (quickAddType === 'brand') {
+        const brand = await crearMarcaDirecto({ nombre: cleanName, descripcion: quickAddExtra.trim() || null });
+        setValue('brand', brand.nombre, { shouldValidate: true, shouldDirty: true });
+        toast.success(`Marca "${brand.nombre}" creada y seleccionada`);
+      } else if (quickAddType === 'supplier') {
+        const sup = await crearProvDirecto({ nombre: cleanName, telefono: quickAddExtra.trim() || null });
+        setValue('supplier', sup.nombre, { shouldValidate: true, shouldDirty: true });
+        toast.success(`Proveedor "${sup.nombre}" creado y seleccionado`);
+      }
+      setQuickAddType(null);
+      setQuickAddName('');
+      setQuickAddExtra('');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al crear elemento');
+    } finally {
+      setQuickAddLoading(false);
+    }
+  };
+
 
   const handleGenerateBarcode = () => {
     const code = generateUniqueBarcode();
@@ -365,21 +435,63 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
               </div>
             </FormField>
 
-            <FormField label="Categoría" name="category" error={errors.category?.message} required>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label htmlFor="category" className="block text-sm font-semibold text-foreground">
+                  Categoría <span className="text-danger ml-0.5">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuickAddType('category');
+                    setQuickAddName('');
+                    setQuickAddExtra('');
+                  }}
+                  className="text-xs text-primary font-bold hover:underline inline-flex items-center gap-0.5"
+                >
+                  + Nueva
+                </button>
+              </div>
               <select id="category" {...register('category', { required: true })} className="input-field">
-                {categories.map((c) => (
-                  <option key={`cat-opt-${c}`} value={c}>{c}</option>
-                ))}
+                {categoryOptions.length === 0 ? (
+                  <option value="">(Sin categorías)</option>
+                ) : (
+                  categoryOptions.map((c) => (
+                    <option key={`cat-opt-${c}`} value={c}>{c}</option>
+                  ))
+                )}
               </select>
-            </FormField>
+              {errors.category && <p className="text-sm text-danger">{errors.category.message}</p>}
+            </div>
 
-            <FormField label="Marca" name="brand" error={errors.brand?.message} required>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label htmlFor="brand" className="block text-sm font-semibold text-foreground">
+                  Marca <span className="text-danger ml-0.5">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuickAddType('brand');
+                    setQuickAddName('');
+                    setQuickAddExtra('');
+                  }}
+                  className="text-xs text-primary font-bold hover:underline inline-flex items-center gap-0.5"
+                >
+                  + Nueva
+                </button>
+              </div>
               <select id="brand" {...register('brand', { required: true })} className="input-field">
-                {brands.map((b) => (
-                  <option key={`brand-opt-${b}`} value={b}>{b}</option>
-                ))}
+                {brandOptions.length === 0 ? (
+                  <option value="">(Sin marcas)</option>
+                ) : (
+                  brandOptions.map((b) => (
+                    <option key={`brand-opt-${b}`} value={b}>{b}</option>
+                  ))
+                )}
               </select>
-            </FormField>
+              {errors.brand && <p className="text-sm text-danger">{errors.brand.message}</p>}
+            </div>
 
             <FormField label="Unidad de Medida" name="unit" error={errors.unit?.message} required>
               <select id="unit" {...register('unit', { required: true })} className="input-field">
@@ -389,13 +501,34 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
               </select>
             </FormField>
 
-            <FormField label="Proveedor" name="supplier" error={errors.supplier?.message} required>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label htmlFor="supplier" className="block text-sm font-semibold text-foreground">
+                  Proveedor Registrado <span className="text-danger ml-0.5">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuickAddType('supplier');
+                    setQuickAddName('');
+                    setQuickAddExtra('');
+                  }}
+                  className="text-xs text-primary font-bold hover:underline inline-flex items-center gap-0.5"
+                >
+                  + Nuevo
+                </button>
+              </div>
               <select id="supplier" {...register('supplier', { required: true })} className="input-field">
-                {suppliers.map((s) => (
-                  <option key={`sup-opt-${s}`} value={s}>{s}</option>
-                ))}
+                {supplierOptions.length === 0 ? (
+                  <option value="">(No hay proveedores registrados)</option>
+                ) : (
+                  supplierOptions.map((s) => (
+                    <option key={`sup-opt-${s}`} value={s}>{s}</option>
+                  ))
+                )}
               </select>
-            </FormField>
+              {errors.supplier && <p className="text-sm text-danger">{errors.supplier.message}</p>}
+            </div>
 
             <FormField label="Estado" name="status" error={errors.status?.message} required>
               <select id="status" {...register('status', { required: true })} className="input-field">
@@ -612,6 +745,89 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
           </div>
         </div>
       </form>
+
+      {/* Mini Modal de Registro Rápido */}
+      {quickAddType && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-card w-full max-w-md rounded-2xl border border-border shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-border">
+              <h4 className="text-sm font-bold text-foreground">
+                {quickAddType === 'category'
+                  ? 'Nueva Categoría Rápida'
+                  : quickAddType === 'brand'
+                  ? 'Nueva Marca Rápida'
+                  : 'Nuevo Proveedor Rápido'}
+              </h4>
+              <button
+                type="button"
+                onClick={() => setQuickAddType(null)}
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleQuickAddSubmit} className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1 block">
+                  Nombre <span className="text-danger">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder={
+                    quickAddType === 'category'
+                      ? 'Ej. Enlatados'
+                      : quickAddType === 'brand'
+                      ? 'Ej. Induveca'
+                      : 'Ej. Distribuidora Central'
+                  }
+                  value={quickAddName}
+                  onChange={(e) => setQuickAddName(e.target.value)}
+                  className="input-field text-xs !h-9"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1 block">
+                  {quickAddType === 'supplier' ? 'Teléfono (Opcional)' : 'Descripción (Opcional)'}
+                </label>
+                <input
+                  type="text"
+                  placeholder={
+                    quickAddType === 'supplier'
+                      ? 'Ej. 809-555-0123'
+                      : 'Breve detalle...'
+                  }
+                  value={quickAddExtra}
+                  onChange={(e) => setQuickAddExtra(e.target.value)}
+                  className="input-field text-xs !h-9"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setQuickAddType(null)}
+                  className="btn-secondary !h-8 text-xs px-3"
+                  disabled={quickAddLoading}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary !h-8 text-xs px-4 font-bold"
+                  disabled={quickAddLoading}
+                >
+                  {quickAddLoading ? 'Guardando...' : 'Guardar y Seleccionar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
-}
+}

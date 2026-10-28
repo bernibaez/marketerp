@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Package, Scale, Layers } from 'lucide-react';
 import type { WeightUnit } from '@/types/database';
 import { formatWeightUnitLabel } from './WeightCalculator';
@@ -39,9 +40,9 @@ export default function MixedSaleTypeModal({
 
   if (!open) return null;
 
-  return (
+  const modalContent = (
     <div
-      className="dialog-inline-host"
+      className="dialog-inline-host !z-[9999]"
       onClick={onClose}
     >
       <div
@@ -132,4 +133,6 @@ export default function MixedSaleTypeModal({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }

@@ -22,6 +22,7 @@ export type CompraLineaInput = {
   cantidad: number;
   precio_costo: number;
   precio_venta: number;
+  precio_mayorista?: number;
   porcentaje_impuesto: number;
 };
 
@@ -158,7 +159,7 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
   const { error: detErr } = await sb.from('detalle_compras').insert(detalles);
   if (detErr) throw detErr;
 
-  // Actualiza stock y precios en productos
+  // Actualiza stock y precios en productos (costo, venta y al por mayor)
   for (const linea of input.lineas) {
     if (!linea.producto_id) continue;
     const { data: prod } = await sb
@@ -171,6 +172,7 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
       stock_actual: stockActual + linea.cantidad,
       precio_costo: linea.precio_costo,
       precio_venta: linea.precio_venta,
+      ...(linea.precio_mayorista !== undefined ? { precio_mayorista: linea.precio_mayorista } : {}),
     });
   }
 

@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import {
   CheckCircle2,
   AlertCircle,
@@ -91,8 +92,8 @@ export default function OperationProgressModal({
     return <Loader2 size={24} className="animate-spin" />;
   };
 
-  return (
-    <div className="dialog-inline-host z-[1200]">
+  const modalContent = (
+    <div className="dialog-inline-host !z-[9999]">
       <div
         className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-7 shadow-2xl border border-slate-100 dark:border-slate-800 flex flex-col gap-5 text-slate-800 dark:text-slate-200 animate-modalPanelIn"
         onClick={(e) => e.stopPropagation()}
@@ -233,4 +234,6 @@ export default function OperationProgressModal({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }
