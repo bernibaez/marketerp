@@ -31,7 +31,7 @@ interface POSModalsProps {
 
   scaleOpen: boolean;
   onCloseScale: () => void;
-  scaleParams: { productId?: string; weight?: number } | null;
+  scaleParams: { productId?: string; weight?: number; product?: any } | null;
   onConfirmScale: (item: any, qty: number) => void;
 
   returnOpen: boolean;
@@ -136,6 +136,7 @@ export const POSModals: React.FC<POSModalsProps> = ({
         <PosScaleModal
           initialProductId={scaleParams?.productId}
           initialWeight={scaleParams?.weight}
+          initialProduct={scaleParams?.product}
           onClose={onCloseScale}
           onConfirm={onConfirmScale}
         />

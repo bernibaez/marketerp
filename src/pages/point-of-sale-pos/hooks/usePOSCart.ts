@@ -95,7 +95,8 @@ export function usePOSCart() {
         discountValue?: number;
         professionalDiscount?: number;
       },
-      qty = 1
+      qty = 1,
+      replaceQty = false
     ) => {
       if (
         product.sku.toUpperCase() === DELETE_SKU ||
@@ -116,16 +117,23 @@ export function usePOSCart() {
         return;
       }
 
+      const safeQty = Math.round((Number(qty) || 0) * 1000) / 1000;
+
       setCart((prev) => {
         const existing = prev.find(
-          (item) => item.productId === product.productId || item.sku === product.sku
+          (item) =>
+            (product.productId && item.productId === product.productId) ||
+            (product.sku && item.sku && item.sku.toLowerCase() === product.sku.toLowerCase())
         );
         if (existing) {
           return prev.map((item) =>
-            item.productId === product.productId || item.sku === product.sku
+            (product.productId && item.productId === product.productId) ||
+            (product.sku && item.sku && item.sku.toLowerCase() === product.sku.toLowerCase())
               ? {
                   ...item,
-                  qty: Math.round((item.qty + qty) * 100) / 100,
+                  qty: replaceQty
+                    ? safeQty
+                    : Math.round((item.qty + safeQty) * 1000) / 1000,
                   price: product.price ?? item.price,
                   discount: product.discount !== undefined ? product.discount : item.discount,
                   discountType: product.discountType ?? item.discountType,
@@ -147,7 +155,7 @@ export function usePOSCart() {
             regularPrice,
             wholesalePrice,
             isWholesale: product.isWholesale ?? false,
-            qty,
+            qty: safeQty,
             discount: product.discount ?? 0,
             discountType: product.discountType ?? 'fixed',
             discountValue: product.discountValue ?? (product.discount ? (product.discount * product.price) / 100 : 0),

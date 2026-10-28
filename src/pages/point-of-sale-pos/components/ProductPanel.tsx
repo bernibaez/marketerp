@@ -34,7 +34,7 @@ interface Product {
 
 interface ProductPanelProps {
   onAddToCart: (product: Omit<CartItem, 'qty' | 'discount'>, qty?: number) => void;
-  onOpenScale?: (productId?: string, weight?: number) => void;
+  onOpenScale?: (productId?: string, weight?: number, product?: any) => void;
   awaitingDelete?: boolean;
   searchQuery?: string;
   onSearchChange?: (q: string) => void;
@@ -172,7 +172,7 @@ export default function ProductPanel({
         p.unit.toLowerCase() === 'kg') &&
       onOpenScale
     ) {
-      onOpenScale(p.id, 1.0);
+      onOpenScale(p.id, 1.0, p);
       return;
     }
 
