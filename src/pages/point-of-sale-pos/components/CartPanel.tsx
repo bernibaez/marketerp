@@ -13,12 +13,16 @@ import {
   FileText,
   Barcode,
   Tag,
+  Scale,
+  Package,
+  Loader2,
 } from 'lucide-react';
 import type { CartItem, Customer } from './POSTerminal';
 import { useClientes } from '@/hooks/useClientes';
 import { useProductos } from '@/hooks/useProductos';
 import { initialProducts } from '@/lib/initialProducts';
 import { productMatchesScanCode } from '@/lib/scaleBarcode';
+import { obtenerProductos, productoAUi } from '@/services/productos.service';
 import PosAddCustomerModal from './PosAddCustomerModal';
 import { toast } from '@/lib/toast';
 import type { NCFType } from '@/lib/ncfStore';
@@ -86,6 +90,9 @@ export default function CartPanel({
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [addCustomerOpen, setAddCustomerOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [dbResults, setDbResults] = useState<any[]>([]);
+  const [searchingDb, setSearchingDb] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
   const { productosUi } = useProductos({ pagina: 1, limite: 500, estado: 'todos' });
@@ -102,18 +109,74 @@ export default function CartPanel({
     return list;
   }, [productosUi]);
 
-  // Filtered search results for the floating autocomplete dropdown
+  // Consulta en tiempo real a Supabase / Base de datos con debounce cuando el usuario escribe en la barra
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q || q.length < 1) {
+      setDbResults([]);
+      setSearchingDb(false);
+      setSelectedIndex(0);
+      return;
+    }
+
+    setSearchingDb(true);
+    const abortCtrl = new AbortController();
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await obtenerProductos({
+          busqueda: q,
+          limite: 30,
+          estado: 'todos',
+          signal: abortCtrl.signal,
+        });
+        if (!abortCtrl.signal.aborted) {
+          setDbResults(res.datos.map(productoAUi));
+          setSearchingDb(false);
+          setSelectedIndex(0);
+        }
+      } catch (err: any) {
+        if (!abortCtrl.signal.aborted) {
+          setSearchingDb(false);
+        }
+      }
+    }, 180);
+
+    return () => {
+      clearTimeout(timer);
+      abortCtrl.abort();
+    };
+  }, [searchQuery]);
+
+  // Resultados combinados: catálogo local instantáneo + resultados en vivo de la base de datos
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q || q.length < 1) return [];
-    return allProducts.filter((p) => {
+
+    // 1. Filtrar en catálogo local
+    const localMatches = allProducts.filter((p) => {
       const name = (p.name || '').toLowerCase();
       const sku = (p.sku || '').toLowerCase();
       const barcode = (p.barcode || '').toLowerCase();
       const plu = (p.plu || '').toLowerCase();
       return name.includes(q) || sku.includes(q) || barcode.includes(q) || plu.includes(q);
-    }).slice(0, 15);
-  }, [searchQuery, allProducts]);
+    });
+
+    // 2. Fusionar con resultados devueltos por la base de datos sin duplicados
+    const combined: any[] = [...localMatches];
+    const seenIds = new Set(localMatches.map((p) => p.id));
+    const seenSkus = new Set(localMatches.map((p) => (p.sku || '').toLowerCase()));
+
+    for (const dbItem of dbResults) {
+      if (!seenIds.has(dbItem.id) && !seenSkus.has((dbItem.sku || '').toLowerCase())) {
+        combined.push(dbItem);
+        seenIds.add(dbItem.id);
+        if (dbItem.sku) seenSkus.add(dbItem.sku.toLowerCase());
+      }
+    }
+
+    return combined.slice(0, 30);
+  }, [searchQuery, allProducts, dbResults]);
 
   useEffect(() => {
     setCustomers(
@@ -147,7 +210,31 @@ export default function CartPanel({
   const totalItemsCount = cart.reduce((s, i) => s + i.qty, 0);
 
   const handleSelectProduct = (p: any) => {
-    if (onAddToCart) {
+    const isWeight =
+      p.isWeightProduct ||
+      p.saleType === 'weight' ||
+      (p.unit && (p.unit.toLowerCase().includes('lb') || p.unit.toLowerCase().includes('kg')));
+
+    if (isWeight && onEditWeight) {
+      onEditWeight({
+        id: `cart-${p.id}-${Date.now()}`,
+        productId: p.id,
+        name: p.name,
+        sku: p.sku,
+        barcode: p.barcode || '',
+        price: p.salePrice ?? p.price,
+        regularPrice: p.salePrice ?? p.price,
+        wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
+        isWholesale: false,
+        cost: p.costPrice ?? p.cost ?? 0,
+        tax: p.tax ?? 18,
+        image: p.image || '',
+        unit: p.unit || 'lb',
+        qty: 1,
+        discount: 0,
+        isWeighted: true,
+      });
+    } else if (onAddToCart) {
       onAddToCart({
         id: `cart-${p.id}-${Date.now()}`,
         productId: p.id,
@@ -162,7 +249,7 @@ export default function CartPanel({
         tax: p.tax ?? 18,
         image: p.image || '',
         unit: p.unit || 'Und',
-        isWeighted: p.isWeightProduct || p.saleType === 'weight' || p.unit?.toLowerCase().includes('lb'),
+        isWeighted: isWeight,
       });
     }
     if (onSearchChange) onSearchChange('');
@@ -172,20 +259,43 @@ export default function CartPanel({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (searchResults.length > 0) {
+        setDropdownOpen(true);
+        setSelectedIndex((prev) => (prev + 1) % searchResults.length);
+      }
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (searchResults.length > 0) {
+        setDropdownOpen(true);
+        setSelectedIndex((prev) => (prev - 1 + searchResults.length) % searchResults.length);
+      }
+      return;
+    }
+
     if (e.key === 'Enter') {
       e.preventDefault();
       e.stopPropagation();
       const valueToSubmit = searchQuery.trim();
       if (!valueToSubmit) return;
 
-      // 1. Si hay coincidencia exacta por código de barras, SKU o PLU en la lista en memoria:
+      // 1. Si el usuario navegó por la lista con las flechas y seleccionó uno:
+      if (dropdownOpen && searchResults.length > 0 && selectedIndex >= 0 && selectedIndex < searchResults.length) {
+        handleSelectProduct(searchResults[selectedIndex]);
+        return;
+      }
+
+      // 2. Si hay coincidencia exacta por código de barras, SKU o PLU en los resultados:
       const exact = searchResults.find((p) => productMatchesScanCode(p, valueToSubmit));
       if (exact) {
         handleSelectProduct(exact);
         return;
       }
 
-      // 2. Si no hay coincidencia exacta local, delegar al procesador de escáner global
+      // 3. Si no hay coincidencia exacta local, delegar al procesador de escáner global
       // que incluye decodificación de balanza, consulta a Supabase y combos.
       if (onSearchSubmit) {
         if (onSearchChange) onSearchChange('');
@@ -322,35 +432,122 @@ export default function CartPanel({
             <Minus size={20} strokeWidth={3} />
           </button>
 
-          {/* Floating Search Dropdown (Matches Reference Image) */}
-          {dropdownOpen && searchResults.length > 0 && (
-            <div className="absolute left-0 top-full mt-1 w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl z-50 max-h-72 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
-              {searchResults.map((item) => {
-                const stockVal = item.currentStock ?? 0;
-                const unitStr = item.unit || 'Und';
-                const codeStr = item.barcode || item.sku || '';
+          {/* Floating Search Dropdown (Lista de productos en vivo desde Base de Datos) */}
+          {dropdownOpen && (searchResults.length > 0 || (searchQuery.trim().length >= 1 && searchingDb)) && (
+            <div className="absolute left-0 top-full mt-1.5 w-full min-w-[340px] max-w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl z-50 overflow-hidden divide-y divide-slate-100 dark:divide-slate-800 animate-in fade-in-50 duration-150">
+              {/* Barra de estado / cabecera */}
+              <div className="px-3.5 py-2 bg-slate-50 dark:bg-slate-800/60 flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                <span className="flex items-center gap-1.5">
+                  {searchingDb ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin text-blue-600" />
+                      <span>Consultando en base de datos...</span>
+                    </>
+                  ) : (
+                    <span>{searchResults.length} productos encontrados</span>
+                  )}
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
+                  ↑↓ para navegar · Enter para agregar
+                </span>
+              </div>
 
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => handleSelectProduct(item)}
-                    className="w-full text-left px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-800/70 transition-colors flex items-start gap-2.5 cursor-pointer group"
-                  >
-                    <div className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center flex-shrink-0 mt-0.5 text-slate-500 group-hover:text-blue-600">
-                      <Banknote size={13} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-extrabold text-slate-900 dark:text-slate-100 leading-snug truncate">
-                        {item.name} {codeStr ? `(${codeStr})` : ''}
-                      </p>
-                      <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mt-0.5">
-                        Price: {Number(item.salePrice || 0).toFixed(2)} - {stockVal.toFixed(2)}{unitStr}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
+              {/* Lista de productos */}
+              <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60 scrollbar-thin">
+                {searchResults.length === 0 ? (
+                  <div className="px-4 py-8 text-center text-slate-400">
+                    {searchingDb ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <Loader2 size={22} className="animate-spin text-blue-500" />
+                        <p className="text-xs">Buscando "{searchQuery.trim()}" en la base de datos...</p>
+                      </div>
+                    ) : (
+                      <p className="text-xs font-semibold">No se encontraron productos con "{searchQuery.trim()}" en la base de datos</p>
+                    )}
+                  </div>
+                ) : (
+                  searchResults.map((item, index) => {
+                    const isSelected = index === selectedIndex;
+                    const stockVal = Number(item.currentStock ?? 0);
+                    const unitStr = item.unit || 'Und';
+                    const isOut = stockVal <= 0 || item.stockStatus === 'out';
+                    const isLow = !isOut && (stockVal <= (item.minStock || 5) || item.stockStatus === 'low');
+                    const isWeight =
+                      item.isWeightProduct ||
+                      item.saleType === 'weight' ||
+                      (item.unit && (item.unit.toLowerCase().includes('lb') || item.unit.toLowerCase().includes('kg')));
+
+                    return (
+                      <button
+                        key={item.id || index}
+                        type="button"
+                        onClick={() => handleSelectProduct(item)}
+                        onMouseEnter={() => setSelectedIndex(index)}
+                        className={`w-full text-left px-3.5 py-2.5 transition-all flex items-center justify-between gap-3 cursor-pointer group ${
+                          isSelected
+                            ? 'bg-blue-50 dark:bg-blue-950/50 border-l-4 border-blue-600 pl-2.5'
+                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                        }`}
+                      >
+                        {/* Info Izquierda: Imagen/Icono + Nombre + SKU/Barcode */}
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center flex-shrink-0 overflow-hidden text-slate-500">
+                            {item.image ? (
+                              <img src={item.image} alt="" className="w-full h-full object-cover" />
+                            ) : isWeight ? (
+                              <Scale size={16} className="text-amber-600 dark:text-amber-400" />
+                            ) : (
+                              <Package size={16} className="text-slate-500" />
+                            )}
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <p className="text-xs font-bold text-slate-900 dark:text-white leading-tight truncate">
+                                {item.name}
+                              </p>
+                              {isWeight && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 text-[9px] font-bold rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                                  <Scale size={10} /> Balanza
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                              {item.barcode && <span>Barras: {item.barcode}</span>}
+                              {item.sku && <span>SKU: {item.sku}</span>}
+                              {item.plu && <span>PLU: {item.plu}</span>}
+                              {item.category && item.category !== 'General' && (
+                                <span className="text-slate-400">· {item.category}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Info Derecha: Precio + Stock Badge */}
+                        <div className="text-right flex-shrink-0">
+                          <p className="text-sm font-black text-emerald-600 dark:text-emerald-400 font-mono tabular-nums">
+                            {fmt(item.salePrice ?? item.price ?? 0)}
+                          </p>
+                          <div className="mt-0.5 flex justify-end">
+                            <span
+                              className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md ${
+                                isOut
+                                  ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                                  : isLow
+                                  ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                                  : 'text-slate-500 dark:text-slate-400'
+                              }`}
+                            >
+                              {isOut ? 'Agotado' : `${stockVal} ${unitStr}`}
+                            </span>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
             </div>
           )}
         </div>
