@@ -114,6 +114,10 @@ export function usePOSCheckout({
 
   const paymentProps = {
     total,
+    subtotal,
+    taxTotal,
+    discountTotal: globalDiscountAmount,
+    registerNumber: activeCashLabel,
     cart,
     customer: selectedCustomer,
     orderCompleted,

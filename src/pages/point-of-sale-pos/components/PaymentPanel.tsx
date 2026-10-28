@@ -31,6 +31,10 @@ type PaymentMethod = 'cash' | 'card' | 'transfer' | 'credit' | 'split';
 
 interface PaymentPanelProps {
   total: number;
+  subtotal?: number;
+  taxTotal?: number;
+  discountTotal?: number;
+  registerNumber?: string;
   cart: CartItem[];
   customer: Customer | null;
   onComplete: (payments: PaymentSplit, fiscalInvoice?: FiscalInvoiceRecord) => any;
@@ -56,6 +60,10 @@ const quickCashPresets = [50, 100, 200, 500, 1000];
 
 export default function PaymentPanel({
   total,
+  subtotal,
+  taxTotal,
+  discountTotal,
+  registerNumber,
   cart,
   customer,
   onComplete,
@@ -284,8 +292,14 @@ export default function PaymentPanel({
   // ----------------------------------------------------
   if (orderCompleted) {
     const now = new Date();
-    const subtotalNet = total / 1.18;
-    const totalItbis = total - subtotalNet;
+    const computedSubtotal =
+      typeof subtotal === 'number'
+        ? subtotal
+        : cart.reduce((s, item) => s + item.price * item.qty * (1 - (item.discount || 0) / 100), 0);
+    const computedTax =
+      typeof taxTotal === 'number'
+        ? taxTotal
+        : Math.max(0, total - computedSubtotal + (discountTotal || 0));
 
     const actualInvoiceNumber =
       completedSaleResult?.numero_factura ||
@@ -305,20 +319,26 @@ export default function PaymentPanel({
       issueDate: now.toLocaleDateString('es-DO'),
       issueTime: now.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' }),
       cashier: user?.name || user?.username || 'Caja POS',
-      customerName: customer?.name || (companyName.trim() || undefined),
+      registerNumber: registerNumber || 'POS-01',
+      customerName: customer?.name || (companyName.trim() || 'Consumidor Final'),
       customerRnc: customer?.rnc_cedula || rncClient.trim() || undefined,
+      customerPhone: customer?.phone || undefined,
       items: cart
         .filter((item) => item.qty > 0)
-        .map((item) => ({
-          sku: item.sku,
-          name: item.name,
-          qty: item.qty,
-          price: item.price,
-          subtotal: item.price * item.qty,
-          itbis: (item.price - item.price / 1.18) * item.qty,
-        })),
-      subtotal: Math.round(subtotalNet * 100) / 100,
-      itbis: Math.round(totalItbis * 100) / 100,
+        .map((item) => {
+          const lineNet = item.price * item.qty * (1 - (item.discount || 0) / 100);
+          return {
+            sku: item.sku,
+            name: item.name,
+            qty: item.qty,
+            price: item.price,
+            subtotal: lineNet,
+            itbis: (lineNet * (item.tax || 0)) / 100,
+          };
+        }),
+      subtotal: Math.round(computedSubtotal * 100) / 100,
+      discount: discountTotal ? Math.round(discountTotal * 100) / 100 : undefined,
+      itbis: Math.round(computedTax * 100) / 100,
       total,
       paymentMethod: method,
       cashReceived: cashAmount || total,

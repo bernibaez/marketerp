@@ -133,6 +133,9 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
                 itbis: sale.monto_impuesto,
                 total: sale.monto_total,
                 paymentMethod: sale.metodo_pago,
+                cashReceived: sale.monto_pagado || sale.monto_total,
+                change: sale.devuelta_entregada || 0,
+                registerNumber: sale.caja_id ? `Caja #${sale.caja_id}` : 'POS-01',
               }}
               formatOverride={printFormat}
             />
