@@ -52,6 +52,7 @@ interface CartPanelProps {
   onToggleWholesale?: (id: string) => void;
   onToggleAllWholesale?: () => void;
   onOpenDiscountModal?: (item: CartItem) => void;
+  isAdmin?: boolean;
 }
 
 export default function CartPanel({
@@ -78,6 +79,7 @@ export default function CartPanel({
   onToggleWholesale,
   onToggleAllWholesale,
   onOpenDiscountModal,
+  isAdmin = false,
 }: CartPanelProps) {
   const { clientes, refetch } = useClientes('');
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -446,39 +448,64 @@ export default function CartPanel({
               >
                 <div className="col-span-6 min-w-0 pr-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={() => onOpenDiscountModal && onOpenDiscountModal(item)}
-                      className="text-left text-[16px] sm:text-[17px] font-black text-slate-900 dark:text-slate-100 hover:text-primary truncate leading-snug cursor-pointer transition-colors"
-                      title="Clic para modificar precio o agregar descuento"
-                    >
-                      {item.name}
-                    </button>
-
-                    {hasDiscount ? (
+                    {isAdmin ? (
                       <button
                         type="button"
                         onClick={() => onOpenDiscountModal && onOpenDiscountModal(item)}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-all cursor-pointer shadow-2xs"
-                        title="Descuento aplicado. Clic para editar"
+                        className="text-left text-[16px] sm:text-[17px] font-black text-slate-900 dark:text-slate-100 hover:text-primary truncate leading-snug cursor-pointer transition-colors"
+                        title="Clic para modificar precio o agregar descuento"
                       >
-                        <Tag size={11} />
-                        <span>
-                          Desc: -{item.discountType === 'percentage'
-                            ? `${(item.discountValue !== undefined ? item.discountValue : item.discount).toFixed(0)}%`
-                            : `RD$ ${(item.discountValue || 0).toFixed(2)}`}
-                        </span>
+                        {item.name}
                       </button>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => onOpenDiscountModal && onOpenDiscountModal(item)}
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold text-slate-400 hover:text-primary hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                        title="Agregar descuento a este producto"
+                      <span
+                        className="text-left text-[16px] sm:text-[17px] font-black text-slate-900 dark:text-slate-100 truncate leading-snug select-none"
+                        title={item.name}
                       >
-                        <Tag size={10} />
-                        <span>+ Descuento</span>
-                      </button>
+                        {item.name}
+                      </span>
+                    )}
+
+                    {hasDiscount ? (
+                      isAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenDiscountModal && onOpenDiscountModal(item)}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-all cursor-pointer shadow-2xs"
+                          title="Descuento aplicado. Clic para editar"
+                        >
+                          <Tag size={11} />
+                          <span>
+                            Desc: -{item.discountType === 'percentage'
+                              ? `${(item.discountValue !== undefined ? item.discountValue : item.discount).toFixed(0)}%`
+                              : `RD$ ${(item.discountValue || 0).toFixed(2)}`}
+                          </span>
+                        </button>
+                      ) : (
+                        <span
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shadow-2xs"
+                          title="Descuento aplicado"
+                        >
+                          <Tag size={11} />
+                          <span>
+                            Desc: -{item.discountType === 'percentage'
+                              ? `${(item.discountValue !== undefined ? item.discountValue : item.discount).toFixed(0)}%`
+                              : `RD$ ${(item.discountValue || 0).toFixed(2)}`}
+                          </span>
+                        </span>
+                      )
+                    ) : (
+                      isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenDiscountModal && onOpenDiscountModal(item)}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold text-slate-400 hover:text-primary hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                          title="Agregar descuento a este producto"
+                        >
+                          <Tag size={10} />
+                          <span>+ Descuento</span>
+                        </button>
+                      )
                     )}
 
                     {hasWholesale && (

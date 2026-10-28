@@ -66,7 +66,13 @@ export interface Customer {
 export default function POSTerminal() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const isAdminUser = user?.role === 'Administrador';
+  const roleNorm = (user?.role || '').trim().toLowerCase();
+  const isAdminUser =
+    roleNorm === 'administrador' ||
+    roleNorm === 'admin' ||
+    roleNorm === 'super administrador' ||
+    roleNorm === 'superadmin' ||
+    user?.role === 'Administrador';
   const { registers, loading: registersLoading, refetch: refetchRegisters, markRegisterClosed } = useCashRegisters();
 
   // 1. Data Catalogs
@@ -245,11 +251,21 @@ export default function POSTerminal() {
   const [discountTargetProduct, setDiscountTargetProduct] = useState<CartItem | null>(null);
 
   const handleOpenCartItemDiscount = (item: CartItem) => {
+    if (!isAdminUser) {
+      toast.error('Solo los administradores pueden aplicar descuentos manuales o modificar precios');
+      return;
+    }
     setDiscountTargetProduct(item);
     setDiscountModalOpen(true);
   };
 
   const handleConfirmDiscount = (data: PosProductDiscountData) => {
+    if (!isAdminUser) {
+      toast.error('Solo los administradores pueden aplicar descuentos manuales');
+      setDiscountModalOpen(false);
+      setDiscountTargetProduct(null);
+      return;
+    }
     if (!discountTargetProduct) return;
 
     updateItemDiscountAndPrice(discountTargetProduct.id, {
@@ -356,7 +372,8 @@ export default function POSTerminal() {
               onCancelDelete={handleCancelDeleteMode}
               onToggleWholesale={toggleWholesalePrice}
               onToggleAllWholesale={toggleAllWholesale}
-              onOpenDiscountModal={handleOpenCartItemDiscount}
+              onOpenDiscountModal={isAdminUser ? handleOpenCartItemDiscount : undefined}
+              isAdmin={isAdminUser}
             />
           </div>
 
