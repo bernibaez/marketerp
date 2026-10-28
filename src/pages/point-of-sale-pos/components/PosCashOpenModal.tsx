@@ -54,7 +54,13 @@ export default function PosCashOpenModal({
 }: PosCashOpenModalProps) {
   const { user } = useAuth();
   const { registers, dbUsers } = useCashRegisters();
-  const isAdmin = user?.role === 'Administrador';
+  const roleNorm = (user?.role || '').trim().toLowerCase();
+  const isAdmin =
+    roleNorm === 'administrador' ||
+    roleNorm === 'super administrador' ||
+    roleNorm === 'admin' ||
+    roleNorm === 'super_admin' ||
+    roleNorm === 'superadmin';
   const availableRegisters = isAdmin
     ? registers
     : registers.filter((c) => !c.isAdminBox);
@@ -193,8 +199,14 @@ export default function PosCashOpenModal({
     }
   };
 
-  const activeUserName = user?.name || 'super admin';
-  const activeUserRole = user?.role || 'Super Administrador';
+  const activeUserName =
+    isAdmin && selectedUser
+      ? selectedUser.nombre_completo
+      : user?.name || 'Cajero';
+  const activeUserRole =
+    isAdmin && selectedUser
+      ? ROL_DB_A_UI[selectedUser.rol] || 'Cajero'
+      : user?.role || 'Cajero';
 
   return (
     <div
@@ -259,10 +271,24 @@ export default function PosCashOpenModal({
                   <div className="w-10 h-10 rounded-full bg-emerald-600 text-white font-black text-sm flex items-center justify-center flex-shrink-0">
                     {activeUserName.charAt(0).toUpperCase()}
                   </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-extrabold text-slate-900 dark:text-white leading-tight truncate">
-                      {activeUserName}
-                    </p>
+                  <div className="min-w-0 flex-1">
+                    {isAdmin && dbUsers.length > 0 ? (
+                      <select
+                        value={selectedCajeroId}
+                        onChange={(e) => setSelectedCajeroId(e.target.value)}
+                        className="w-full text-sm font-extrabold text-slate-900 dark:text-white bg-transparent focus:outline-none cursor-pointer truncate"
+                      >
+                        {dbUsers.map((u) => (
+                          <option key={u.id} value={u.id} className="bg-white dark:bg-slate-900">
+                            {u.nombre_completo} ({ROL_DB_A_UI[u.rol] || u.rol})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="text-sm font-extrabold text-slate-900 dark:text-white leading-tight truncate">
+                        {activeUserName}
+                      </p>
+                    )}
                     <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400 truncate">
                       {activeUserRole}
                     </p>

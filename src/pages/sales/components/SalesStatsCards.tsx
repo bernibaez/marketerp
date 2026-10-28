@@ -19,6 +19,10 @@ export function SalesStatsCards({
   cotizaciones,
   devoluciones,
 }: SalesStatsCardsProps) {
+  const ventasValidas = ventas.filter(
+    (v) => (v.estado as string) !== 'anulada' && (v.estado as string) !== 'cancelled'
+  );
+
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
       {tab === 'returns' ? (
@@ -105,9 +109,9 @@ export function SalesStatsCards({
             </p>
             <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-slate-900 dark:text-white mt-0.5">
               RD${' '}
-              {ventas
-                .reduce((s, x) => s + x.monto_total, 0)
-                .toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+              {ventasValidas
+                .reduce((s, x) => s + Number(x.monto_total || 0), 0)
+                .toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
           <div className="p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">
@@ -116,9 +120,9 @@ export function SalesStatsCards({
             </p>
             <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-slate-900 dark:text-white mt-0.5">
               RD${' '}
-              {ventas
-                .reduce((s, x) => s + (x.monto_total - x.costo_total), 0)
-                .toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+              {ventasValidas
+                .reduce((s, x) => s + (Number(x.monto_total || 0) - Number(x.costo_total || 0)), 0)
+                .toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
           <div className="p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">
@@ -127,9 +131,9 @@ export function SalesStatsCards({
             </p>
             <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-slate-900 dark:text-white mt-0.5">
               RD${' '}
-              {ventas
-                .reduce((s, x) => s + x.monto_impuesto, 0)
-                .toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+              {ventasValidas
+                .reduce((s, x) => s + Number(x.monto_impuesto || 0), 0)
+                .toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
           <div className="p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">

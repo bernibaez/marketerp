@@ -21,7 +21,13 @@ export default function PosCashCloseModal({
 }: PosCashCloseModalProps) {
   const { user } = useAuth();
   const { registers, dbUsers } = useCashRegisters();
-  const isAdmin = user?.role === 'Administrador';
+  const roleNorm = (user?.role || '').trim().toLowerCase();
+  const isAdmin =
+    roleNorm === 'administrador' ||
+    roleNorm === 'super administrador' ||
+    roleNorm === 'admin' ||
+    roleNorm === 'super_admin' ||
+    roleNorm === 'superadmin';
   const availableRegisters = isAdmin
     ? registers
     : registers.filter((c) => !c.isAdminBox);

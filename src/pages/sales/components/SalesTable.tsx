@@ -173,8 +173,8 @@ export const SalesTable: React.FC<SalesTableProps> = ({
                       </div>
                     </td>
 
-                    <td className="px-4 py-3.5 text-xs font-medium text-slate-600 dark:text-slate-400">
-                      {s.cajero_nombre || 'super admin'}
+                    <td className="px-4 py-3.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      {s.cajero_nombre || 'No especificado'}
                     </td>
 
                     <td className="px-4 py-3.5 text-center">
@@ -205,7 +205,10 @@ export const SalesTable: React.FC<SalesTableProps> = ({
                         RD$ {s.monto_total.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                       <div className="text-[10px] text-slate-400 font-medium mt-0.5">
-                        RD$ {s.subtotal.toLocaleString('es-DO', { minimumFractionDigits: 2 })} + ITBIS RD$ {s.monto_impuesto.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                        RD$ {s.subtotal.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} + ITBIS RD$ {s.monto_impuesto.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {s.monto_descuento > 0
+                          ? ` - Desc. RD$ ${s.monto_descuento.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : ''}
                       </div>
                     </td>
 

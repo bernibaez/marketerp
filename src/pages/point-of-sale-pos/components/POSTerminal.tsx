@@ -112,7 +112,7 @@ export default function POSTerminal() {
 
   // 3. Cash Session State
   const [activeCashId, setActiveCashId] = useState<CashRegisterId>(() =>
-    user?.role === 'Administrador' ? ADMIN_OWN_CASH : DEFAULT_CASHIER_CASH
+    isAdminUser ? ADMIN_OWN_CASH : DEFAULT_CASHIER_CASH
   );
   const [shiftOpenedLocally, setShiftOpenedLocally] = useState(false);
   const [shiftClosedLocally, setShiftClosedLocally] = useState(false);
@@ -217,9 +217,14 @@ export default function POSTerminal() {
     cashIsOpen,
     activeCashId,
     activeCashLabel: activeCash.label,
+    activeCashCashierId: activeCashSession?.open ? activeCashSession.cashierId : undefined,
+    activeCashCashierName: activeCashSession?.open ? activeCashSession.cashier : undefined,
     user,
     clearCart,
     navigate,
+    onSaleSuccess: () => {
+      void refetchRegisters();
+    },
   });
 
   // 6. Scanner, Scale Parser & Global Keyboard Shortcuts Hook
@@ -243,7 +248,13 @@ export default function POSTerminal() {
   // 7. Auxiliary Modals State
   const [expenseOpen, setExpenseOpen] = useState(false);
   const [scaleOpen, setScaleOpen] = useState(false);
-  const [scaleParams, setScaleParams] = useState<{ productId?: string; weight?: number } | null>(null);
+  const [scaleParams, setScaleParams] = useState<{
+    productId?: string;
+    weight?: number;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    product?: any;
+    replaceExisting?: boolean;
+  } | null>(null);
   const [returnOpen, setReturnOpen] = useState(false);
   const [registerDetailsOpen, setRegisterDetailsOpen] = useState(false);
   const [cashSwitchOpen, setCashSwitchOpen] = useState(false);
@@ -285,8 +296,13 @@ export default function POSTerminal() {
     setDiscountTargetProduct(null);
   };
 
-  const handleOpenScale = (productId?: string, weight?: number) => {
-    setScaleParams(productId || weight ? { productId, weight } : null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleOpenScale = (productId?: string, weight?: number, product?: any, replaceExisting?: boolean) => {
+    setScaleParams(
+      productId || weight || product
+        ? { productId, weight, product, replaceExisting }
+        : null
+    );
     setScaleOpen(true);
   };
 
@@ -357,7 +373,7 @@ export default function POSTerminal() {
               onUpdateQty={updateQty}
               onUpdateDiscount={updateDiscount}
               onRemove={removeFromCart}
-              onEditWeight={(item) => handleOpenScale(item.productId, item.qty)}
+              onEditWeight={(item) => handleOpenScale(item.productId, item.qty, item, true)}
               onOpenWeightScan={() => setWeightScanOpen(true)}
               globalDiscount={globalDiscount}
               onSetGlobalDiscount={setGlobalDiscount}
@@ -500,7 +516,7 @@ export default function POSTerminal() {
         onCloseScale={() => setScaleOpen(false)}
         scaleParams={scaleParams}
         onConfirmScale={(item, qty) => {
-          addToCart(item, qty);
+          addToCart(item, qty, Boolean(scaleParams?.replaceExisting));
           setScaleOpen(false);
         }}
 

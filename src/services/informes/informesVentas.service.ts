@@ -34,8 +34,9 @@ export async function informeVentas(p: PeriodoInforme): Promise<InformeVentas> {
     .from('ventas')
     .select(
       `
-      id, numero_factura, creado_en, monto_total, monto_impuesto, metodo_pago, cliente_id,
+      id, numero_factura, creado_en, monto_total, monto_impuesto, metodo_pago, cliente_id, cajero_id,
       clientes ( nombre ),
+      perfiles!cajero_id ( nombre_completo ),
       detalle_ventas ( id )
     `
     )
@@ -66,6 +67,10 @@ export async function informeVentas(p: PeriodoInforme): Promise<InformeVentas> {
     const pago = labelPago(v.metodo_pago as string);
     byPay.set(pago, (byPay.get(pago) ?? 0) + total);
     const cliente = v.clientes as { nombre?: string } | null;
+    const perfilRaw = v.perfiles as { nombre_completo?: string } | { nombre_completo?: string }[] | null;
+    const cajeroNombre = Array.isArray(perfilRaw)
+      ? perfilRaw[0]?.nombre_completo
+      : perfilRaw?.nombre_completo;
     const items = (v.detalle_ventas as unknown[] | null)?.length ?? 0;
     return [
       String(v.numero_factura ?? ''),
@@ -73,7 +78,7 @@ export async function informeVentas(p: PeriodoInforme): Promise<InformeVentas> {
       cliente?.nombre ?? 'Cliente general',
       items,
       pago,
-      '—',
+      cajeroNombre || 'Cajero',
       total,
     ];
   });

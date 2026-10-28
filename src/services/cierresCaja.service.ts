@@ -67,7 +67,7 @@ function localToDb(c: CashClosure): CierreCaja {
 }
 
 export function cierreDbARegistro(
-  c: CierreCaja,
+  c: CierreCaja & { cajero_nombre?: string; cajero_username?: string },
   extra?: Partial<Pick<CashClosure, 'userName' | 'username' | 'cashRegisterLabel' | 'notes' | 'baseCash'>>
 ): CashClosure {
   const local = getCashClosures().find((x) => x.id === c.id);
@@ -76,8 +76,8 @@ export function cierreDbARegistro(
     id: c.id,
     code: c.codigo,
     userId: c.cajero_id ?? local?.userId ?? '',
-    username: extra?.username || local?.username || '',
-    userName: extra?.userName || local?.userName || '',
+    username: extra?.username || c.cajero_username || local?.username || '',
+    userName: extra?.userName || c.cajero_nombre || local?.userName || 'Cajero',
     openedAt: c.abierta_en || local?.openedAt || '',
     closedAt,
     date: (closedAt || c.abierta_en || new Date().toISOString()).slice(0, 10),
@@ -123,6 +123,19 @@ export async function obtenerRegistrosCierreCaja(): Promise<CashClosure[]> {
   return [...mapped, ...locales].sort((a, b) => (a.closedAt < b.closedAt ? 1 : -1));
 }
 
+function mapCierreRowWithPerfil(row: any): CierreCaja & { cajero_nombre?: string; cajero_username?: string } {
+  const perfil = Array.isArray(row?.perfiles) ? row.perfiles[0] : row?.perfiles;
+  const local = getCashClosures().find((x) => x.id === row?.id);
+  const cajeroNombre = perfil?.nombre_completo || row?.cajero_nombre || local?.userName || undefined;
+  const cajeroUsername = perfil?.correo || row?.cajero_username || local?.username || undefined;
+  const { perfiles: _omitPerfiles, ...rest } = row || {};
+  return {
+    ...(rest as CierreCaja),
+    ...(cajeroNombre ? { cajero_nombre: cajeroNombre } : {}),
+    ...(cajeroUsername ? { cajero_username: cajeroUsername } : {}),
+  };
+}
+
 export async function obtenerCierresCaja(params?: {
   signal?: AbortSignal;
 }): Promise<CierreCaja[]> {
@@ -130,15 +143,22 @@ export async function obtenerCierresCaja(params?: {
   if (!sb) {
     return getCashClosures().map(localToDb);
   }
-  let query = sb
-    .from('cierres_caja')
-    .select(CIERRE_COLUMNS)
-    .order('abierta_en', { ascending: false })
-    .limit(100);
-  if (params?.signal) query = query.abortSignal(params.signal);
-  const { data, error } = await query;
-  if (error) throw error;
-  return (data ?? []) as CierreCaja[];
+  const buildQuery = (cols: string) => {
+    let q = sb
+      .from('cierres_caja')
+      .select(cols)
+      .order('abierta_en', { ascending: false })
+      .limit(100);
+    if (params?.signal) q = q.abortSignal(params.signal);
+    return q;
+  };
+  let { data, error } = await buildQuery(`${CIERRE_COLUMNS}, perfiles!cajero_id(nombre_completo, correo)`);
+  if (error) {
+    const fallback = await buildQuery(CIERRE_COLUMNS);
+    if (fallback.error) throw fallback.error;
+    data = fallback.data;
+  }
+  return (data ?? []).map(mapCierreRowWithPerfil);
 }
 
 export type NuevoCierreInput = {
@@ -338,16 +358,25 @@ export async function obtenerCajaAbierta(cajaId?: string, cajeroId?: string): Pr
     return pickMatch(getCashClosures().map(localToDb));
   }
 
-  let query = sb
+  const firstQuery = await sb
     .from('cierres_caja')
-    .select(CIERRE_COLUMNS)
+    .select(`${CIERRE_COLUMNS}, perfiles!cajero_id(nombre_completo, correo)`)
     .eq('estado', 'abierta')
     .order('abierta_en', { ascending: false })
     .limit(20);
 
-  const { data, error } = await query;
-  if (error) throw error;
-  const matched = pickMatch((data ?? []) as CierreCaja[]);
+  let rows: any[] = firstQuery.data ?? [];
+  if (firstQuery.error) {
+    const fallback = await sb
+      .from('cierres_caja')
+      .select(CIERRE_COLUMNS)
+      .eq('estado', 'abierta')
+      .order('abierta_en', { ascending: false })
+      .limit(20);
+    if (fallback.error) throw fallback.error;
+    rows = fallback.data ?? [];
+  }
+  const matched = pickMatch(rows.map(mapCierreRowWithPerfil));
   if (matched) return matched;
 
   return pickMatch(getCashClosures().map(localToDb));

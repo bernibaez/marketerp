@@ -37,12 +37,18 @@ export default function SalesPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
-  const isAdmin = user?.role === 'Administrador';
-  const canSeeAllSales = isAdmin || user?.role === 'Contador';
-  const canEditSales = hasPermission(user?.role ?? 'Cajero', 'ventas', 'editar');
-  const canDeleteSales = hasPermission(user?.role ?? 'Cajero', 'ventas', 'eliminar');
-  const canCreateSales = hasPermission(user?.role ?? 'Cajero', 'ventas', 'crear');
-  const canExportSales = hasPermission(user?.role ?? 'Cajero', 'ventas', 'exportar');
+  const roleNorm = (user?.role ?? '').trim().toLowerCase();
+  const isAdmin =
+    roleNorm === 'administrador' ||
+    roleNorm === 'super administrador' ||
+    roleNorm === 'admin' ||
+    roleNorm === 'super_admin' ||
+    roleNorm === 'superadmin';
+  const canSeeAllSales = isAdmin || roleNorm === 'contador';
+  const canEditSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'editar');
+  const canDeleteSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'eliminar');
+  const canCreateSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'crear');
+  const canExportSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'exportar');
   const ownCajeroId = !canSeeAllSales ? user?.id : undefined;
 
   useEffect(() => {
@@ -146,7 +152,11 @@ export default function SalesPage() {
 
   const handleCreateSaleSubmit = async (payload: Parameters<typeof cobrar>[0]) => {
     try {
-      const res = await cobrar(payload);
+      const res = await cobrar({
+        ...payload,
+        cajero_id: payload.cajero_id ?? user?.id ?? null,
+        cajero_nombre: payload.cajero_nombre ?? user?.name ?? 'Cajero',
+      });
       toast.success(`¡Venta procesada con éxito! Factura: ${res.numero_factura}`);
       setShowAddSaleForm(false);
     } catch (err: unknown) {

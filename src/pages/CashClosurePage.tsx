@@ -12,7 +12,13 @@ import { CashClosureListView } from './cash-closure/components/CashClosureListVi
 
 export default function CashClosurePage() {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'Administrador';
+  const roleNorm = (user?.role || '').trim().toLowerCase();
+  const isAdmin =
+    roleNorm === 'administrador' ||
+    roleNorm === 'super administrador' ||
+    roleNorm === 'admin' ||
+    roleNorm === 'super_admin' ||
+    roleNorm === 'superadmin';
 
   const [closures, setClosures] = useState<CashClosure[]>([]);
   const [showCloseModal, setShowCloseModal] = useState(false);

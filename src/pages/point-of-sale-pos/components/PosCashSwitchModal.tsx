@@ -15,7 +15,13 @@ interface Props {
 export default function PosCashSwitchModal({ currentId, onSelect, onClose }: Props) {
   const { user } = useAuth();
   const { registers, refetch } = useCashRegisters();
-  const isAdmin = user?.role === 'Administrador';
+  const roleNorm = (user?.role || '').trim().toLowerCase();
+  const isAdmin =
+    roleNorm === 'administrador' ||
+    roleNorm === 'super administrador' ||
+    roleNorm === 'admin' ||
+    roleNorm === 'super_admin' ||
+    roleNorm === 'superadmin';
 
   const visibleRegisters = isAdmin
     ? registers

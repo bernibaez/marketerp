@@ -17,6 +17,7 @@ interface UseSalesModalsOptions {
     tipo_ncf: string | null;
     ncf: string | null;
     monto_descuento: number;
+    monto_total?: number;
     estado: EstadoVenta;
   }) => Promise<void>;
   convertirAVenta: (id: string, metodoPago: MetodoPago) => Promise<{ numero_factura: string }>;
@@ -96,6 +97,7 @@ export function useSalesModals({
     tipo_ncf: string | null;
     ncf: string | null;
     monto_descuento: number;
+    monto_total?: number;
     estado: string;
   }) => {
     if (!editingSale) return;
@@ -110,6 +112,7 @@ export function useSalesModals({
         tipo_ncf: data.tipo_ncf,
         ncf: data.ncf,
         monto_descuento: data.monto_descuento,
+        monto_total: data.monto_total,
         estado: data.estado as EstadoVenta,
       });
       toast.success(`Factura ${editingSale.numero_factura} actualizada exitosamente`);

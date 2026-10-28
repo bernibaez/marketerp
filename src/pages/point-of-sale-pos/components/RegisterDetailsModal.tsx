@@ -31,8 +31,9 @@ export default function RegisterDetailsModal({
   const [loading, setLoading] = useState(true);
   const [ventas, setVentas] = useState<VentaConDetalle[]>([]);
   const [abiertaEn, setAbiertaEn] = useState<string>('');
+  const [turnoCajeroNombre, setTurnoCajeroNombre] = useState<string>('');
 
-  const displayUser = user?.name || 'Usuario';
+  const displayUser = turnoCajeroNombre || ventas[0]?.cajero_nombre || user?.name || 'Usuario';
   const displayEmail = user?.email || '';
 
   useEffect(() => {
@@ -44,33 +45,41 @@ export default function RegisterDetailsModal({
         if (!abierta) {
           if (alive) {
             setAbiertaEn('');
+            setTurnoCajeroNombre('');
             setVentas([]);
           }
           return;
         }
         const desde = abierta.abierta_en;
-        if (alive) setAbiertaEn(desde);
+        const cajeroAbierta =
+          (abierta as typeof abierta & { cajero_nombre?: string })?.cajero_nombre || '';
+        if (alive) {
+          setAbiertaEn(desde);
+          setTurnoCajeroNombre(cajeroAbierta);
+        }
 
         const cajaIds = Array.from(new Set([cajaId, abierta.caja_id].filter(Boolean) as string[]));
         const porCaja = await obtenerVentasTurno({
           cajaId: cajaIds.length > 0 ? cajaIds : cajaId,
-          // No-admin: solo las ventas que él/ella realizó
-          cajeroId: includeUserSales ? undefined : user?.id,
+          // No-admin: solo las ventas que él/ella realizó; Admin: todas las ventas de esta caja
+          cajeroId: includeUserSales ? undefined : (abierta.cajero_id || user?.id),
           desde,
           limite: 500,
         });
 
         let merged = porCaja;
-        // Admin: también incluye ventas hechas por su usuario en otras cajas del mismo turno
-        if (includeUserSales && user?.id) {
-          const porUsuario = await obtenerVentasTurno({
-            cajeroId: user.id,
+        // Si hay ventas del cajero titular del turno sin caja_id explícita, incluirlas
+        const targetCajeroId = abierta.cajero_id || (!includeUserSales ? user?.id : undefined);
+        if (targetCajeroId) {
+          const porCajero = await obtenerVentasTurno({
+            cajeroId: targetCajeroId,
             desde,
             limite: 500,
           });
+          const allowedSet = new Set(cajaIds.map(String));
           const seen = new Set(merged.map((v) => v.id));
-          for (const v of porUsuario) {
-            if (!seen.has(v.id)) {
+          for (const v of porCajero) {
+            if (!seen.has(v.id) && (!v.caja_id || allowedSet.has(String(v.caja_id)))) {
               merged = [...merged, v];
               seen.add(v.id);
             }

@@ -12,6 +12,7 @@ interface SaleEditViewProps {
     tipo_ncf: string | null;
     ncf: string | null;
     monto_descuento: number;
+    monto_total: number;
     estado: string;
   }) => Promise<void>;
   onClose: () => void;
@@ -31,6 +32,11 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
   const [estado, setEstado] = useState<string>(sale.estado || 'completada');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const nuevoMontoTotal = Math.max(
+    0,
+    Math.round((Number(sale.subtotal || 0) + Number(sale.monto_impuesto || 0) - Number(montoDescuento || 0)) * 100) / 100
+  );
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -41,6 +47,7 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
         tipo_ncf: tipoNcf || null,
         ncf: ncf || null,
         monto_descuento: Number(montoDescuento),
+        monto_total: nuevoMontoTotal,
         estado,
       });
     } finally {
@@ -154,9 +161,9 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
 
           <div className="bg-secondary/30 p-3 rounded-xl text-xs space-y-1">
             <div className="flex justify-between text-muted-foreground">
-              <span>Monto Total Actual:</span>
+              <span>Monto Total Actualizado:</span>
               <span className="font-bold text-foreground font-mono">
-                RD$ {sale.monto_total.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                RD$ {nuevoMontoTotal.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
             <div className="flex justify-between text-muted-foreground">

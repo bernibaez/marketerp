@@ -25,9 +25,12 @@ interface UsePOSCheckoutProps {
   cashIsOpen: boolean;
   activeCashId: CashRegisterId;
   activeCashLabel: string;
+  activeCashCashierId?: string;
+  activeCashCashierName?: string;
   user: { id?: string; name?: string } | null;
   clearCart: () => void;
   navigate: (to: string) => void;
+  onSaleSuccess?: () => void;
 }
 
 export function usePOSCheckout({
@@ -44,9 +47,12 @@ export function usePOSCheckout({
   cashIsOpen,
   activeCashId,
   activeCashLabel,
+  activeCashCashierId,
+  activeCashCashierName,
   user,
   clearCart,
   navigate,
+  onSaleSuccess,
 }: UsePOSCheckoutProps) {
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [preferredPayMethod, setPreferredPayMethod] = useState<
@@ -159,9 +165,16 @@ export function usePOSCheckout({
       try {
         const effectiveNcfType =
           fiscalInvoice?.ncfType ?? (fiscalEnabled ? selectedNcfType : null);
+        const effectiveCajeroId = activeCashCashierId || user?.id || null;
+        const effectiveCajeroNombre =
+          (activeCashCashierName && activeCashCashierName.trim()) ||
+          user?.name ||
+          'Cajero';
         const resultado = await procesarVenta({
-          cajero_id: user?.id ?? null,
+          cajero_id: effectiveCajeroId,
+          cajero_nombre: effectiveCajeroNombre,
           cliente_id: selectedCustomer?.id ?? null,
+          cliente_nombre: selectedCustomer?.name ?? 'Cliente General',
           caja_id: String(activeCashId),
           subtotal,
           monto_impuesto: taxTotal,
@@ -186,7 +199,7 @@ export function usePOSCheckout({
             costo_unitario: item.cost,
             cantidad: item.qty,
             porcentaje_impuesto: item.tax,
-            subtotal: item.price * item.qty * (1 - item.discount / 100),
+            subtotal: Math.round(item.price * item.qty * (1 - item.discount / 100) * 100) / 100,
           })),
         });
 
@@ -220,7 +233,7 @@ export function usePOSCheckout({
             itbis: taxTotal,
             total,
             paymentMethod: metodo,
-            cashier: user?.name || 'Cajero POS',
+            cashier: effectiveCajeroNombre,
             expirationDate: fiscalInvoice?.expirationDate || '2027-12-31',
             items: activeItems.map((item) => ({
               sku: item.sku,
@@ -253,6 +266,7 @@ export function usePOSCheckout({
         }
 
         setOrderCompleted(true);
+        if (onSaleSuccess) onSaleSuccess();
         return resultado;
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Error al registrar la venta');

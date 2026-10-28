@@ -9,6 +9,7 @@ interface SaleCreateViewProps {
   products: Producto[];
   onSubmit: (payload: {
     cliente_id: string | null;
+    cliente_nombre?: string | null;
     tipo_ncf: string;
     subtotal: number;
     monto_impuesto: number;
@@ -59,16 +60,35 @@ export const SaleCreateView: React.FC<SaleCreateViewProps> = ({
   };
 
   const subtotal = useMemo(
-    () => cart.reduce((sum, item) => sum + item.cantidad * item.precio_unitario, 0),
+    () =>
+      Math.round(
+        cart.reduce((sum, item) => sum + item.cantidad * item.precio_unitario, 0) * 100
+      ) / 100,
     [cart]
   );
-  const tax = useMemo(() => Math.round(subtotal * 0.18 * 100) / 100, [subtotal]);
-  const total = useMemo(() => subtotal + tax, [subtotal, tax]);
+  const tax = useMemo(
+    () =>
+      Math.round(
+        cart.reduce((sum, item) => {
+          const itemSub = item.cantidad * item.precio_unitario;
+          const pct = Number(item.producto.porcentaje_impuesto ?? 0);
+          return sum + itemSub * (pct / 100);
+        }, 0) * 100
+      ) / 100,
+    [cart]
+  );
+  const total = useMemo(() => Math.round((subtotal + tax) * 100) / 100, [subtotal, tax]);
   const costoTotal = useMemo(
-    () => cart.reduce((sum, item) => sum + item.cantidad * (item.producto.precio_costo || 0), 0),
+    () =>
+      Math.round(
+        cart.reduce((sum, item) => sum + item.cantidad * (item.producto.precio_costo || 0), 0) * 100
+      ) / 100,
     [cart]
   );
-  const devuelta = useMemo(() => Math.max(0, montoPagado - total), [montoPagado, total]);
+  const devuelta = useMemo(
+    () => Math.round(Math.max(0, montoPagado - total) * 100) / 100,
+    [montoPagado, total]
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,10 +97,13 @@ export const SaleCreateView: React.FC<SaleCreateViewProps> = ({
       return;
     }
 
+    const selectedClient = clients.find((c) => c.id === customerId);
+
     setIsSubmitting(true);
     try {
       await onSubmit({
         cliente_id: customerId || null,
+        cliente_nombre: selectedClient?.nombre || 'Cliente General',
         tipo_ncf: tipoNcf,
         subtotal,
         monto_impuesto: tax,
@@ -97,8 +120,8 @@ export const SaleCreateView: React.FC<SaleCreateViewProps> = ({
           precio_unitario: item.precio_unitario,
           costo_unitario: item.producto.precio_costo || 0,
           cantidad: item.cantidad,
-          porcentaje_impuesto: item.producto.porcentaje_impuesto || 18,
-          subtotal: item.cantidad * item.precio_unitario,
+          porcentaje_impuesto: Number(item.producto.porcentaje_impuesto ?? 0),
+          subtotal: Math.round(item.cantidad * item.precio_unitario * 100) / 100,
         })),
       });
     } finally {
