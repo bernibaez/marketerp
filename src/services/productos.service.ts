@@ -381,11 +381,77 @@ function localAsProductos(): Producto[] {
   });
 }
 
-const PRODUCTOS_CACHE_TTL = 30_000; // 30 segundos de cache para navegación instantánea
+const PRODUCTOS_CACHE_TTL = 10 * 60_000; // 10 minutos de cache para evitar consumo excesivo de egress en Supabase
 const productosCache = new Map<string, { timestamp: number; result: ProductosResultado }>();
+const inFlightRequests = new Map<string, Promise<ProductosResultado>>();
+
+interface MasterCatalogEntry {
+  timestamp: number;
+  data: Producto[];
+  total: number;
+}
+const masterCatalogCache = new Map<string, MasterCatalogEntry>();
 
 export function invalidarCacheProductos(): void {
   productosCache.clear();
+  inFlightRequests.clear();
+  masterCatalogCache.clear();
+}
+
+export async function buscarProductoPorCodigo(codigo: string): Promise<Producto | null> {
+  const code = (codigo || '').trim().toLowerCase();
+  if (!code) return null;
+
+  // 1. Buscar en el catalogo maestro en memoria (0 ms, 0 egress)
+  for (const entry of masterCatalogCache.values()) {
+    const found = entry.data.find(
+      (p) =>
+        (p.codigo_barras && p.codigo_barras.toLowerCase() === code) ||
+        (p.sku && p.sku.toLowerCase() === code) ||
+        (p.plu && p.plu.toLowerCase() === code)
+    );
+    if (found) return found;
+  }
+
+  // 2. Buscar en caché reciente
+  for (const entry of productosCache.values()) {
+    const found = entry.result.datos.find(
+      (p) =>
+        (p.codigo_barras && p.codigo_barras.toLowerCase() === code) ||
+        (p.sku && p.sku.toLowerCase() === code) ||
+        (p.plu && p.plu.toLowerCase() === code)
+    );
+    if (found) return found;
+  }
+
+  const sb = tryGetSupabase();
+  if (!sb) {
+    const local = demoAsProductos();
+    return (
+      local.find(
+        (p) =>
+          (p.codigo_barras && p.codigo_barras.toLowerCase() === code) ||
+          (p.sku && p.sku.toLowerCase() === code)
+      ) ?? null
+    );
+  }
+
+  // 3. Consulta puntual a Supabase (solo 1 fila con maybeSingle, ~0.2 KB en vez de descargar 2 MB)
+  try {
+    const { data, error } = await sb
+      .from('productos')
+      .select('*')
+      .or(`codigo_barras.eq."${codigo.trim()}",sku.eq."${codigo.trim()}",plu.eq."${codigo.trim()}"`)
+      .maybeSingle();
+
+    if (!error && data) {
+      return data as Producto;
+    }
+  } catch (err) {
+    console.warn('Error buscando producto por código:', err);
+  }
+
+  return null;
 }
 
 export async function obtenerProductos(params: ProductosFiltro = {}): Promise<ProductosResultado> {
@@ -411,9 +477,47 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
         datos: [...cached.result.datos],
       };
     }
+
+    // Si ya existe una petición idéntica en vuelo, reutilizarla (Deduplicación de peticiones)
+    const inFlight = inFlightRequests.get(cacheKey);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    // Servir desde el Catálogo Maestro en memoria si ya fue descargado previamente (0 egress a Supabase!)
+    const estadoKey = params.estado || 'todos';
+    const masterEntry = masterCatalogCache.get(estadoKey) || (estadoKey !== 'todos' ? masterCatalogCache.get('todos') : null);
+    if (masterEntry && Date.now() - masterEntry.timestamp < PRODUCTOS_CACHE_TTL) {
+      let filtered = masterEntry.data;
+      if (params.estado && params.estado !== 'todos') {
+        filtered = filtered.filter((p) => p.estado === params.estado);
+      }
+      if (params.categoria && params.categoria !== 'Todas') {
+        filtered = filtered.filter((p) => p.categoria === params.categoria);
+      }
+      if (params.busqueda && params.busqueda.trim()) {
+        const q = params.busqueda.trim().toLowerCase();
+        filtered = filtered.filter(
+          (p) =>
+            (p.nombre && p.nombre.toLowerCase().includes(q)) ||
+            (p.sku && p.sku.toLowerCase().includes(q)) ||
+            (p.codigo_barras && p.codigo_barras.toLowerCase().includes(q)) ||
+            (p.plu && p.plu.toLowerCase().includes(q)) ||
+            (p.categoria && p.categoria.toLowerCase().includes(q)) ||
+            (p.marca && p.marca.toLowerCase().includes(q))
+        );
+      }
+
+      const total = filtered.length;
+      const datos = filtered.slice(desde, desde + limite);
+      const res: ProductosResultado = { datos, total, pagina, limite };
+      productosCache.set(cacheKey, { timestamp: Date.now(), result: res });
+      return res;
+    }
   }
 
-  const sb = tryGetSupabase();
+  const runQuery = async (): Promise<ProductosResultado> => {
+    const sb = tryGetSupabase();
   let dbProducts: Producto[] = [];
   let dbCount = 0;
   let supabaseFailed = false;
@@ -563,9 +667,28 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
 
   if (!params.signal) {
     productosCache.set(cacheKey, { timestamp: Date.now(), result });
+    // Si fue una carga masiva sin filtros, registrarla como Catálogo Maestro en memoria
+    if (limite >= 1000 && !params.busqueda && (!params.categoria || params.categoria === 'Todas')) {
+      masterCatalogCache.set(params.estado || 'todos', {
+        timestamp: Date.now(),
+        data: combined,
+        total,
+      });
+    }
   }
 
   return result;
+  };
+
+  if (!params.signal) {
+    const promise = runQuery().finally(() => {
+      inFlightRequests.delete(cacheKey);
+    });
+    inFlightRequests.set(cacheKey, promise);
+    return promise;
+  }
+
+  return runQuery();
 }
 
 
@@ -870,6 +993,12 @@ export async function buscarProductoPorCodigoEscaneado(
 
   const matchesLocal = (list: Producto[]) =>
     list.find((p) => productoCoincideConCodigo(p, clean)) ?? null;
+
+  // 1. Revisar primero si coincide en el catálogo maestro en memoria (0 ms de respuesta, 0 egress)
+  for (const entry of masterCatalogCache.values()) {
+    const found = entry.data.find((p) => productoCoincideConCodigo(p, clean));
+    if (found) return found;
+  }
 
   const sb = tryGetSupabase();
   if (!sb) {

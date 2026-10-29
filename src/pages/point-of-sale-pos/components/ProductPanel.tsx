@@ -39,6 +39,7 @@ interface ProductPanelProps {
   awaitingDelete?: boolean;
   searchQuery?: string;
   onSearchChange?: (q: string) => void;
+  catalogProducts?: any[];
 }
 
 export default function ProductPanel({
@@ -46,6 +47,7 @@ export default function ProductPanel({
   onOpenScale,
   awaitingDelete = false,
   searchQuery = '',
+  catalogProducts,
 }: ProductPanelProps) {
   const [alertOpen, setAlertOpen] = useState(false);
   const [alertComboName, setAlertComboName] = useState('');
@@ -57,11 +59,32 @@ export default function ProductPanel({
     return term;
   }, [searchQuery]);
 
-  const { productosUi } = useProductos({ pagina: 1, limite: 500, busqueda: catalogSearch, estado: 'activo' });
+  // Filtrado en memoria ultra rápido (0 ms, 0 egress) cuando se pasa el catálogo compartido
+  const localFilteredCatalog = useMemo(() => {
+    if (!catalogProducts || catalogProducts.length === 0) return null;
+    if (!catalogSearch) return catalogProducts;
+    const q = catalogSearch.toLowerCase();
+    return catalogProducts.filter(
+      (p) =>
+        (p.name && p.name.toLowerCase().includes(q)) ||
+        (p.sku && p.sku.toLowerCase().includes(q)) ||
+        (p.barcode && p.barcode.toLowerCase().includes(q)) ||
+        (p.plu && p.plu.toLowerCase().includes(q)) ||
+        (p.category && p.category.toLowerCase().includes(q))
+    );
+  }, [catalogProducts, catalogSearch]);
+
+  const { productosUi: fallbackProductosUi } = useProductos(
+    catalogProducts && catalogProducts.length > 0
+      ? { pagina: 1, limite: 1 }
+      : { pagina: 1, limite: 100, busqueda: catalogSearch, estado: 'activo' }
+  );
+
+  const effectiveProductosUi = localFilteredCatalog || fallbackProductosUi;
   const { combos } = useCombos(true);
 
   const products: Product[] = useMemo(() => {
-    const fromStore = productosUi
+    const fromStore = effectiveProductosUi
       .filter((p) => p.status === 'active' || p.status === undefined)
       .map((p): Product => {
         const isWeight =
@@ -137,7 +160,7 @@ export default function ProductPanel({
       });
 
     return [...fromStore, ...demoExtras];
-  }, [productosUi]);
+  }, [effectiveProductosUi]);
 
   const allCombos = combos.filter((c) => c.active && c.visibleInPos);
 
@@ -227,7 +250,7 @@ export default function ProductPanel({
       return;
     }
 
-    const stockCheck = checkComboStockAvailability(combo, 1, productosUi as any);
+    const stockCheck = checkComboStockAvailability(combo, 1, effectiveProductosUi as any);
     if (!stockCheck.available) {
       setAlertComboName(combo.name);
       setMissingItems(stockCheck.missingItems);

@@ -14,6 +14,7 @@ interface Props {
   initialProductId?: string;
   initialWeight?: number;
   initialProduct?: any;
+  sharedCatalog?: any[];
 }
 
 export default function PosScaleModal({
@@ -22,8 +23,14 @@ export default function PosScaleModal({
   initialProductId,
   initialWeight,
   initialProduct,
+  sharedCatalog,
 }: Props) {
-  const { productosUi } = useProductos({ pagina: 1, limite: 1000, estado: 'todos' });
+  const { productosUi: fallbackProductosUi } = useProductos(
+    sharedCatalog && sharedCatalog.length > 0
+      ? { pagina: 1, limite: 1 }
+      : { pagina: 1, limite: 100, estado: 'todos' }
+  );
+  const productosUi = (sharedCatalog && sharedCatalog.length > 0) ? sharedCatalog : fallbackProductosUi;
   const [extraProducts, setExtraProducts] = useState<ScaleProduct[]>([]);
 
   const normalizedInitialProduct: ScaleProduct | null = useMemo(() => {

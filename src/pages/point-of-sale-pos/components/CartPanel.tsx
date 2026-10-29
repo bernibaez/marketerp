@@ -20,7 +20,6 @@ import {
 } from 'lucide-react';
 import type { CartItem, Customer } from './POSTerminal';
 import { useClientes } from '@/hooks/useClientes';
-import { useProductos } from '@/hooks/useProductos';
 import { initialProducts } from '@/lib/initialProducts';
 import { isVariableWeightBarcode, productMatchesScanCode } from '@/lib/scaleBarcode';
 import { obtenerProductos, productoAUi } from '@/services/productos.service';
@@ -61,6 +60,7 @@ interface CartPanelProps {
   onOpenDiscountModal?: (item: CartItem) => void;
   onOpenPriceModal?: (item: CartItem) => void;
   isAdmin?: boolean;
+  catalogProducts?: any[];
 }
 
 export default function CartPanel({
@@ -90,6 +90,7 @@ export default function CartPanel({
   onOpenDiscountModal,
   onOpenPriceModal,
   isAdmin = false,
+  catalogProducts,
 }: CartPanelProps) {
   const { clientes, refetch } = useClientes('');
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -109,19 +110,18 @@ export default function CartPanel({
     }
   }, [topCartItemKey]);
 
-  const { productosUi } = useProductos({ pagina: 1, limite: 5000, estado: 'activo' });
-
-  // Merge store products and initialProducts for comprehensive local search matching (solo activos)
+  // Usar catálogo compartido recibido de POSTerminal (0 peticiones duplicadas a Supabase)
   const allProducts = useMemo(() => {
-    const list = [...productosUi.filter((p) => p.status === 'active' || p.status === undefined)];
-    const skus = new Set(list.map((p) => p.sku.toLowerCase()));
+    const source = catalogProducts || [];
+    const list = [...source.filter((p) => p.status === 'active' || p.status === undefined)];
+    const skus = new Set(list.map((p) => (p.sku || '').toLowerCase()));
     for (const p of initialProducts) {
       if (!skus.has(p.sku.toLowerCase()) && p.status !== 'inactive' && p.status !== 'discontinued') {
         list.push(p as any);
       }
     }
     return list;
-  }, [productosUi]);
+  }, [catalogProducts]);
 
   // Consulta en tiempo real a Supabase / Base de datos con debounce cuando el usuario escribe en la barra
   useEffect(() => {

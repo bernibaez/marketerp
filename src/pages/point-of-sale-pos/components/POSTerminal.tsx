@@ -78,7 +78,7 @@ export default function POSTerminal() {
   const { registers, loading: registersLoading, refetch: refetchRegisters, markRegisterClosed } = useCashRegisters();
 
   // 1. Data Catalogs
-  const { productosUi } = useProductos({ pagina: 1, limite: 500, estado: 'activo' });
+  const { productosUi } = useProductos({ pagina: 1, limite: 5000, estado: 'activo' });
   const { combos } = useCombos(true);
 
   // 2. Cart & Calculations Hook
@@ -472,6 +472,7 @@ export default function POSTerminal() {
               onOpenDiscountModal={handleOpenCartItemDiscount}
               onOpenPriceModal={handleRequestPriceChange}
               isAdmin={isAdminUser}
+              catalogProducts={productosUi}
             />
           </div>
 
@@ -482,6 +483,7 @@ export default function POSTerminal() {
               awaitingDelete={awaitingDeleteScan}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
+              catalogProducts={productosUi}
             />
           </div>
         </div>
@@ -616,6 +618,7 @@ export default function POSTerminal() {
         }}
         registers={registers}
         isAdminUser={isAdminUser}
+        catalogProducts={productosUi}
 
         registerDetailsOpen={registerDetailsOpen}
         onCloseRegisterDetails={() => setRegisterDetailsOpen(false)}

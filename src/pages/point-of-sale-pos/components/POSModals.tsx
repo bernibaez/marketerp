@@ -61,6 +61,7 @@ interface POSModalsProps {
   onCloseWeightScan: () => void;
   realScaleCatalog: any[];
   onConfirmWeightScan: (item: any, weight: number) => void;
+  catalogProducts?: any[];
 }
 
 export const POSModals: React.FC<POSModalsProps> = ({
@@ -91,6 +92,7 @@ export const POSModals: React.FC<POSModalsProps> = ({
   onSelectCashRegister,
   registers,
   isAdminUser,
+  catalogProducts,
 
   registerDetailsOpen,
   onCloseRegisterDetails,
@@ -139,6 +141,7 @@ export const POSModals: React.FC<POSModalsProps> = ({
           initialProduct={scaleParams?.product}
           onClose={onCloseScale}
           onConfirm={onConfirmScale}
+          sharedCatalog={catalogProducts}
         />
       )}
 

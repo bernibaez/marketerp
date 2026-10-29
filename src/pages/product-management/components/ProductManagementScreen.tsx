@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ProductsHeader from './ProductsHeader';
 import ProductsToolbar from './ProductsToolbar';
 import ProductsTable from './ProductsTable';
@@ -29,6 +29,14 @@ import { useCategorias } from '@/hooks/useCategorias';
 export default function ProductManagementScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [search]);
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterStock, setFilterStock] = useState('all');
@@ -61,7 +69,7 @@ export default function ProductManagementScreen() {
   const { productosUi, crear, actualizar, eliminar, refetch } = useProductos({
     pagina: 1,
     limite: 5000,
-    busqueda: search,
+    busqueda: debouncedSearch,
     categoria: filterCategory === 'all' ? undefined : filterCategory,
     estado: estadoDb,
   });
