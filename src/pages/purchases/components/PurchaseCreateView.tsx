@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+rimport React, { useState, useMemo, useEffect, useRef } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { Search, Loader2, X, Plus, Trash2, Check, ChevronDown, Building2, Phone, Mail, MapPin } from 'lucide-react';
 import ModalShell from '@/components/ui/ModalShell';
