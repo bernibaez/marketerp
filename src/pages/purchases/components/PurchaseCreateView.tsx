@@ -367,30 +367,30 @@ export function PurchaseCreateView({
 
           {/* Tabla de Renglones Ajustada y Compacta */}
           <div className="overflow-x-auto rounded-xl border border-border/80 bg-card">
-            <table className="w-full min-w-[850px] table-fixed text-xs">
+            <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-border bg-secondary/40 text-slate-700 dark:text-slate-200">
-                  <th className="text-left py-3 px-3 font-bold w-[26%]">Producto</th>
-                  <th className="text-center py-3 px-2 font-bold w-[9%]">Cant.</th>
-                  <th className="text-right py-3 px-2 font-bold w-[13%]">
+                <tr className="border-b border-border bg-secondary/40 text-slate-600 dark:text-slate-300">
+                  <th className="text-left py-2.5 px-3 font-bold min-w-[150px]">Producto</th>
+                  <th className="text-center py-2.5 px-2 font-bold w-20 sm:w-24">Cant.</th>
+                  <th className="text-right py-2.5 px-2 font-bold w-28 sm:w-32">
                     P. Compra
-                    <span className="block text-[10px] font-normal text-muted-foreground">costo</span>
+                    <span className="block text-[9px] font-normal text-muted-foreground">costo</span>
                   </th>
-                  <th className="text-right py-3 px-2 font-bold w-[13%]">
+                  <th className="text-right py-2.5 px-2 font-bold w-28 sm:w-32">
                     P. Venta
-                    <span className="block text-[10px] font-normal text-emerald-600">público</span>
+                    <span className="block text-[9px] font-normal text-emerald-600">público</span>
                   </th>
                   {/* Margen justo al lado del precio de venta */}
-                  <th className="text-center py-3 px-2 font-bold w-[11%]">
+                  <th className="text-center py-2.5 px-2 font-bold w-24 sm:w-28">
                     Margen Venta
-                    <span className="block text-[10px] font-normal text-emerald-600">% ganancia</span>
+                    <span className="block text-[9px] font-normal text-emerald-600">% ganancia</span>
                   </th>
-                  <th className="text-right py-3 px-2 font-bold w-[13%]">
+                  <th className="text-right py-2.5 px-2 font-bold w-28 sm:w-32">
                     P. Mayor
-                    <span className="block text-[10px] font-normal text-amber-600 dark:text-amber-400">mayorista</span>
+                    <span className="block text-[9px] font-normal text-amber-600 dark:text-amber-400">mayorista</span>
                   </th>
-                  <th className="text-right py-3 px-3 font-bold w-[11%]">Subtotal</th>
-                  <th className="text-center py-3 px-2 w-[4%]"></th>
+                  <th className="text-right py-2.5 px-3 font-bold w-28 sm:w-32">Subtotal</th>
+                  <th className="text-center py-2.5 px-2 w-10"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
@@ -417,64 +417,62 @@ export function PurchaseCreateView({
                         }`}
                       >
                         {/* Producto */}
-                        <td className="py-2.5 px-3">
-                          <p className="font-bold text-foreground text-xs sm:text-sm leading-snug" title={item.name}>
+                        <td className="py-2 px-3">
+                          <p className="font-bold text-foreground text-xs truncate max-w-[220px]" title={item.name}>
                             {item.name}
                           </p>
-                          <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
-                            SKU: <span className="font-medium text-foreground/80">{item.sku}</span>
-                          </p>
+                          <p className="text-[10px] font-mono text-muted-foreground mt-0.5">{item.sku}</p>
                         </td>
 
                         {/* Cantidad */}
-                        <td className="py-2.5 px-2 text-center">
+                        <td className="py-2 px-2 text-center">
                           <input
                             type="number"
                             min={0.001}
                             step="0.001"
                             value={item.qty}
                             onChange={(e) => onUpdateLineQty(item.id, parseFloat(e.target.value) || 0)}
-                            className="input-field w-16 sm:w-20 text-center py-1.5 px-1.5 font-bold text-xs sm:text-sm mx-auto block"
+                            className="input-field w-16 sm:w-20 text-center py-1 px-1 font-bold text-xs"
                           />
                         </td>
 
                         {/* Precio Compra */}
-                        <td className="py-2.5 px-2 text-right">
-                          <div className="flex items-center gap-1 justify-end">
-                            <span className="text-[10px] text-muted-foreground font-semibold">RD$</span>
+                        <td className="py-2 px-2 text-right">
+                          <div className="inline-flex items-center gap-1 justify-end">
+                            <span className="text-[9px] text-muted-foreground font-semibold">RD$</span>
                             <input
                               type="number"
                               min={0}
                               step="0.01"
                               value={item.price}
                               onChange={(e) => onUpdateLinePrice(item.id, Number(e.target.value))}
-                              className="input-field w-20 sm:w-24 text-right py-1.5 px-1.5 font-bold font-mono text-xs sm:text-sm tabular-nums"
+                              className="input-field w-20 sm:w-24 text-right py-1 px-1.5 font-bold font-mono text-xs tabular-nums"
                               title="Precio de compra / costo"
                             />
                           </div>
                         </td>
 
                         {/* Precio Venta */}
-                        <td className="py-2.5 px-2 text-right">
-                          <div className="flex items-center gap-1 justify-end">
-                            <span className="text-[10px] text-emerald-600 font-semibold">RD$</span>
+                        <td className="py-2 px-2 text-right">
+                          <div className="inline-flex items-center gap-1 justify-end">
+                            <span className="text-[9px] text-emerald-600 font-semibold">RD$</span>
                             <input
                               type="number"
                               min={0}
                               step="0.01"
                               value={item.salePrice}
                               onChange={(e) => onUpdateLineSalePrice(item.id, Number(e.target.value))}
-                              className="input-field w-20 sm:w-24 text-right py-1.5 px-1.5 font-bold font-mono text-xs sm:text-sm tabular-nums text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                              className="input-field w-20 sm:w-24 text-right py-1 px-1.5 font-bold font-mono text-xs tabular-nums text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
                               title="Precio de venta"
                             />
                           </div>
                         </td>
 
                         {/* Margen Venta justo al lado de Precio de Venta */}
-                        <td className="py-2.5 px-2 text-center">
+                        <td className="py-2 px-2 text-center">
                           <div className="flex flex-col items-center justify-center">
                             <span
-                              className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-black tabular-nums leading-tight ${
+                              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-black tabular-nums leading-tight ${
                                 marginAmt >= 0
                                   ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                                   : 'bg-danger-bg text-danger border border-danger/20'
@@ -483,29 +481,29 @@ export function PurchaseCreateView({
                             >
                               {marginPct >= 0 ? `+${marginPct.toFixed(0)}%` : `${marginPct.toFixed(0)}%`}
                             </span>
-                            <span className="text-[10px] font-mono text-muted-foreground mt-0.5 tabular-nums">
-                              {marginAmt >= 0 ? `+RD$ ${marginAmt.toFixed(2)}` : `-RD$ ${Math.abs(marginAmt).toFixed(2)}`}
+                            <span className="text-[9px] font-mono text-muted-foreground mt-0.5 tabular-nums">
+                              {marginAmt >= 0 ? `+${marginAmt.toFixed(2)}` : `${marginAmt.toFixed(2)}`}
                             </span>
                           </div>
                         </td>
 
                         {/* Precio Al Por Mayor */}
-                        <td className="py-2.5 px-2 text-right">
-                          <div className="flex flex-col items-end">
-                            <div className="flex items-center gap-1 justify-end">
-                              <span className="text-[10px] text-amber-600 font-semibold">RD$</span>
+                        <td className="py-2 px-2 text-right">
+                          <div className="inline-flex flex-col items-end">
+                            <div className="inline-flex items-center gap-1 justify-end">
+                              <span className="text-[9px] text-amber-600 font-semibold">RD$</span>
                               <input
                                 type="number"
                                 min={0}
                                 step="0.01"
                                 value={item.wholesalePrice || 0}
                                 onChange={(e) => onUpdateLineWholesalePrice(item.id, Number(e.target.value))}
-                                className="input-field w-20 sm:w-24 text-right py-1.5 px-1.5 font-bold font-mono text-xs sm:text-sm tabular-nums text-amber-600 dark:text-amber-400 border-amber-500/30"
+                                className="input-field w-20 sm:w-24 text-right py-1 px-1.5 font-bold font-mono text-xs tabular-nums text-amber-600 dark:text-amber-400 border-amber-500/30"
                                 title="Precio de venta al por mayor"
                               />
                             </div>
                             {item.wholesalePrice ? (
-                              <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 tabular-nums mt-0.5">
+                              <span className="text-[9px] font-mono text-amber-600 dark:text-amber-400 tabular-nums mt-0.5">
                                 {wholesaleMarginPct >= 0 ? `+${wholesaleMarginPct.toFixed(0)}%` : `${wholesaleMarginPct.toFixed(0)}%`}
                               </span>
                             ) : null}
@@ -513,19 +511,19 @@ export function PurchaseCreateView({
                         </td>
 
                         {/* Subtotal */}
-                        <td className="py-2.5 px-3 text-right font-black text-foreground tabular-nums text-xs sm:text-sm whitespace-nowrap">
+                        <td className="py-2 px-3 text-right font-black text-foreground tabular-nums text-xs whitespace-nowrap">
                           RD$ {(item.qty * item.price).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                         </td>
 
                         {/* Acciones */}
-                        <td className="py-2.5 px-2 text-center">
+                        <td className="py-2 px-2 text-center">
                           <button
                             type="button"
                             onClick={() => onRemoveLine(item.id)}
                             className="p-1 text-muted-foreground hover:text-danger hover:bg-danger-bg rounded-md transition-colors cursor-pointer"
                             title="Eliminar renglón"
                           >
-                            <Trash2 size={15} />
+                            <Trash2 size={14} />
                           </button>
                         </td>
                       </tr>
