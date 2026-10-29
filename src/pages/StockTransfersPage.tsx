@@ -36,7 +36,7 @@ export default function StockTransfersPage() {
   const [productoId, setProductoId] = useState('');
   const [cantidad, setCantidad] = useState('1');
 
-  const { productosUi } = useProductos({ pagina: 1, limite: 300, estado: 'activo' });
+  const { productosUi } = useProductos({ pagina: 1, limite: 5000, estado: 'activo' });
 
   const reload = async () => {
     setLoading(true);

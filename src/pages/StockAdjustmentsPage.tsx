@@ -144,7 +144,7 @@ export default function StockAdjustmentsPage() {
       try {
         const res = await obtenerProductos({
           pagina: 1,
-          limite: 20,
+          limite: 5000,
           busqueda: query,
           estado: 'activo',
           signal: ac.signal,

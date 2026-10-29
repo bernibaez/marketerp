@@ -392,10 +392,12 @@ export default function ProductsTable({
               }}
               className="h-7 px-1.5 rounded-md border border-border bg-background text-xs cursor-pointer outline-hidden"
             >
-              <option value={10}>10</option>
-              <option value={12}>12</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
+              <option value={12}>12 por pág.</option>
+              <option value={25}>25 por pág.</option>
+              <option value={50}>50 por pág.</option>
+              <option value={100}>100 por pág.</option>
+              <option value={500}>500 por pág.</option>
+              <option value={10000}>Mostrar Todos</option>
             </select>
           </div>
         </div>

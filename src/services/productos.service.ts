@@ -390,7 +390,7 @@ export function invalidarCacheProductos(): void {
 
 export async function obtenerProductos(params: ProductosFiltro = {}): Promise<ProductosResultado> {
   const pagina = params.pagina ?? 1;
-  const limite = params.limite ?? 20;
+  const limite = params.limite ?? 5000;
   const desde = (pagina - 1) * limite;
   const hasta = desde + limite - 1;
 
@@ -464,6 +464,39 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
       if (!error && data) {
         dbProducts = data as Producto[];
         dbCount = count ?? dbProducts.length;
+
+        // Si la base de datos tiene más de 1,000 productos, paginar lotes para cargar todos
+        if (dbCount > dbProducts.length && hasta >= 1000 && dbProducts.length === 1000) {
+          let currentOffset = 1000;
+          while (currentOffset < dbCount && currentOffset <= hasta) {
+            const nextHasta = Math.min(hasta, currentOffset + 999);
+            let nextQuery = sb
+              .from('productos')
+              .select('*')
+              .order('nombre')
+              .range(currentOffset, nextHasta);
+            if (q) {
+              nextQuery = nextQuery.or(
+                `nombre.ilike."%${q}%",sku.ilike."%${q}%",codigo_barras.ilike."%${q}%",plu.ilike."%${q}%",categoria.ilike."%${q}%",marca.ilike."%${q}%"`
+              );
+            }
+            if (params.categoria && params.categoria !== 'Todas') {
+              nextQuery = nextQuery.eq('categoria', params.categoria);
+            }
+            if (params.estado && params.estado !== 'todos') {
+              nextQuery = nextQuery.eq('estado', params.estado);
+            }
+            if (params.signal) nextQuery = nextQuery.abortSignal(params.signal);
+
+            const nextBatch = await nextQuery;
+            if (nextBatch.data && nextBatch.data.length > 0) {
+              dbProducts.push(...(nextBatch.data as Producto[]));
+              currentOffset += nextBatch.data.length;
+            } else {
+              break;
+            }
+          }
+        }
       } else if (error) {
         console.warn('Error al consultar productos de Supabase:', error);
         supabaseFailed = true;

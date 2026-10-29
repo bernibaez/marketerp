@@ -106,7 +106,7 @@ export default function CartPanel({
     }
   }, [topCartItemKey]);
 
-  const { productosUi } = useProductos({ pagina: 1, limite: 500, estado: 'activo' });
+  const { productosUi } = useProductos({ pagina: 1, limite: 5000, estado: 'activo' });
 
   // Merge store products and initialProducts for comprehensive local search matching (solo activos)
   const allProducts = useMemo(() => {

@@ -22,7 +22,7 @@ export function useProductos(params: ProductosFiltro = {}) {
   const mountedRef = useRef(true);
 
   const pagina = params.pagina ?? 1;
-  const limite = params.limite ?? 50;
+  const limite = params.limite ?? 5000;
   const busqueda = params.busqueda ?? '';
   const categoria = params.categoria;
   const estado = params.estado;

@@ -82,7 +82,7 @@ export function usePurchaseCatalog({ onAddProductDirectly }: UsePurchaseCatalogO
       try {
         const res = await obtenerProductos({
           pagina: 1,
-          limite: 50,
+          limite: 5000,
           busqueda: q,
           estado: 'todos',
           signal: controller.signal,
@@ -139,7 +139,7 @@ export function usePurchaseCatalog({ onAddProductDirectly }: UsePurchaseCatalogO
     try {
       const res = await obtenerProductos({
         pagina: page,
-        limite: query ? 50 : 20,
+        limite: 5000,
         busqueda: query,
         estado: 'todos',
         signal: controller.signal,

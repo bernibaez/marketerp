@@ -60,7 +60,7 @@ export default function ProductManagementScreen() {
 
   const { productosUi, crear, actualizar, eliminar, refetch } = useProductos({
     pagina: 1,
-    limite: 2000,
+    limite: 5000,
     busqueda: search,
     categoria: filterCategory === 'all' ? undefined : filterCategory,
     estado: estadoDb,
