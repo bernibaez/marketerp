@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import AppLayout from '@/components/AppLayout';
-import { Search, Loader2, X, Plus, Trash2, Check } from 'lucide-react';
+import { Search, Loader2, X, Plus, Trash2, Check, ChevronDown } from 'lucide-react';
 import type { ProductItem } from '@/lib/productStore';
 import type { Proveedor } from '@/services/proveedores.service';
 
@@ -91,6 +91,81 @@ export function PurchaseCreateView({
   grandTotal,
   onOpenNewProductModal,
 }: PurchaseCreateViewProps) {
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
+  const [supplierHighlightIndex, setSupplierHighlightIndex] = useState(0);
+  const supplierContainerRef = useRef<HTMLDivElement>(null);
+
+  // Sincronizar texto cuando cambia el supplierId seleccionado
+  useEffect(() => {
+    if (supplierId) {
+      const found = proveedores.find((p) => p.id === supplierId);
+      if (found) {
+        setSupplierSearch(found.nombre);
+      }
+    } else {
+      setSupplierSearch('');
+    }
+  }, [supplierId, proveedores]);
+
+  // Cerrar dropdown al hacer clic fuera
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (supplierContainerRef.current && !supplierContainerRef.current.contains(e.target as Node)) {
+        setSupplierDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Filtrar proveedores en tiempo real por nombre, código o teléfono
+  const filteredProveedores = useMemo(() => {
+    if (!supplierSearch.trim()) return proveedores;
+    const q = supplierSearch.toLowerCase().trim();
+    return proveedores.filter(
+      (p) =>
+        p.nombre.toLowerCase().includes(q) ||
+        (p.codigo && p.codigo.toLowerCase().includes(q)) ||
+        (p.telefono && p.telefono.includes(q))
+    );
+  }, [proveedores, supplierSearch]);
+
+  const handleSelectSupplier = (p: Proveedor) => {
+    setSupplierId(p.id);
+    setSupplierSearch(p.nombre);
+    setSupplierDropdownOpen(false);
+  };
+
+  const handleClearSupplier = () => {
+    setSupplierId('');
+    setSupplierSearch('');
+    setSupplierDropdownOpen(false);
+  };
+
+  const handleSupplierKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!supplierDropdownOpen) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter') {
+        setSupplierDropdownOpen(true);
+        return;
+      }
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSupplierHighlightIndex((prev) => (prev + 1 < filteredProveedores.length ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSupplierHighlightIndex((prev) => (prev - 1 >= 0 ? prev - 1 : filteredProveedores.length - 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filteredProveedores[supplierHighlightIndex]) {
+        handleSelectSupplier(filteredProveedores[supplierHighlightIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      setSupplierDropdownOpen(false);
+    }
+  };
+
   return (
     <AppLayout>
       <div className="space-y-5 slide-up">
@@ -113,20 +188,94 @@ export function PurchaseCreateView({
           <div className="lg:col-span-2 card p-4 sm:p-5 space-y-3.5">
             <h3 className="font-semibold text-foreground text-sm sm:text-base">Información de la Compra</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Proveedor *</label>
-                <select
-                  value={supplierId}
-                  onChange={(e) => setSupplierId(e.target.value)}
-                  className="input-field text-xs cursor-pointer"
-                >
-                  <option value="">Seleccionar proveedor…</option>
-                  {proveedores.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.nombre}
-                    </option>
-                  ))}
-                </select>
+              {/* Selector de Proveedor Autocompletable y Escribible */}
+              <div className="relative" ref={supplierContainerRef}>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                  Proveedor * <span className="font-normal text-muted-foreground/80">(escribe para buscar o selecciona)</span>
+                </label>
+                <div className="relative flex items-center">
+                  <Search size={14} className="absolute left-2.5 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={supplierSearch}
+                    onChange={(e) => {
+                      setSupplierSearch(e.target.value);
+                      setSupplierDropdownOpen(true);
+                      setSupplierHighlightIndex(0);
+                      if (!e.target.value.trim()) {
+                        setSupplierId('');
+                      }
+                    }}
+                    onFocus={() => setSupplierDropdownOpen(true)}
+                    onKeyDown={handleSupplierKeyDown}
+                    placeholder="Escribe el nombre del proveedor..."
+                    className="input-field text-xs pl-8 pr-16 h-9 cursor-text"
+                  />
+                  <div className="absolute right-2 flex items-center gap-1">
+                    {supplierId ? (
+                      <button
+                        type="button"
+                        onClick={handleClearSupplier}
+                        className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded transition cursor-pointer"
+                        title="Limpiar proveedor"
+                      >
+                        <X size={13} />
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setSupplierDropdownOpen((prev) => !prev)}
+                      className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded transition cursor-pointer"
+                      title="Ver lista de proveedores"
+                    >
+                      <ChevronDown size={14} className={`transition-transform ${supplierDropdownOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Dropdown flotante con lista filtrada */}
+                {supplierDropdownOpen && (
+                  <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl z-50 max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 animate-in fade-in zoom-in-95 duration-150">
+                    {filteredProveedores.length === 0 ? (
+                      <div className="p-3 text-center text-xs text-muted-foreground">
+                        No se encontraron proveedores para &quot;{supplierSearch}&quot;
+                      </div>
+                    ) : (
+                      filteredProveedores.map((p, idx) => {
+                        const isSelected = p.id === supplierId;
+                        const isHighlighted = idx === supplierHighlightIndex;
+                        return (
+                          <div
+                            key={p.id}
+                            onClick={() => handleSelectSupplier(p)}
+                            onMouseEnter={() => setSupplierHighlightIndex(idx)}
+                            className={`p-2.5 cursor-pointer text-xs flex items-center justify-between transition-colors ${
+                              isHighlighted
+                                ? 'bg-secondary/70 text-foreground'
+                                : isSelected
+                                ? 'bg-primary/10 text-primary font-semibold'
+                                : 'hover:bg-secondary/40 text-foreground'
+                            }`}
+                          >
+                            <div className="truncate pr-2">
+                              <p className="font-bold truncate">{p.nombre}</p>
+                              {(p.codigo || p.telefono) && (
+                                <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
+                                  {p.codigo ? `Cód: ${p.codigo}` : ''}
+                                  {p.codigo && p.telefono ? ' · ' : ''}
+                                  {p.telefono ? `Tel: ${p.telefono}` : ''}
+                                </p>
+                              )}
+                            </div>
+                            {isSelected && (
+                              <Check size={14} className="text-primary shrink-0" />
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1 block">Fecha de Compra *</label>
