@@ -77,7 +77,7 @@ export default function POSTerminal() {
   const { registers, loading: registersLoading, refetch: refetchRegisters, markRegisterClosed } = useCashRegisters();
 
   // 1. Data Catalogs
-  const { productosUi } = useProductos({ pagina: 1, limite: 500, estado: 'todos' });
+  const { productosUi } = useProductos({ pagina: 1, limite: 500, estado: 'activo' });
   const { combos } = useCombos(true);
 
   // 2. Cart & Calculations Hook
@@ -104,6 +104,7 @@ export default function POSTerminal() {
     clearCart,
     toggleWholesalePrice,
     toggleAllWholesale,
+    isWholesaleMode,
     subtotal,
     globalDiscountAmount,
     taxTotal,
@@ -271,6 +272,7 @@ export default function POSTerminal() {
     enabled: cashIsOpen,
     cart,
     addToCart,
+    isWholesaleMode,
     deductOrRemoveFromCart,
     awaitingDeleteScan,
     toggleDeleteMode,
@@ -407,6 +409,7 @@ export default function POSTerminal() {
               onCancelDelete={handleCancelDeleteMode}
               onToggleWholesale={toggleWholesalePrice}
               onToggleAllWholesale={toggleAllWholesale}
+              isWholesaleMode={isWholesaleMode}
               onOpenDiscountModal={isAdminUser ? handleOpenCartItemDiscount : undefined}
               isAdmin={isAdminUser}
             />
@@ -587,20 +590,23 @@ export default function POSTerminal() {
         onCloseWeightScan={() => setWeightScanOpen(false)}
         realScaleCatalog={realScaleCatalog}
         onConfirmWeightScan={(matchedProduct, weight) => {
+          const shouldWholesale = isWholesaleMode && (matchedProduct.wholesalePrice || 0) > 0;
+          const itemPrice = shouldWholesale ? Number(matchedProduct.wholesalePrice) : matchedProduct.price;
+          const resolvedUnit = matchedProduct.unit && !['unidad', 'ud', 'und', 'unidades'].includes(matchedProduct.unit.toLowerCase()) ? matchedProduct.unit : 'lb';
           addToCart(
             {
               id: `cart-${matchedProduct.productId}-${Date.now()}`,
               productId: matchedProduct.productId,
               name: matchedProduct.name,
               sku: matchedProduct.sku,
-              price: matchedProduct.price,
+              price: itemPrice,
               regularPrice: matchedProduct.price,
               wholesalePrice: matchedProduct.wholesalePrice,
-              isWholesale: false,
+              isWholesale: shouldWholesale,
               cost: matchedProduct.cost,
               tax: matchedProduct.tax,
               image: matchedProduct.image || '',
-              unit: matchedProduct.unit || 'lb',
+              unit: resolvedUnit,
               isWeighted: true,
             },
             weight

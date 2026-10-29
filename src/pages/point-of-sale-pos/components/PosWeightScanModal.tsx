@@ -90,6 +90,16 @@ export default function PosWeightScanModal({
         const decoded = decodeVariableWeightBarcode(clean);
         if (fromDb && decoded.isVariableWeight) {
           const ui = productoAUi(fromDb);
+          if (ui.status === 'inactive' || ui.status === 'discontinued' || fromDb.estado === 'inactivo') {
+            toast.error(`El producto "${ui.name}" está inactivo y no se puede vender`);
+            setScanInput('');
+            return;
+          }
+          if (ui.currentStock <= 0 || ui.stockStatus === 'out') {
+            toast.error(`Producto sin existencias: "${ui.name}"`);
+            setScanInput('');
+            return;
+          }
           parsed = {
             product: {
               productId: ui.id,
@@ -99,7 +109,10 @@ export default function PosWeightScanModal({
               price: ui.salePrice,
               cost: ui.costPrice,
               tax: ui.tax,
-              unit: ui.unit || ui.weightUnit || 'lb',
+              unit:
+                ui.unit && !['unidad', 'ud', 'und', 'unidades'].includes(ui.unit.toLowerCase())
+                  ? ui.unit
+                  : ui.weightUnit || 'lb',
               barcode: ui.barcode || '',
               category: ui.category || '',
               image: ui.image,

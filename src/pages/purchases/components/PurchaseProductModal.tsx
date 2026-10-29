@@ -477,10 +477,15 @@ export function PurchaseProductModal({
                   </button>
                   <input
                     type="number"
-                    min={0.001}
+                    min={0}
                     step="0.001"
-                    value={modalQty}
-                    onChange={(e) => setModalQty(parseFloat(e.target.value) || 0)}
+                    value={modalQty === 0 ? '' : modalQty}
+                    placeholder="0"
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      setModalQty(v === '' ? 0 : parseFloat(v) || 0);
+                    }}
                     className="input-field text-lg font-black text-center h-12 flex-1 tabular-nums"
                   />
                   <button
@@ -517,9 +522,13 @@ export function PurchaseProductModal({
                     type="number"
                     min={0}
                     step="0.01"
-                    value={modalPrice || ''}
-                    onChange={(e) => setModalPrice(Number(e.target.value))}
+                    value={modalPrice === 0 ? '' : modalPrice}
                     placeholder="0.00"
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      setModalPrice(v === '' ? 0 : parseFloat(v) || 0);
+                    }}
                     className="input-field text-base font-black text-right h-12 tabular-nums pl-14"
                   />
                 </div>
@@ -542,9 +551,13 @@ export function PurchaseProductModal({
                     type="number"
                     min={0}
                     step="0.01"
-                    value={modalSalePrice || ''}
-                    onChange={(e) => setModalSalePrice(Number(e.target.value))}
+                    value={modalSalePrice === 0 ? '' : modalSalePrice}
                     placeholder="0.00"
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      setModalSalePrice(v === '' ? 0 : parseFloat(v) || 0);
+                    }}
                     className="input-field text-base font-black text-right h-12 tabular-nums pl-14 border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
                   />
                 </div>
@@ -567,9 +580,13 @@ export function PurchaseProductModal({
                     type="number"
                     min={0}
                     step="0.01"
-                    value={modalWholesalePrice || ''}
-                    onChange={(e) => setModalWholesalePrice(Number(e.target.value))}
+                    value={modalWholesalePrice === 0 ? '' : modalWholesalePrice}
                     placeholder="0.00"
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      setModalWholesalePrice(v === '' ? 0 : parseFloat(v) || 0);
+                    }}
                     className="input-field text-base font-black text-right h-12 tabular-nums pl-14 border-amber-500/40 text-amber-600 dark:text-amber-400"
                   />
                 </div>

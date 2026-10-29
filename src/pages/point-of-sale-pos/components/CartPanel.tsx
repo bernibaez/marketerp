@@ -56,6 +56,7 @@ interface CartPanelProps {
   onCancelDelete?: () => void;
   onToggleWholesale?: (id: string) => void;
   onToggleAllWholesale?: () => void;
+  isWholesaleMode?: boolean;
   onOpenDiscountModal?: (item: CartItem) => void;
   isAdmin?: boolean;
 }
@@ -83,6 +84,7 @@ export default function CartPanel({
   onCancelDelete,
   onToggleWholesale,
   onToggleAllWholesale,
+  isWholesaleMode = false,
   onOpenDiscountModal,
   isAdmin = false,
 }: CartPanelProps) {
@@ -104,14 +106,14 @@ export default function CartPanel({
     }
   }, [topCartItemKey]);
 
-  const { productosUi } = useProductos({ pagina: 1, limite: 500, estado: 'todos' });
+  const { productosUi } = useProductos({ pagina: 1, limite: 500, estado: 'activo' });
 
-  // Merge store products and initialProducts for comprehensive local search matching
+  // Merge store products and initialProducts for comprehensive local search matching (solo activos)
   const allProducts = useMemo(() => {
-    const list = [...productosUi];
+    const list = [...productosUi.filter((p) => p.status === 'active' || p.status === undefined)];
     const skus = new Set(list.map((p) => p.sku.toLowerCase()));
     for (const p of initialProducts) {
-      if (!skus.has(p.sku.toLowerCase())) {
+      if (!skus.has(p.sku.toLowerCase()) && p.status !== 'inactive' && p.status !== 'discontinued') {
         list.push(p as any);
       }
     }
@@ -136,11 +138,11 @@ export default function CartPanel({
         const res = await obtenerProductos({
           busqueda: q,
           limite: 30,
-          estado: 'todos',
+          estado: 'activo',
           signal: abortCtrl.signal,
         });
         if (!abortCtrl.signal.aborted) {
-          setDbResults(res.datos.map(productoAUi));
+          setDbResults(res.datos.map(productoAUi).filter((p) => p.status === 'active'));
           setSearchingDb(false);
           setSelectedIndex(0);
         }
@@ -157,13 +159,21 @@ export default function CartPanel({
     };
   }, [searchQuery]);
 
-  // Resultados combinados: catálogo local instantáneo + resultados en vivo de la base de datos
+  // Resultados combinados: catálogo local instantáneo + resultados en vivo de la base de datos (solo activos)
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q || q.length < 1) return [];
 
     // 1. Filtrar en catálogo local
-    const localMatches = allProducts.filter((p) => {
+    const localMatches = allProducts.filter((p: any) => {
+      if (
+        p.status === 'inactive' ||
+        p.status === 'discontinued' ||
+        p.estado === 'inactivo' ||
+        p.estado === 'descontinuado'
+      ) {
+        return false;
+      }
       const name = (p.name || '').toLowerCase();
       const sku = (p.sku || '').toLowerCase();
       const barcode = (p.barcode || '').toLowerCase();
@@ -177,12 +187,43 @@ export default function CartPanel({
     const seenSkus = new Set(localMatches.map((p) => (p.sku || '').toLowerCase()));
 
     for (const dbItem of dbResults) {
+      if (
+        dbItem.status === 'inactive' ||
+        dbItem.status === 'discontinued' ||
+        dbItem.estado === 'inactivo' ||
+        dbItem.estado === 'descontinuado'
+      ) {
+        continue;
+      }
       if (!seenIds.has(dbItem.id) && !seenSkus.has((dbItem.sku || '').toLowerCase())) {
         combined.push(dbItem);
         seenIds.add(dbItem.id);
         if (dbItem.sku) seenSkus.add(dbItem.sku.toLowerCase());
       }
     }
+
+    // 3. Ordenar por relevancia para que productos cuyo nombre empiece con la búsqueda (ej. "fresaya") aparezcan al inicio
+    combined.sort((a, b) => {
+      const aName = (a.name || '').toLowerCase().trim();
+      const bName = (b.name || '').toLowerCase().trim();
+      const aBarcode = (a.barcode || '').toLowerCase().trim();
+      const bBarcode = (b.barcode || '').toLowerCase().trim();
+      const aSku = (a.sku || '').toLowerCase().trim();
+      const bSku = (b.sku || '').toLowerCase().trim();
+
+      const getRank = (name: string, barcode: string, sku: string) => {
+        if (name === q || barcode === q || sku === q) return 0;
+        if (name.startsWith(q)) return 1;
+        if (barcode.startsWith(q) || sku.startsWith(q)) return 2;
+        if (name.includes(q)) return 3;
+        return 4;
+      };
+
+      const rankA = getRank(aName, aBarcode, aSku);
+      const rankB = getRank(bName, bBarcode, bSku);
+      if (rankA !== rankB) return rankA - rankB;
+      return aName.localeCompare(bName);
+    });
 
     return combined.slice(0, 30);
   }, [searchQuery, allProducts, dbResults]);
@@ -219,18 +260,51 @@ export default function CartPanel({
   const totalItemsCount = cart.reduce((s, i) => s + i.qty, 0);
 
   const handleSelectProduct = (p: any) => {
+    // 1. Validar que no esté inactivo
+    if (
+      p.status === 'inactive' ||
+      p.status === 'discontinued' ||
+      p.estado === 'inactivo' ||
+      p.estado === 'descontinuado'
+    ) {
+      toast.error(`El producto "${p.name}" está inactivo y no se puede vender`);
+      return;
+    }
+
+    // 2. Validar que no esté agotado
+    if (
+      p.stockStatus === 'out' ||
+      p.outOfStock ||
+      (p.currentStock !== undefined && p.currentStock <= 0) ||
+      (p.stock !== undefined && p.stock <= 0)
+    ) {
+      toast.error(`Producto sin existencias: "${p.name}"`);
+      return;
+    }
+
     const isWeight =
       p.isWeightProduct ||
       p.saleType === 'weight' ||
+      p.saleType === 'both' ||
       (p.unit && (p.unit.toLowerCase().includes('lb') || p.unit.toLowerCase().includes('kg')));
 
-    const unitPrice = Number(
+    // Unidad corregida: productos de balanza pasan como 'lb' (o su unidad de peso), NUNCA 'Unidad' o 'ud'
+    const resolvedUnit = isWeight
+      ? (p.weightUnit || (p.unit && !['und', 'ud', 'unidad', 'unidades'].includes(p.unit.toLowerCase()) ? p.unit : 'lb'))
+      : (p.unit || 'Und');
+
+    const wholesale = p.wholesalePrice ? Number(p.wholesalePrice) : undefined;
+    const shouldWholesale = Boolean(isWholesaleMode && wholesale && wholesale > 0);
+
+    const basePrice = Number(
       p.salePrice && p.salePrice > 0
         ? p.salePrice
         : p.pricePerWeight && p.pricePerWeight > 0
           ? p.pricePerWeight
           : p.price ?? 0
     );
+
+    const unitPrice = shouldWholesale && wholesale ? wholesale : basePrice;
 
     const existingInCart = cart.find(
       (i) => i.productId === p.id || (p.sku && i.sku && i.sku.toLowerCase() === p.sku.toLowerCase())
@@ -244,13 +318,13 @@ export default function CartPanel({
         sku: p.sku || '',
         barcode: p.barcode || '',
         price: unitPrice,
-        regularPrice: unitPrice,
-        wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
-        isWholesale: false,
+        regularPrice: basePrice,
+        wholesalePrice: wholesale,
+        isWholesale: shouldWholesale,
         cost: Number(p.costPrice ?? p.cost ?? 0),
         tax: Number(p.tax ?? 0),
         image: p.image || '',
-        unit: p.unit || p.weightUnit || 'lb',
+        unit: resolvedUnit,
         qty: existingInCart ? existingInCart.qty : 1,
         discount: existingInCart?.discount ?? 0,
         isWeighted: true,
@@ -263,14 +337,16 @@ export default function CartPanel({
         sku: p.sku || '',
         barcode: p.barcode || '',
         price: unitPrice,
-        regularPrice: unitPrice,
-        wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
-        isWholesale: false,
+        regularPrice: basePrice,
+        wholesalePrice: wholesale,
+        isWholesale: shouldWholesale,
         cost: Number(p.costPrice ?? p.cost ?? 0),
         tax: Number(p.tax ?? 0),
         image: p.image || '',
-        unit: p.unit || 'Und',
+        unit: resolvedUnit,
         isWeighted: isWeight,
+        status: p.status,
+        outOfStock: false,
       });
     }
     if (onSearchChange) onSearchChange('');
@@ -303,6 +379,8 @@ export default function CartPanel({
       const valueToSubmit = searchQuery.trim();
       if (!valueToSubmit) return;
 
+      const qLower = valueToSubmit.toLowerCase();
+
       // 0. Si es una etiqueta de balanza con peso embebido (EAN-13/12 prefijo 20-29),
       // procesarla directamente con el decodificador de balanza para usar el peso exacto de la etiqueta.
       if (isVariableWeightBarcode(valueToSubmit) && onSearchSubmit) {
@@ -313,35 +391,54 @@ export default function CartPanel({
       }
 
       // 1. Si hay coincidencia exacta por código de barras, SKU o PLU en los resultados:
-      const exact = searchResults.find((p) => productMatchesScanCode(p, valueToSubmit));
-      if (exact) {
-        handleSelectProduct(exact);
+      const exactCode = searchResults.find((p) => productMatchesScanCode(p, valueToSubmit));
+      if (exactCode) {
+        handleSelectProduct(exactCode);
         return;
       }
 
-      // 2. Si la lista desplegable está visible y tiene resultados, seleccionar el ítem resaltado:
-      if (dropdownOpen && searchResults.length > 0 && selectedIndex >= 0 && selectedIndex < searchResults.length) {
+      // 2. Coincidencia exacta de nombre (ej. "fresaya")
+      const exactName = searchResults.find(
+        (p) => (p.name || '').trim().toLowerCase() === qLower
+      );
+      if (exactName) {
+        handleSelectProduct(exactName);
+        return;
+      }
+
+      // 3. Coincidencia donde el nombre del producto inicia con el texto escrito (ej: "fresaya")
+      const startsName = searchResults.find(
+        (p) => (p.name || '').trim().toLowerCase().startsWith(qLower)
+      );
+      if (startsName) {
+        handleSelectProduct(startsName);
+        return;
+      }
+
+      // 4. Si el usuario navegó activamente con flechas y seleccionó un ítem específico:
+      if (dropdownOpen && searchResults.length > 0 && selectedIndex > 0 && selectedIndex < searchResults.length) {
         handleSelectProduct(searchResults[selectedIndex]);
         return;
       }
 
-      // 3. Si no hay coincidencia local, delegar al procesador de escáner global (Supabase / combos):
+      // 5. Si hay un primer resultado que contiene el texto escrito:
+      if (searchResults.length > 0) {
+        const topResult = searchResults[0];
+        const topName = (topResult.name || '').toLowerCase();
+        const topSku = (topResult.sku || '').toLowerCase();
+        const topBarcode = (topResult.barcode || '').toLowerCase();
+        if (topName.includes(qLower) || topSku.includes(qLower) || topBarcode.includes(qLower)) {
+          handleSelectProduct(topResult);
+          return;
+        }
+      }
+
+      // 6. Si no hay coincidencia local, delegar al procesador global (Supabase / combos):
       if (onSearchSubmit) {
         if (onSearchChange) onSearchChange('');
         setDropdownOpen(false);
-        const res = onSearchSubmit(valueToSubmit);
-        if (res && typeof (res as Promise<any>).then === 'function') {
-          void (res as Promise<any>).then((added) => {
-            if (!added && searchResults.length > 0) {
-              handleSelectProduct(searchResults[0]);
-            }
-          });
-        }
+        void onSearchSubmit(valueToSubmit);
         return;
-      }
-
-      if (searchResults.length > 0) {
-        handleSelectProduct(searchResults[0]);
       }
     } else if (e.key === 'Escape') {
       setDropdownOpen(false);
@@ -459,6 +556,27 @@ export default function CartPanel({
           >
             <Minus size={20} strokeWidth={3} />
           </button>
+
+          {/* Botón para Activar/Desactivar Venta al Por Mayor */}
+          {onToggleAllWholesale && (
+            <button
+              type="button"
+              onClick={onToggleAllWholesale}
+              className={`h-10 px-2.5 rounded-xl flex items-center gap-1.5 flex-shrink-0 transition-all shadow-2xs cursor-pointer active:scale-95 border font-bold text-xs ${
+                isWholesaleMode
+                  ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-md ring-2 ring-amber-400/40'
+                  : 'bg-slate-100 hover:bg-amber-50 dark:bg-slate-800 dark:hover:bg-amber-950/40 text-slate-700 hover:text-amber-700 dark:text-slate-300 dark:hover:text-amber-400 border-slate-200 dark:border-slate-700 hover:border-amber-300'
+              }`}
+              title={
+                isWholesaleMode
+                  ? 'Modo Por Mayor activo: clic para volver a precio normal'
+                  : 'Activar modo venta al por mayor para todo el carrito'
+              }
+            >
+              <Tag size={15} className={isWholesaleMode ? 'text-white' : 'text-amber-600 dark:text-amber-400'} />
+              <span className="hidden sm:inline">{isWholesaleMode ? 'Al Por Mayor' : 'Por Mayor'}</span>
+            </button>
+          )}
 
           {/* Floating Search Dropdown (Lista de productos en vivo desde Base de Datos) */}
           {dropdownOpen && (searchResults.length > 0 || (searchQuery.trim().length >= 1 && searchingDb)) && (
@@ -788,8 +906,14 @@ export default function CartPanel({
                       {item.qty} {unitLabel} × RD$ {item.price}
                     </p>
                   ) : (
-                    <p className="text-xs sm:text-[13px] font-mono font-medium text-slate-500 dark:text-slate-400 truncate mt-0.5 tracking-wide">
-                      {codeToDisplay}
+                    <p className="text-xs sm:text-[13px] font-medium text-slate-500 dark:text-slate-400 truncate mt-0.5 tracking-wide flex items-center gap-1.5 flex-wrap">
+                      {codeToDisplay && <span className="font-mono">{codeToDisplay} ·</span>}
+                      <span className="font-bold text-slate-700 dark:text-slate-300">RD$ {item.price.toFixed(2)} c/u</span>
+                      {isWholesaleActive && (
+                        <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1 py-0.2 rounded border border-amber-300 dark:border-amber-700">
+                          (Por mayor)
+                        </span>
+                      )}
                     </p>
                   )}
                 </div>

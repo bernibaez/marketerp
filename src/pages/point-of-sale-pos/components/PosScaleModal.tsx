@@ -36,6 +36,10 @@ export default function PosScaleModal({
         initialProduct.pricePerWeight ??
         0
     );
+    const resolvedUnit =
+      initialProduct.unit && !['unidad', 'ud', 'und', 'unidades'].includes(initialProduct.unit.toLowerCase())
+        ? initialProduct.unit
+        : initialProduct.weightUnit || 'lb';
     return {
       productId: String(pid),
       name: initialProduct.name || 'Producto sin nombre',
@@ -45,7 +49,7 @@ export default function PosScaleModal({
       wholesalePrice: initialProduct.wholesalePrice ? Number(initialProduct.wholesalePrice) : undefined,
       cost: Number(initialProduct.cost ?? initialProduct.costPrice ?? 0),
       tax: Number(initialProduct.tax ?? 0),
-      unit: initialProduct.unit || initialProduct.weightUnit || 'lb',
+      unit: resolvedUnit,
       barcode: initialProduct.barcode || '',
       category: initialProduct.category || '',
       image: initialProduct.image || '',
@@ -90,7 +94,10 @@ export default function PosScaleModal({
         wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
         cost: Number(p.costPrice ?? (p as any).cost ?? 0),
         tax: Number(p.tax ?? 0),
-        unit: p.unit || p.weightUnit || 'lb',
+        unit:
+          p.unit && !['unidad', 'ud', 'und', 'unidades'].includes(p.unit.toLowerCase())
+            ? p.unit
+            : p.weightUnit || 'lb',
         barcode: p.barcode || '',
         category: p.category || '',
         image: p.image,
@@ -216,7 +223,10 @@ export default function PosScaleModal({
           wholesalePrice: ui.wholesalePrice ? Number(ui.wholesalePrice) : undefined,
           cost: ui.costPrice ?? 0,
           tax: ui.tax ?? 0,
-          unit: ui.unit || ui.weightUnit || 'lb',
+          unit:
+            ui.unit && !['unidad', 'ud', 'und', 'unidades'].includes(ui.unit.toLowerCase())
+              ? ui.unit
+              : ui.weightUnit || 'lb',
           barcode: ui.barcode || '',
           category: ui.category || '',
           image: ui.image,
@@ -252,6 +262,24 @@ export default function PosScaleModal({
       toast.error('Ingresa un peso mayor a cero');
       return;
     }
+
+    const foundProd = (productosUi as any[])?.find((p) => p.id === product.productId);
+    if (foundProd) {
+      if (foundProd.status === 'inactive' || foundProd.status === 'discontinued') {
+        toast.error(`El producto "${product.name}" está inactivo y no se puede vender`);
+        return;
+      }
+      if (foundProd.currentStock <= 0 || foundProd.stockStatus === 'out') {
+        toast.error(`Producto sin existencias: "${product.name}"`);
+        return;
+      }
+    }
+
+    const resolvedUnit =
+      product.unit && !['unidad', 'ud', 'und', 'unidades'].includes(product.unit.toLowerCase())
+        ? product.unit
+        : 'lb';
+
     onConfirm(
       {
         id: `cart-scale-${product.productId}-${Date.now()}`,
@@ -266,12 +294,12 @@ export default function PosScaleModal({
         cost: product.cost,
         tax: product.tax,
         image: product.image || '',
-        unit: product.unit,
+        unit: resolvedUnit,
         isWeighted: true,
       },
       qty
     );
-    toast.success(`Agregado: ${qty.toFixed(3)} ${product.unit} de ${product.name}`);
+    toast.success(`Agregado: ${qty.toFixed(3)} ${resolvedUnit} de ${product.name}`);
   };
 
   return (

@@ -47,7 +47,7 @@ export default function PurchasesPage() {
   const [supplierId, setSupplierId] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Transferencia');
   const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const { proveedores } = useProveedores();
+  const { proveedores, crear: crearProveedorHook } = useProveedores();
 
   const [viewingPurchase, setViewingPurchase] = useState<CompraDetalle | null>(null);
   const [loadingPurchaseDetail, setLoadingPurchaseDetail] = useState(false);
@@ -233,6 +233,11 @@ export default function PurchasesPage() {
       toast.error('Selecciona un proveedor');
       return;
     }
+    const invalidQtyItem = purchaseItems.find((i) => !i.qty || i.qty <= 0);
+    if (invalidQtyItem) {
+      toast.error(`Ingresa una cantidad mayor a 0 para "${invalidQtyItem.name}"`);
+      return;
+    }
 
     setSaving(true);
     try {
@@ -334,6 +339,7 @@ export default function PurchasesPage() {
           supplierId={supplierId}
           setSupplierId={setSupplierId}
           proveedores={proveedores}
+          onCrearProveedor={crearProveedorHook}
           purchaseDate={purchaseDate}
           setPurchaseDate={setPurchaseDate}
           paymentMethod={paymentMethod}

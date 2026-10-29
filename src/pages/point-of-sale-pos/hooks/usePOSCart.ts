@@ -12,6 +12,7 @@ export function usePOSCart() {
   const [fiscalEnabled, setFiscalEnabled] = useState(false);
   const [selectedNcfType, setSelectedNcfType] = useState<NCFType>('B02');
   const [awaitingDeleteScan, setAwaitingDeleteScan] = useState(false);
+  const [isWholesaleMode, setIsWholesaleMode] = useState(false);
 
   const focusPosBarcodeInput = () => {
     const el = document.getElementById('pos-barcode-search-input') as HTMLInputElement | null;
@@ -93,6 +94,12 @@ export function usePOSCart() {
         discountType?: 'fixed' | 'percentage';
         discountValue?: number;
         professionalDiscount?: number;
+        status?: string;
+        estado?: string;
+        outOfStock?: boolean;
+        stockStatus?: string;
+        stock?: number;
+        currentStock?: number;
       },
       qty = 1,
       replaceQty = false
@@ -116,6 +123,28 @@ export function usePOSCart() {
         return;
       }
 
+      // 1. Validar que el producto no esté inactivo
+      if (
+        product.status === 'inactive' ||
+        product.status === 'discontinued' ||
+        product.estado === 'inactivo' ||
+        product.estado === 'descontinuado'
+      ) {
+        toast.error(`El producto "${product.name}" está inactivo y no se puede vender.`);
+        return;
+      }
+
+      // 2. Validar que el producto no esté agotado
+      if (
+        (product.currentStock !== undefined && product.currentStock <= 0) ||
+        (product.stock !== undefined && product.stock <= 0) ||
+        product.outOfStock ||
+        product.stockStatus === 'out'
+      ) {
+        toast.error(`Producto sin existencias: "${product.name}"`);
+        return;
+      }
+
       const safeQty = Math.round((Number(qty) || 0) * 1000) / 1000;
 
       setCart((prev) => {
@@ -124,13 +153,44 @@ export function usePOSCart() {
             (product.productId && item.productId === product.productId) ||
             (product.sku && item.sku && item.sku.toLowerCase() === product.sku.toLowerCase())
         );
+
+        const regularPrice = product.regularPrice ?? product.price;
+        const wholesalePrice =
+          product.wholesalePrice && product.wholesalePrice > 0
+            ? Number(product.wholesalePrice)
+            : existing?.wholesalePrice && existing.wholesalePrice > 0
+              ? Number(existing.wholesalePrice)
+              : undefined;
+
+        // Determinar si este ítem debe ser al por mayor:
+        // Si se especificó explícitamente en el producto, o si el ítem existente ya estaba al por mayor,
+        // o si el modo al por mayor del carrito está activo y el producto tiene precio al por mayor
+        const shouldBeWholesale =
+          product.isWholesale !== undefined
+            ? product.isWholesale
+            : existing
+              ? existing.isWholesale
+              : (isWholesaleMode && !!wholesalePrice && wholesalePrice > 0);
+
+        const effectivePrice =
+          shouldBeWholesale && wholesalePrice && wholesalePrice > 0
+            ? wholesalePrice
+            : existing
+              ? existing.isWholesale
+                ? existing.price
+                : regularPrice
+              : product.price;
+
         if (existing) {
           const updatedItem: CartItem = {
             ...existing,
             qty: replaceQty
               ? safeQty
               : Math.round((existing.qty + safeQty) * 1000) / 1000,
-            price: product.price ?? existing.price,
+            regularPrice: existing.regularPrice ?? regularPrice,
+            wholesalePrice: existing.wholesalePrice ?? wholesalePrice,
+            isWholesale: shouldBeWholesale,
+            price: effectivePrice,
             discount: product.discount !== undefined ? product.discount : existing.discount,
             discountType: product.discountType ?? existing.discountType,
             discountValue: product.discountValue ?? existing.discountValue,
@@ -138,28 +198,25 @@ export function usePOSCart() {
           };
           return [updatedItem, ...prev.filter((item) => item.id !== existing.id)];
         }
-        const regularPrice = product.regularPrice ?? product.price;
-        const wholesalePrice =
-          product.wholesalePrice && product.wholesalePrice > 0
-            ? Number(product.wholesalePrice)
-            : undefined;
+
         return [
           {
             ...product,
             regularPrice,
             wholesalePrice,
-            isWholesale: product.isWholesale ?? false,
+            isWholesale: shouldBeWholesale,
+            price: effectivePrice,
             qty: safeQty,
             discount: product.discount ?? 0,
             discountType: product.discountType ?? 'fixed',
-            discountValue: product.discountValue ?? (product.discount ? (product.discount * product.price) / 100 : 0),
+            discountValue: product.discountValue ?? (product.discount ? (product.discount * effectivePrice) / 100 : 0),
             professionalDiscount: product.professionalDiscount ?? 0,
           },
           ...prev,
         ];
       });
     },
-    [awaitingDeleteScan, deductOrRemoveFromCart, toggleDeleteMode]
+    [awaitingDeleteScan, deductOrRemoveFromCart, toggleDeleteMode, isWholesaleMode]
   );
 
 
@@ -195,35 +252,40 @@ export function usePOSCart() {
   }, []);
 
   const toggleAllWholesale = useCallback(() => {
-    setCart((prev) => {
-      const eligible = prev.filter((i) => i.wholesalePrice && i.wholesalePrice > 0);
-      if (eligible.length === 0) {
-        toast.info('Ningún producto en el carrito tiene precio al por mayor configurado');
-        return prev;
-      }
+    setIsWholesaleMode((prevMode) => {
+      const nextMode = !prevMode;
+      setCart((prev) => {
+        const eligible = prev.filter((i) => i.wholesalePrice && i.wholesalePrice > 0);
+        if (eligible.length === 0) {
+          if (nextMode) {
+            toast.info('Modo al por mayor activado para los siguientes productos que agregues');
+          } else {
+            toast.info('Modo venta normal activado');
+          }
+          return prev;
+        }
 
-      const allAlreadyWholesale = eligible.every((i) => i.isWholesale);
-      const targetState = !allAlreadyWholesale;
+        const updated = prev.map((item) => {
+          if (!item.wholesalePrice || item.wholesalePrice <= 0) return item;
+          const regular = item.regularPrice ?? item.price;
+          const newPrice = nextMode ? item.wholesalePrice : regular;
+          return {
+            ...item,
+            regularPrice: regular,
+            isWholesale: nextMode,
+            price: newPrice,
+          };
+        });
 
-      const updated = prev.map((item) => {
-        if (!item.wholesalePrice || item.wholesalePrice <= 0) return item;
-        const regular = item.regularPrice ?? item.price;
-        const newPrice = targetState ? item.wholesalePrice : regular;
-        return {
-          ...item,
-          regularPrice: regular,
-          isWholesale: targetState,
-          price: newPrice,
-        };
+        if (nextMode) {
+          toast.success(`Modo al por mayor activado (${eligible.length} producto(s) en carrito actualizados)`);
+        } else {
+          toast.info('Modo venta normal restaurado en el carrito');
+        }
+
+        return updated;
       });
-
-      if (targetState) {
-        toast.success(`Precio al por mayor aplicado a ${eligible.length} producto(s)`);
-      } else {
-        toast.info('Precio normal restaurado en todos los productos');
-      }
-
-      return updated;
+      return nextMode;
     });
   }, []);
 
@@ -326,6 +388,7 @@ export function usePOSCart() {
     clearCart,
     toggleWholesalePrice,
     toggleAllWholesale,
+    isWholesaleMode,
     subtotal,
     globalDiscountAmount,
     taxTotal,

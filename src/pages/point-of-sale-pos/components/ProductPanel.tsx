@@ -27,6 +27,7 @@ interface Product {
   image: string;
   lowStock: boolean;
   outOfStock: boolean;
+  status?: 'active' | 'inactive' | 'discontinued';
   isWeighted?: boolean;
   saleType?: SaleType;
   weightUnit?: WeightUnit;
@@ -56,44 +57,52 @@ export default function ProductPanel({
     return term;
   }, [searchQuery]);
 
-  const { productosUi } = useProductos({ pagina: 1, limite: 500, busqueda: catalogSearch, estado: 'todos' });
+  const { productosUi } = useProductos({ pagina: 1, limite: 500, busqueda: catalogSearch, estado: 'activo' });
   const { combos } = useCombos(true);
 
   const products: Product[] = useMemo(() => {
-    const fromStore = productosUi.map((p): Product => {
-      const isWeight =
-        p.isWeightProduct ||
-        p.saleType === 'weight' ||
-        p.saleType === 'both' ||
-        p.unit.toLowerCase().includes('lb') ||
-        p.unit.toLowerCase().includes('kg');
-      return {
-        id: p.id,
-        sku: p.sku,
-        barcode: p.barcode,
-        plu: p.plu,
-        name: p.name,
-        category: p.category,
-        price: p.salePrice,
-        wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
-        cost: p.costPrice,
-        stock: p.currentStock,
-        unit: p.unit,
-        tax: p.tax,
-        image: p.image,
-        lowStock: p.stockStatus === 'low',
-        outOfStock: p.stockStatus === 'out',
-        isWeighted: isWeight,
-        saleType: p.saleType ?? (isWeight ? 'weight' : 'unit'),
-        weightUnit: p.weightUnit ?? 'lb',
-      };
-    });
+    const fromStore = productosUi
+      .filter((p) => p.status === 'active' || p.status === undefined)
+      .map((p): Product => {
+        const isWeight =
+          p.isWeightProduct ||
+          p.saleType === 'weight' ||
+          p.saleType === 'both' ||
+          p.unit.toLowerCase().includes('lb') ||
+          p.unit.toLowerCase().includes('kg');
+        const resolvedUnit = isWeight
+          ? (p.unit && !['unidad', 'ud', 'und', 'unidades'].includes(p.unit.toLowerCase()) ? p.unit : (p.weightUnit || 'lb'))
+          : (p.unit || 'Und');
+
+        return {
+          id: p.id,
+          sku: p.sku,
+          barcode: p.barcode,
+          plu: p.plu,
+          name: p.name,
+          category: p.category,
+          price: p.salePrice,
+          wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
+          cost: p.costPrice,
+          stock: p.currentStock,
+          unit: resolvedUnit,
+          tax: p.tax,
+          image: p.image,
+          lowStock: p.stockStatus === 'low',
+          outOfStock: p.stockStatus === 'out' || p.currentStock <= 0,
+          status: p.status,
+          isWeighted: isWeight,
+          saleType: p.saleType ?? (isWeight ? 'weight' : 'unit'),
+          weightUnit: p.weightUnit ?? 'lb',
+        };
+      });
 
     if (fromStore.length > 0) {
       return fromStore;
     }
 
     const demoExtras: Product[] = initialProducts
+      .filter((ip) => ip.status !== 'inactive' && ip.status !== 'discontinued')
       .map((ip) => {
         const isWeight =
           ip.isWeightProduct ||
@@ -101,6 +110,10 @@ export default function ProductPanel({
           ip.saleType === 'both' ||
           ip.unit.toLowerCase().includes('lb') ||
           ip.unit.toLowerCase().includes('kg');
+        const resolvedUnit = isWeight
+          ? (ip.unit && !['unidad', 'ud', 'und', 'unidades'].includes(ip.unit.toLowerCase()) ? ip.unit : (ip.weightUnit || 'lb'))
+          : (ip.unit || 'Und');
+
         return {
           id: ip.id,
           sku: ip.sku,
@@ -112,11 +125,12 @@ export default function ProductPanel({
           wholesalePrice: ip.wholesalePrice ? Number(ip.wholesalePrice) : undefined,
           cost: ip.costPrice,
           stock: ip.currentStock,
-          unit: ip.unit,
+          unit: resolvedUnit,
           tax: ip.tax,
           image: ip.image,
           lowStock: ip.stockStatus === 'low',
-          outOfStock: ip.stockStatus === 'out',
+          outOfStock: ip.stockStatus === 'out' || ip.currentStock <= 0,
+          status: ip.status,
           isWeighted: isWeight,
           saleType: ip.saleType ?? (isWeight ? 'weight' : 'unit'),
           weightUnit: ip.weightUnit ?? 'lb',
@@ -161,8 +175,13 @@ export default function ProductPanel({
       return;
     }
 
-    if (p.outOfStock) {
-      toast.error(`Producto agotado: ${p.name}`);
+    if (p.status === 'inactive' || p.status === 'discontinued') {
+      toast.error(`El producto "${p.name}" está inactivo y no se puede vender`);
+      return;
+    }
+
+    if (p.outOfStock || p.stock <= 0) {
+      toast.error(`Producto sin existencias: ${p.name}`);
       return;
     }
 

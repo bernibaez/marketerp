@@ -26,7 +26,7 @@ export function usePurchaseItems() {
 
   const handleUpdateLineQty = (id: string, qty: number) => {
     setPurchaseItems((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, qty: Math.max(1, qty) } : item))
+      prev.map((item) => (item.id === id ? { ...item, qty: Math.max(0, qty) } : item))
     );
   };
 

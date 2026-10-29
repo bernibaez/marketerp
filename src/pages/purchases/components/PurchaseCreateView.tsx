@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import AppLayout from '@/components/AppLayout';
-import { Search, Loader2, X, Plus, Trash2, Check } from 'lucide-react';
+import { Search, Loader2, X, Plus, Trash2, Check, UserPlus } from 'lucide-react';
 import type { ProductItem } from '@/lib/productStore';
-import type { Proveedor } from '@/services/proveedores.service';
+import type { Proveedor, NuevoProveedorInput } from '@/services/proveedores.service';
+import { toast } from '@/lib/toast';
 
 export interface PurchaseLineItem {
   id: string;
@@ -20,6 +21,7 @@ interface PurchaseCreateViewProps {
   supplierId: string;
   setSupplierId: (v: string) => void;
   proveedores: Proveedor[];
+  onCrearProveedor?: (datos: NuevoProveedorInput) => Promise<Proveedor>;
   purchaseDate: string;
   setPurchaseDate: (v: string) => void;
   paymentMethod: string;
@@ -58,6 +60,7 @@ export function PurchaseCreateView({
   supplierId,
   setSupplierId,
   proveedores,
+  onCrearProveedor,
   purchaseDate,
   setPurchaseDate,
   paymentMethod,
@@ -91,6 +94,44 @@ export function PurchaseCreateView({
   grandTotal,
   onOpenNewProductModal,
 }: PurchaseCreateViewProps) {
+  const [showNewSupplierModal, setShowNewSupplierModal] = useState(false);
+  const [newSupplierName, setNewSupplierName] = useState('');
+  const [newSupplierPhone, setNewSupplierPhone] = useState('');
+  const [newSupplierEmail, setNewSupplierEmail] = useState('');
+  const [newSupplierAddress, setNewSupplierAddress] = useState('');
+  const [savingSupplier, setSavingSupplier] = useState(false);
+
+  const handleSaveSupplier = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSupplierName.trim()) {
+      toast.error('El nombre del proveedor es obligatorio');
+      return;
+    }
+    if (!onCrearProveedor) {
+      toast.error('No se pudo procesar la creación de proveedor');
+      return;
+    }
+    setSavingSupplier(true);
+    try {
+      const created = await onCrearProveedor({
+        nombre: newSupplierName.trim(),
+        telefono: newSupplierPhone.trim() || undefined,
+        correo: newSupplierEmail.trim() || undefined,
+        direccion: newSupplierAddress.trim() || undefined,
+      });
+      toast.success(`Proveedor "${created.nombre}" creado exitosamente`);
+      setSupplierId(created.id);
+      setShowNewSupplierModal(false);
+      setNewSupplierName('');
+      setNewSupplierPhone('');
+      setNewSupplierEmail('');
+      setNewSupplierAddress('');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al crear el proveedor');
+    } finally {
+      setSavingSupplier(false);
+    }
+  };
   return (
     <AppLayout>
       <div className="space-y-6 slide-up">
@@ -111,7 +152,18 @@ export function PurchaseCreateView({
               <h3 className="font-semibold text-foreground">Información de la Compra</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Proveedor *</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-medium text-muted-foreground block">Proveedor *</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowNewSupplierModal(true)}
+                      className="text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 flex items-center gap-1 cursor-pointer transition-colors"
+                      title="Registrar nuevo proveedor"
+                    >
+                      <Plus size={13} />
+                      <span>Nuevo proveedor</span>
+                    </button>
+                  </div>
                   <select
                     value={supplierId}
                     onChange={(e) => setSupplierId(e.target.value)}
@@ -351,10 +403,15 @@ export function PurchaseCreateView({
                             <td className="py-2.5 px-3 text-center">
                               <input
                                 type="number"
-                                min={0.001}
+                                min={0}
                                 step="0.001"
-                                value={item.qty}
-                                onChange={(e) => onUpdateLineQty(item.id, parseFloat(e.target.value) || 0)}
+                                value={item.qty === 0 ? '' : item.qty}
+                                placeholder="0"
+                                onFocus={(e) => e.target.select()}
+                                onChange={(e) => {
+                                  const val = e.target.value.trim();
+                                  onUpdateLineQty(item.id, val === '' ? 0 : parseFloat(val) || 0);
+                                }}
                                 className="input-field w-24 text-center py-1 font-bold"
                               />
                             </td>
@@ -365,8 +422,13 @@ export function PurchaseCreateView({
                                   type="number"
                                   min={0}
                                   step="0.01"
-                                  value={item.price}
-                                  onChange={(e) => onUpdateLinePrice(item.id, Number(e.target.value))}
+                                  value={item.price === 0 ? '' : item.price}
+                                  placeholder="0.00"
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(e) => {
+                                    const val = e.target.value.trim();
+                                    onUpdateLinePrice(item.id, val === '' ? 0 : parseFloat(val) || 0);
+                                  }}
                                   className="input-field w-28 text-right py-1.5 font-bold tabular-nums"
                                   title="Precio de compra / costo"
                                 />
@@ -379,8 +441,13 @@ export function PurchaseCreateView({
                                   type="number"
                                   min={0}
                                   step="0.01"
-                                  value={item.salePrice}
-                                  onChange={(e) => onUpdateLineSalePrice(item.id, Number(e.target.value))}
+                                  value={item.salePrice === 0 ? '' : item.salePrice}
+                                  placeholder="0.00"
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(e) => {
+                                    const val = e.target.value.trim();
+                                    onUpdateLineSalePrice(item.id, val === '' ? 0 : parseFloat(val) || 0);
+                                  }}
                                   className="input-field w-28 text-right py-1.5 font-bold tabular-nums text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
                                   title="Precio de venta"
                                 />
@@ -393,8 +460,13 @@ export function PurchaseCreateView({
                                   type="number"
                                   min={0}
                                   step="0.01"
-                                  value={item.wholesalePrice || 0}
-                                  onChange={(e) => onUpdateLineWholesalePrice(item.id, Number(e.target.value))}
+                                  value={!item.wholesalePrice || item.wholesalePrice === 0 ? '' : item.wholesalePrice}
+                                  placeholder="0.00"
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(e) => {
+                                    const val = e.target.value.trim();
+                                    onUpdateLineWholesalePrice(item.id, val === '' ? 0 : parseFloat(val) || 0);
+                                  }}
                                   className="input-field w-28 text-right py-1.5 font-bold tabular-nums text-amber-600 dark:text-amber-400 border-amber-500/30"
                                   title="Precio de venta al por mayor"
                                 />
@@ -484,6 +556,108 @@ export function PurchaseCreateView({
             </button>
           </div>
         </div>
+
+        {/* Modal para Crear Proveedor Directamente desde Compras */}
+        {showNewSupplierModal && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-card rounded-2xl border border-border shadow-2xl p-6 space-y-5 animate-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between pb-3 border-b border-border">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold">
+                    <UserPlus size={18} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-foreground text-base">Nuevo Proveedor</h3>
+                    <p className="text-xs text-muted-foreground">Crear proveedor y seleccionarlo en la compra</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowNewSupplierModal(false)}
+                  className="text-muted-foreground hover:text-foreground p-1 rounded-lg hover:bg-secondary cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveSupplier} className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-muted-foreground mb-1 block">
+                    Nombre del Proveedor / Empresa <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    value={newSupplierName}
+                    onChange={(e) => setNewSupplierName(e.target.value)}
+                    placeholder="Ej. Distribuidora Nacional SAS"
+                    className="input-field text-sm font-medium"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-muted-foreground mb-1 block">Teléfono</label>
+                    <input
+                      type="text"
+                      value={newSupplierPhone}
+                      onChange={(e) => setNewSupplierPhone(e.target.value)}
+                      placeholder="809-000-0000"
+                      className="input-field text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-muted-foreground mb-1 block">Correo electrónico</label>
+                    <input
+                      type="email"
+                      value={newSupplierEmail}
+                      onChange={(e) => setNewSupplierEmail(e.target.value)}
+                      placeholder="contacto@empresa.com"
+                      className="input-field text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-muted-foreground mb-1 block">Dirección</label>
+                  <input
+                    type="text"
+                    value={newSupplierAddress}
+                    onChange={(e) => setNewSupplierAddress(e.target.value)}
+                    placeholder="Calle, No., Sector, Ciudad"
+                    className="input-field text-sm"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-3 border-t border-border">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewSupplierModal(false)}
+                    className="btn-secondary text-xs py-2 px-3.5 cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingSupplier || !newSupplierName.trim()}
+                    className="btn-primary text-xs py-2 px-4 font-bold flex items-center gap-1.5 disabled:opacity-50 cursor-pointer bg-[#007052] hover:bg-[#005c43]"
+                  >
+                    {savingSupplier ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" /> Creando…
+                      </>
+                    ) : (
+                      <>
+                        <Check size={14} /> Crear y Seleccionar
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     </AppLayout>
   );

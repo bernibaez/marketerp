@@ -203,6 +203,21 @@ export function productoAUi(p: Producto): Product {
   };
 
   const isWeight = p.is_weight_product || p.es_pesado || p.sale_type === 'weight' || p.sale_type === 'both';
+  const rawUnit = p.unidad?.trim();
+  const rawWeightUnit = p.weight_unit?.trim();
+
+  let resolvedUnit = 'Unidad';
+  if (isWeight) {
+    if (rawWeightUnit) {
+      resolvedUnit = rawWeightUnit.toLowerCase() === 'kg' ? 'kg' : 'lb';
+    } else if (rawUnit && !['unidad', 'ud', 'und', 'unidades'].includes(rawUnit.toLowerCase())) {
+      resolvedUnit = rawUnit;
+    } else {
+      resolvedUnit = 'lb';
+    }
+  } else {
+    resolvedUnit = rawUnit || 'Unidad';
+  }
 
   return {
     id: p.id,
@@ -217,7 +232,7 @@ export function productoAUi(p: Producto): Product {
     name: p.nombre ?? '',
     category: p.categoria ?? 'General',
     brand: p.marca ?? '',
-    unit: p.unidad ?? (p.weight_unit ? p.weight_unit.toUpperCase() : 'Unidad'),
+    unit: resolvedUnit,
     supplier: '',
     costPrice: Number(p.precio_costo ?? 0),
     salePrice: Number(p.precio_venta ?? 0),
@@ -874,16 +889,25 @@ export async function buscarProductoPorCodigoEscaneado(
   if (found) return found;
 
   // Fallback con búsqueda ilike por si hay espacios o variaciones guardadas en BD
-  if (clean.length >= 3) {
+  if (clean.length >= 2) {
     const sanitized = sanitizarBusquedaPostgrest(clean);
     if (sanitized) {
       const fallbackQuery = await sb
         .from('productos')
         .select('*')
-        .or(`codigo_barras.ilike.%${sanitized}%,sku.ilike.%${sanitized}%`)
+        .or(`codigo_barras.ilike.%${sanitized}%,sku.ilike.%${sanitized}%,nombre.ilike.%${sanitized}%`)
         .limit(10);
       if (!fallbackQuery.error && fallbackQuery.data && fallbackQuery.data.length > 0) {
-        return matchesLocal(fallbackQuery.data as Producto[]);
+        const rows = fallbackQuery.data as Producto[];
+        const cleanLower = clean.toLowerCase();
+        // 1. Coincidencia exacta de nombre
+        const exactName = rows.find((p) => (p.nombre || '').trim().toLowerCase() === cleanLower);
+        if (exactName) return exactName;
+        // 2. Coincidencia por inicio de nombre
+        const startName = rows.find((p) => (p.nombre || '').trim().toLowerCase().startsWith(cleanLower));
+        if (startName) return startName;
+        // 3. Coincidencia local o primer resultado
+        return matchesLocal(rows) ?? rows[0];
       }
     }
   }

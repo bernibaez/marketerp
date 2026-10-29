@@ -16,6 +16,7 @@ export interface InvoiceItem {
   sku?: string;
   name: string;
   qty: number;
+  unit?: string;
   price: number;
   subtotal: number;
   itbis?: number;
@@ -397,8 +398,8 @@ export default function PrintableInvoice({
               >
                 <span>
                   {settings.showItemPriceUnitPrice
-                    ? `${item.qty} x ${fmt(item.price)}`
-                    : `Cant: ${item.qty}`}
+                    ? `${item.qty}${item.unit && !['und', 'ud', 'unidad', 'unidades'].includes(item.unit.toLowerCase()) ? ` ${item.unit}` : ''} x ${fmt(item.price)}`
+                    : `Cant: ${item.qty}${item.unit && !['und', 'ud', 'unidad', 'unidades'].includes(item.unit.toLowerCase()) ? ` ${item.unit}` : ''}`}
                 </span>
                 <span className="text-slate-900 font-semibold tabular-nums">
                   {fmt(item.subtotal)}
@@ -669,7 +670,9 @@ export default function PrintableInvoice({
                   <td className="py-2 px-2 font-mono text-slate-500">{item.sku || '—'}</td>
                 )}
                 <td className="py-2 px-2 font-medium text-slate-900">{item.name}</td>
-                <td className="py-2 px-3 text-right tabular-nums text-slate-700">{item.qty}</td>
+                <td className="py-2 px-3 text-right tabular-nums text-slate-700">
+                  {item.qty}{item.unit && !['und', 'ud', 'unidad', 'unidades'].includes(item.unit.toLowerCase()) ? ` ${item.unit}` : ''}
+                </td>
                 {settings.showItemPriceUnitPrice && (
                   <td className="py-2 px-3 text-right font-mono tabular-nums text-slate-700">
                     {fmt(item.price)}

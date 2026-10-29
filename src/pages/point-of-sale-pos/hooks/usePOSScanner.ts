@@ -36,6 +36,7 @@ interface UsePOSScannerProps {
   enabled?: boolean;
   cart: CartItem[];
   addToCart: (item: any, qty?: number) => void;
+  isWholesaleMode?: boolean;
   deductOrRemoveFromCart: (item: {
     productId: string;
     sku?: string;
@@ -60,6 +61,7 @@ export function usePOSScanner({
   enabled = true,
   cart,
   addToCart,
+  isWholesaleMode = false,
   deductOrRemoveFromCart,
   awaitingDeleteScan,
   toggleDeleteMode,
@@ -77,52 +79,68 @@ export function usePOSScanner({
   const [searchQuery, setSearchQuery] = useState('');
 
   const realScaleCatalog = useMemo(() => {
-    const storeProducts = productosUi.map((p) => ({
-      id: p.id,
-      sku: p.sku,
-      barcode: p.barcode || '',
-      plu: p.plu || '',
-      name: p.name,
-      price: p.salePrice,
-      wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
-      cost: p.costPrice,
-      stock: p.currentStock,
-      unit: p.unit,
-      tax: p.tax,
-      image: p.image,
-      outOfStock: p.stockStatus === 'out',
-      isWeighted:
+    const storeProducts = productosUi.map((p) => {
+      const isWeight =
         p.isWeightProduct ||
         p.saleType === 'weight' ||
         p.saleType === 'both' ||
         p.unit.toLowerCase().includes('lb') ||
-        p.unit.toLowerCase().includes('kg'),
-      saleType: p.saleType,
-    }));
+        p.unit.toLowerCase().includes('kg');
+      const resolvedUnit = isWeight
+        ? (p.unit && !['unidad', 'ud', 'und', 'unidades'].includes(p.unit.toLowerCase()) ? p.unit : (p.weightUnit || 'lb'))
+        : (p.unit || 'ud');
+
+      return {
+        id: p.id,
+        sku: p.sku,
+        barcode: p.barcode || '',
+        plu: p.plu || '',
+        name: p.name,
+        price: p.salePrice,
+        wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
+        cost: p.costPrice,
+        stock: p.currentStock,
+        unit: resolvedUnit,
+        tax: p.tax,
+        image: p.image,
+        status: p.status || 'active',
+        outOfStock: p.stockStatus === 'out' || p.currentStock <= 0,
+        isWeighted: isWeight,
+        saleType: p.saleType,
+      };
+    });
 
     const demoExtras = storeProducts.length > 0 ? [] : initialProducts
-      .map((ip) => ({
-        id: ip.id,
-        sku: ip.sku,
-        barcode: ip.barcode || '',
-        plu: ip.plu || '',
-        name: ip.name,
-        price: ip.salePrice,
-        wholesalePrice: ip.wholesalePrice ? Number(ip.wholesalePrice) : undefined,
-        cost: ip.costPrice,
-        stock: ip.currentStock,
-        unit: ip.unit,
-        tax: ip.tax,
-        image: ip.image,
-        outOfStock: ip.stockStatus === 'out',
-        isWeighted:
+      .map((ip) => {
+        const isWeight =
           ip.isWeightProduct ||
           ip.saleType === 'weight' ||
           ip.saleType === 'both' ||
           ip.unit.toLowerCase().includes('lb') ||
-          ip.unit.toLowerCase().includes('kg'),
-        saleType: ip.saleType,
-      }));
+          ip.unit.toLowerCase().includes('kg');
+        const resolvedUnit = isWeight
+          ? (ip.unit && !['unidad', 'ud', 'und', 'unidades'].includes(ip.unit.toLowerCase()) ? ip.unit : (ip.weightUnit || 'lb'))
+          : (ip.unit || 'ud');
+
+        return {
+          id: ip.id,
+          sku: ip.sku,
+          barcode: ip.barcode || '',
+          plu: ip.plu || '',
+          name: ip.name,
+          price: ip.salePrice,
+          wholesalePrice: ip.wholesalePrice ? Number(ip.wholesalePrice) : undefined,
+          cost: ip.costPrice,
+          stock: ip.currentStock,
+          unit: resolvedUnit,
+          tax: ip.tax,
+          image: ip.image,
+          status: ip.status || 'active',
+          outOfStock: ip.stockStatus === 'out' || ip.currentStock <= 0,
+          isWeighted: isWeight,
+          saleType: ip.saleType,
+        };
+      });
 
     const allProds = [...storeProducts, ...demoExtras];
 
@@ -425,9 +443,15 @@ export function usePOSScanner({
       const scaleParsed = parseScaleBarcode(q, realScaleCatalog);
       if (scaleParsed?.isFromEan13) {
         const scaleStock = productosUi.find((p) => p.id === scaleParsed.product.productId);
-        if (scaleStock && scaleStock.currentStock <= 0) {
-          toast.error(`Producto agotado: ${scaleParsed.product.name}`);
-          return keepCodeSelected();
+        if (scaleStock) {
+          if (scaleStock.status === 'inactive' || scaleStock.status === 'discontinued') {
+            toast.error(`El producto "${scaleParsed.product.name}" está inactivo y no se puede vender`);
+            return keepCodeSelected();
+          }
+          if (scaleStock.currentStock <= 0 || scaleStock.stockStatus === 'out') {
+            toast.error(`Producto sin existencias: ${scaleParsed.product.name}`);
+            return keepCodeSelected();
+          }
         }
         return addWeightedFromScale(scaleParsed.product, scaleParsed.weight);
       }
@@ -437,8 +461,12 @@ export function usePOSScanner({
           const fromDb = await buscarProductoPorCodigoEscaneado(q);
           if (fromDb) {
             const ui = productoAUi(fromDb);
-            if (ui.currentStock <= 0) {
-              toast.error(`Producto agotado: ${ui.name}`);
+            if (ui.status === 'inactive' || ui.status === 'discontinued' || fromDb.estado === 'inactivo') {
+              toast.error(`El producto "${ui.name}" está inactivo y no se puede vender`);
+              return keepCodeSelected();
+            }
+            if (ui.currentStock <= 0 || ui.stockStatus === 'out') {
+              toast.error(`Producto sin existencias: ${ui.name}`);
               return keepCodeSelected();
             }
             const decoded = decodeVariableWeightBarcode(q);
@@ -462,52 +490,68 @@ export function usePOSScanner({
         }
       }
 
-      const storeProducts = productosUi.map((p) => ({
-        id: p.id,
-        sku: p.sku,
-        barcode: p.barcode || '',
-        name: p.name,
-        price: p.salePrice,
-        wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
-        cost: p.costPrice,
-        stock: p.currentStock,
-        unit: p.unit,
-        tax: p.tax,
-        image: p.image,
-        outOfStock: p.stockStatus === 'out',
-        plu: p.plu || '',
-        isWeighted:
+      const storeProducts = productosUi.map((p) => {
+        const isWeight =
           p.isWeightProduct ||
           p.saleType === 'weight' ||
           p.saleType === 'both' ||
           p.unit.toLowerCase().includes('lb') ||
-          p.unit.toLowerCase().includes('kg'),
-        saleType: p.saleType,
-      }));
+          p.unit.toLowerCase().includes('kg');
+        const resolvedUnit = isWeight
+          ? (p.unit && !['unidad', 'ud', 'und', 'unidades'].includes(p.unit.toLowerCase()) ? p.unit : (p.weightUnit || 'lb'))
+          : (p.unit || 'ud');
+
+        return {
+          id: p.id,
+          sku: p.sku,
+          barcode: p.barcode || '',
+          name: p.name,
+          price: p.salePrice,
+          wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
+          cost: p.costPrice,
+          stock: p.currentStock,
+          unit: resolvedUnit,
+          tax: p.tax,
+          image: p.image,
+          status: p.status || 'active',
+          outOfStock: p.stockStatus === 'out' || p.currentStock <= 0,
+          plu: p.plu || '',
+          isWeighted: isWeight,
+          saleType: p.saleType,
+        };
+      });
 
       const demoExtras = storeProducts.length > 0 ? [] : initialProducts
-        .map((ip) => ({
-          id: ip.id,
-          sku: ip.sku,
-          barcode: ip.barcode || '',
-          plu: ip.plu || '',
-          name: ip.name,
-          price: ip.salePrice,
-          wholesalePrice: ip.wholesalePrice ? Number(ip.wholesalePrice) : undefined,
-          cost: ip.costPrice,
-          stock: ip.currentStock,
-          unit: ip.unit,
-          tax: ip.tax,
-          image: ip.image,
-          outOfStock: ip.stockStatus === 'out',
-          isWeighted:
+        .map((ip) => {
+          const isWeight =
             ip.isWeightProduct ||
             ip.saleType === 'weight' ||
             ip.saleType === 'both' ||
             ip.unit.toLowerCase().includes('lb') ||
-            ip.unit.toLowerCase().includes('kg'),
-          saleType: ip.saleType,
-        }));
+            ip.unit.toLowerCase().includes('kg');
+          const resolvedUnit = isWeight
+            ? (ip.unit && !['unidad', 'ud', 'und', 'unidades'].includes(ip.unit.toLowerCase()) ? ip.unit : (ip.weightUnit || 'lb'))
+            : (ip.unit || 'ud');
+
+          return {
+            id: ip.id,
+            sku: ip.sku,
+            barcode: ip.barcode || '',
+            plu: ip.plu || '',
+            name: ip.name,
+            price: ip.salePrice,
+            wholesalePrice: ip.wholesalePrice ? Number(ip.wholesalePrice) : undefined,
+            cost: ip.costPrice,
+            stock: ip.currentStock,
+            unit: resolvedUnit,
+            tax: ip.tax,
+            image: ip.image,
+            status: ip.status || 'active',
+            outOfStock: ip.stockStatus === 'out' || ip.currentStock <= 0,
+            isWeighted: isWeight,
+            saleType: ip.saleType,
+          };
+        });
 
       const allProds = [...storeProducts, ...demoExtras];
       const qLower = q.toLowerCase();
@@ -515,7 +559,11 @@ export function usePOSScanner({
       let matchedProd = allProds.find((p) => productMatchesScanCode(p, q));
 
       if (!matchedProd) {
-        matchedProd = allProds.find((p) => p.name.toLowerCase() === qLower);
+        matchedProd = allProds.find((p) => (p.name || '').toLowerCase() === qLower);
+      }
+
+      if (!matchedProd) {
+        matchedProd = allProds.find((p) => (p.name || '').toLowerCase().startsWith(qLower));
       }
 
       if (!matchedProd) {
@@ -524,13 +572,18 @@ export function usePOSScanner({
             p.barcode.toLowerCase().includes(qLower) ||
             p.sku.toLowerCase().includes(qLower) ||
             (p.plu && p.plu.toLowerCase().includes(qLower)) ||
-            p.name.toLowerCase().includes(qLower)
+            (p.name || '').toLowerCase().includes(qLower)
         );
       }
 
       if (matchedProd) {
-        if (matchedProd.outOfStock) {
-          toast.error(`Producto sin stock disponible: ${matchedProd.name}`);
+        if (matchedProd.status === 'inactive' || matchedProd.status === 'discontinued') {
+          toast.error(`El producto "${matchedProd.name}" está inactivo y no se puede vender`);
+          return keepCodeSelected();
+        }
+
+        if (matchedProd.outOfStock || matchedProd.stock <= 0) {
+          toast.error(`Producto sin existencias: ${matchedProd.name}`);
           return keepCodeSelected();
         }
 
@@ -540,23 +593,28 @@ export function usePOSScanner({
           return true;
         }
 
+        const shouldWholesale = isWholesaleMode && (matchedProd.wholesalePrice || 0) > 0;
+        const itemPrice = shouldWholesale ? Number(matchedProd.wholesalePrice) : matchedProd.price;
+
         addToCart({
           id: `cart-${matchedProd.id}-${Date.now()}`,
           productId: matchedProd.id,
           name: matchedProd.name,
           sku: matchedProd.sku,
           barcode: matchedProd.barcode,
-          price: matchedProd.price,
+          price: itemPrice,
           regularPrice: matchedProd.price,
           wholesalePrice: matchedProd.wholesalePrice,
-          isWholesale: false,
+          isWholesale: shouldWholesale,
           cost: matchedProd.cost,
           tax: matchedProd.tax,
           image: matchedProd.image || '',
           unit: matchedProd.unit || 'ud',
           isWeighted: matchedProd.isWeighted,
+          status: matchedProd.status,
+          outOfStock: false,
         });
-        toast.success(`Producto agregado: ${matchedProd.name}`);
+        toast.success(`Producto agregado: ${matchedProd.name}${shouldWholesale ? ' (Al por mayor)' : ''}`);
         setSearchQuery('');
         focusPosBarcodeInput();
         return true;
@@ -567,8 +625,13 @@ export function usePOSScanner({
         const fromDb = await buscarProductoPorCodigoEscaneado(q);
         if (fromDb) {
           const ui = productoAUi(fromDb);
+          if (ui.status === 'inactive' || ui.status === 'discontinued' || fromDb.estado === 'inactivo') {
+            toast.error(`El producto "${ui.name}" está inactivo y no se puede vender`);
+            return keepCodeSelected();
+          }
+
           if (ui.stockStatus === 'out' || ui.currentStock <= 0) {
-            toast.error(`Producto sin stock disponible: ${ui.name}`);
+            toast.error(`Producto sin existencias: ${ui.name}`);
             return keepCodeSelected();
           }
 
@@ -585,23 +648,28 @@ export function usePOSScanner({
             return true;
           }
 
+          const shouldWholesale = isWholesaleMode && (ui.wholesalePrice || 0) > 0;
+          const itemPrice = shouldWholesale ? Number(ui.wholesalePrice) : ui.salePrice;
+
           addToCart({
             id: `cart-${ui.id}-${Date.now()}`,
             productId: ui.id,
             name: ui.name,
             sku: ui.sku,
             barcode: ui.barcode || '',
-            price: ui.salePrice,
+            price: itemPrice,
             regularPrice: ui.salePrice,
             wholesalePrice: ui.wholesalePrice ? Number(ui.wholesalePrice) : undefined,
-            isWholesale: false,
+            isWholesale: shouldWholesale,
             cost: ui.costPrice,
             tax: ui.tax,
             image: ui.image || '',
             unit: ui.unit || 'ud',
             isWeighted,
+            status: ui.status,
+            outOfStock: false,
           });
-          toast.success(`Producto agregado: ${ui.name}`);
+          toast.success(`Producto agregado: ${ui.name}${shouldWholesale ? ' (Al por mayor)' : ''}`);
           setSearchQuery('');
           focusPosBarcodeInput();
           return true;
