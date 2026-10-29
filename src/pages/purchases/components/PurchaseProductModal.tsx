@@ -479,9 +479,10 @@ export function PurchaseProductModal({
                     type="number"
                     min={0}
                     step="0.001"
-                    value={modalQty === 0 ? '' : modalQty}
+value={modalQty === 0 ? '' : modalQty}
                     placeholder="0"
                     onFocus={(e) => e.target.select()}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
                     onChange={(e) => {
                       const v = e.target.value.trim();
                       setModalQty(v === '' ? 0 : parseFloat(v) || 0);
@@ -522,9 +523,10 @@ export function PurchaseProductModal({
                     type="number"
                     min={0}
                     step="0.01"
-                    value={modalPrice === 0 ? '' : modalPrice}
+value={modalPrice === 0 ? '' : modalPrice}
                     placeholder="0.00"
                     onFocus={(e) => e.target.select()}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
                     onChange={(e) => {
                       const v = e.target.value.trim();
                       setModalPrice(v === '' ? 0 : parseFloat(v) || 0);
@@ -551,9 +553,10 @@ export function PurchaseProductModal({
                     type="number"
                     min={0}
                     step="0.01"
-                    value={modalSalePrice === 0 ? '' : modalSalePrice}
+value={modalSalePrice === 0 ? '' : modalSalePrice}
                     placeholder="0.00"
                     onFocus={(e) => e.target.select()}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
                     onChange={(e) => {
                       const v = e.target.value.trim();
                       setModalSalePrice(v === '' ? 0 : parseFloat(v) || 0);
@@ -580,9 +583,10 @@ export function PurchaseProductModal({
                     type="number"
                     min={0}
                     step="0.01"
-                    value={modalWholesalePrice === 0 ? '' : modalWholesalePrice}
+value={modalWholesalePrice === 0 ? '' : modalWholesalePrice}
                     placeholder="0.00"
                     onFocus={(e) => e.target.select()}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
                     onChange={(e) => {
                       const v = e.target.value.trim();
                       setModalWholesalePrice(v === '' ? 0 : parseFloat(v) || 0);
