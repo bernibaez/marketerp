@@ -82,7 +82,22 @@ export function parseScaleBarcode(code: string, catalog?: ScaleProduct[]): Parse
   const decoded = decodeVariableWeightBarcode(clean);
   const matchedProduct = findScaleProductByCode(productsToSearch, clean);
 
-  if (decoded.isVariableWeight && matchedProduct) {
+  if (!matchedProduct) return null;
+
+  const isActuallyWeighted =
+    matchedProduct.isWeightProduct ||
+    Boolean((matchedProduct as any).isWeighted) ||
+    (matchedProduct as any).saleType === 'weight' ||
+    (matchedProduct as any).saleType === 'both' ||
+    ['lb', 'libra', 'kg', 'kilogramo'].includes((matchedProduct.unit || '').toLowerCase());
+
+  // Si el producto coincidente no está configurado para venta por peso / balanza,
+  // NO debe interpretarse como etiqueta de peso variable.
+  if (!isActuallyWeighted) {
+    return null;
+  }
+
+  if (decoded.isVariableWeight) {
     const total = Math.round(matchedProduct.price * decoded.weight * 100) / 100;
     return {
       product: matchedProduct,
@@ -93,11 +108,7 @@ export function parseScaleBarcode(code: string, catalog?: ScaleProduct[]): Parse
     };
   }
 
-  if (matchedProduct) {
-    const weight = 1.0;
-    const total = Math.round(matchedProduct.price * weight * 100) / 100;
-    return { product: matchedProduct, weight, price: matchedProduct.price, total, isFromEan13: false };
-  }
-
-  return null;
+  const weight = 1.0;
+  const total = Math.round(matchedProduct.price * weight * 100) / 100;
+  return { product: matchedProduct, weight, price: matchedProduct.price, total, isFromEan13: false };
 }

@@ -232,19 +232,28 @@ export function usePOSScanner({
             const fromDb = await buscarProductoPorCodigoEscaneado(q);
             if (fromDb) {
               const ui = productoAUi(fromDb);
-              const inCart = cart.find(
-                (i) => i.productId === ui.id || i.sku.toLowerCase() === ui.sku.toLowerCase()
-              );
-              if (inCart) {
-                deductOrRemoveFromCart({
-                  productId: ui.id,
-                  sku: ui.sku,
-                  barcode: ui.barcode || '',
-                  name: ui.name,
-                });
-                setSearchQuery('');
-                focusPosBarcodeInput();
-                return true;
+              const isWeight =
+                ui.isWeightProduct ||
+                fromDb.es_pesado ||
+                fromDb.sale_type === 'weight' ||
+                fromDb.sale_type === 'both' ||
+                ['lb', 'libra', 'kg', 'kilogramo'].includes((ui.unit || '').toLowerCase());
+
+              if (isWeight) {
+                const inCart = cart.find(
+                  (i) => i.productId === ui.id || i.sku.toLowerCase() === ui.sku.toLowerCase()
+                );
+                if (inCart) {
+                  deductOrRemoveFromCart({
+                    productId: ui.id,
+                    sku: ui.sku,
+                    barcode: ui.barcode || '',
+                    name: ui.name,
+                  });
+                  setSearchQuery('');
+                  focusPosBarcodeInput();
+                  return true;
+                }
               }
             }
           } catch {
@@ -461,29 +470,38 @@ export function usePOSScanner({
           const fromDb = await buscarProductoPorCodigoEscaneado(q);
           if (fromDb) {
             const ui = productoAUi(fromDb);
-            if (ui.status === 'inactive' || ui.status === 'discontinued' || fromDb.estado === 'inactivo') {
-              toast.error(`El producto "${ui.name}" está inactivo y no se puede vender`);
-              return keepCodeSelected();
+            const isWeight =
+              ui.isWeightProduct ||
+              fromDb.es_pesado ||
+              fromDb.sale_type === 'weight' ||
+              fromDb.sale_type === 'both' ||
+              ['lb', 'libra', 'kg', 'kilogramo'].includes((ui.unit || '').toLowerCase());
+
+            if (isWeight) {
+              if (ui.status === 'inactive' || ui.status === 'discontinued' || fromDb.estado === 'inactivo') {
+                toast.error(`El producto "${ui.name}" está inactivo y no se puede vender`);
+                return keepCodeSelected();
+              }
+              if (ui.currentStock <= 0 || ui.stockStatus === 'out') {
+                toast.error(`Producto sin existencias: ${ui.name}`);
+                return keepCodeSelected();
+              }
+              const decoded = decodeVariableWeightBarcode(q);
+              return addWeightedFromScale(
+                {
+                  productId: ui.id,
+                  name: ui.name,
+                  sku: ui.sku,
+                  price: ui.salePrice,
+                  wholesalePrice: ui.wholesalePrice ? Number(ui.wholesalePrice) : undefined,
+                  cost: ui.costPrice,
+                  tax: ui.tax,
+                  image: ui.image,
+                  unit: ui.unit || ui.weightUnit || 'lb',
+                },
+                decoded.weight
+              );
             }
-            if (ui.currentStock <= 0 || ui.stockStatus === 'out') {
-              toast.error(`Producto sin existencias: ${ui.name}`);
-              return keepCodeSelected();
-            }
-            const decoded = decodeVariableWeightBarcode(q);
-            return addWeightedFromScale(
-              {
-                productId: ui.id,
-                name: ui.name,
-                sku: ui.sku,
-                price: ui.salePrice,
-                wholesalePrice: ui.wholesalePrice ? Number(ui.wholesalePrice) : undefined,
-                cost: ui.costPrice,
-                tax: ui.tax,
-                image: ui.image,
-                unit: ui.unit || ui.weightUnit || 'lb',
-              },
-              decoded.weight
-            );
           }
         } catch {
           // Continúa con la búsqueda local

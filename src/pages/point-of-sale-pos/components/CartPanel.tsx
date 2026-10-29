@@ -381,19 +381,21 @@ export default function CartPanel({
 
       const qLower = valueToSubmit.toLowerCase();
 
-      // 0. Si es una etiqueta de balanza con peso embebido (EAN-13/12 prefijo 20-29),
-      // procesarla directamente con el decodificador de balanza para usar el peso exacto de la etiqueta.
+      // 1. Si hay coincidencia exacta por código de barras, SKU o PLU en los resultados:
+      // (Priorizar siempre productos regulares para no confundir productos con código fijo
+      // que empieza en 20-29 con etiquetas de peso de balanza)
+      const exactCode = searchResults.find((p) => productMatchesScanCode(p, valueToSubmit));
+      if (exactCode) {
+        handleSelectProduct(exactCode);
+        return;
+      }
+
+      // 2. Si es una etiqueta de balanza con peso embebido (EAN-13/12 prefijo 20-29) y NO es
+      // un producto de catálogo con código exacto fijo:
       if (isVariableWeightBarcode(valueToSubmit) && onSearchSubmit) {
         if (onSearchChange) onSearchChange('');
         setDropdownOpen(false);
         void onSearchSubmit(valueToSubmit);
-        return;
-      }
-
-      // 1. Si hay coincidencia exacta por código de barras, SKU o PLU en los resultados:
-      const exactCode = searchResults.find((p) => productMatchesScanCode(p, valueToSubmit));
-      if (exactCode) {
-        handleSelectProduct(exactCode);
         return;
       }
 

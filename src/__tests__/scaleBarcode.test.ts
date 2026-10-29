@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { parseScaleBarcode, type ScaleProduct } from '@/pages/point-of-sale-pos/utils/scaleUtils';
 import {
   decodeVariableWeightBarcode,
   extractPluFromCode,
@@ -85,6 +86,54 @@ describe('scaleBarcode (Decodificación de Códigos de Balanza mscale)', () => {
     it('coincide por PLU y código de balanza variable', () => {
       expect(productMatchesScanCode({ plu: '132' }, '00132')).toBe(true);
       expect(productMatchesScanCode({ plu: '00132' }, '2000132014558')).toBe(true);
+    });
+  });
+
+  describe('parseScaleBarcode (Protección de productos por unidad con prefijo 20-29)', () => {
+    it('no procesa como balanza productos regulares por unidad cuyo barcode inicia en 20-29 (ej: Vainilla Blanca Galón)', () => {
+      const mockCatalog: ScaleProduct[] = [
+        {
+          productId: 'prod-vainilla-1',
+          name: 'Extracto De Vainilla Blanca Galon',
+          sku: '2021321111336',
+          barcode: '2021321111336',
+          price: 175,
+          cost: 141.66,
+          tax: 0,
+          unit: 'Unidad',
+          category: 'Abarrotes',
+          isWeightProduct: false,
+        },
+      ];
+
+      // Al escanear 2021321111336, debe retornar null para que el POS lo venda como UNIDAD regular y no como 11.133 lb
+      const result = parseScaleBarcode('2021321111336', mockCatalog);
+      expect(result).toBeNull();
+    });
+
+    it('procesa correctamente etiquetas de balanza reales cuando el producto sí es pesado', () => {
+      const mockCatalog: ScaleProduct[] = [
+        {
+          productId: 'prod-queso-1',
+          name: 'Queso Cheddar',
+          sku: 'SKU-00132',
+          plu: '00132',
+          barcode: '00132',
+          price: 200,
+          cost: 150,
+          tax: 0,
+          unit: 'lb',
+          category: 'Embutidos',
+          isWeightProduct: true,
+        },
+      ];
+
+      // 20 + 00132 (PLU) + 01455 (1.455 lb) + 8 (check)
+      const result = parseScaleBarcode('2000132014558', mockCatalog);
+      expect(result).not.toBeNull();
+      expect(result?.weight).toBe(1.455);
+      expect(result?.isFromEan13).toBe(true);
+      expect(result?.product.name).toBe('Queso Cheddar');
     });
   });
 });

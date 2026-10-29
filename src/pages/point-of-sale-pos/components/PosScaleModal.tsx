@@ -213,6 +213,16 @@ export default function PosScaleModal({
       const fromDb = await buscarProductoPorCodigoEscaneado(code);
       if (fromDb) {
         const ui = productoAUi(fromDb);
+        const isWeight =
+          ui.isWeightProduct ||
+          fromDb.es_pesado ||
+          fromDb.sale_type === 'weight' ||
+          fromDb.sale_type === 'both' ||
+          ['lb', 'libra', 'kg', 'kilogramo'].includes((ui.unit || '').toLowerCase());
+        if (!isWeight) {
+          toast.error(`"${ui.name}" es un producto por unidad, no de balanza`);
+          return;
+        }
         const decoded = decodeVariableWeightBarcode(code);
         const dbScaleProd: ScaleProduct = {
           productId: ui.id,
