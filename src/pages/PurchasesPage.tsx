@@ -47,7 +47,7 @@ export default function PurchasesPage() {
   const [supplierId, setSupplierId] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Transferencia');
   const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const { proveedores } = useProveedores();
+  const { proveedores, refetch: reloadProveedores } = useProveedores();
 
   const [viewingPurchase, setViewingPurchase] = useState<CompraDetalle | null>(null);
   const [loadingPurchaseDetail, setLoadingPurchaseDetail] = useState(false);
@@ -334,6 +334,7 @@ export default function PurchasesPage() {
           supplierId={supplierId}
           setSupplierId={setSupplierId}
           proveedores={proveedores}
+          onSupplierCreated={() => void reloadProveedores()}
           purchaseDate={purchaseDate}
           setPurchaseDate={setPurchaseDate}
           paymentMethod={paymentMethod}

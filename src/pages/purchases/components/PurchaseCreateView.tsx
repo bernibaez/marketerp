@@ -1,6 +1,9 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import AppLayout from '@/components/AppLayout';
-import { Search, Loader2, X, Plus, Trash2, Check, ChevronDown } from 'lucide-react';
+import { Search, Loader2, X, Plus, Trash2, Check, ChevronDown, Building2, Phone, Mail, MapPin } from 'lucide-react';
+import ModalShell from '@/components/ui/ModalShell';
+import { crearProveedor } from '@/services/proveedores.service';
+import { toast } from '@/lib/toast';
 import type { ProductItem } from '@/lib/productStore';
 import type { Proveedor } from '@/services/proveedores.service';
 
@@ -20,6 +23,7 @@ interface PurchaseCreateViewProps {
   supplierId: string;
   setSupplierId: (v: string) => void;
   proveedores: Proveedor[];
+  onSupplierCreated?: (nuevo: Proveedor) => void | Promise<void>;
   purchaseDate: string;
   setPurchaseDate: (v: string) => void;
   paymentMethod: string;
@@ -58,6 +62,7 @@ export function PurchaseCreateView({
   supplierId,
   setSupplierId,
   proveedores,
+  onSupplierCreated,
   purchaseDate,
   setPurchaseDate,
   paymentMethod,
@@ -95,6 +100,53 @@ export function PurchaseCreateView({
   const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
   const [supplierHighlightIndex, setSupplierHighlightIndex] = useState(0);
   const supplierContainerRef = useRef<HTMLDivElement>(null);
+  // Estado para modal de crear nuevo proveedor
+  const [showNewSupplierModal, setShowNewSupplierModal] = useState(false);
+  const [savingSupplier, setSavingSupplier] = useState(false);
+  const [newSupplierName, setNewSupplierName] = useState('');
+  const [newSupplierPhone, setNewSupplierPhone] = useState('');
+  const [newSupplierEmail, setNewSupplierEmail] = useState('');
+  const [newSupplierAddress, setNewSupplierAddress] = useState('');
+  const [localNewSuppliers, setLocalNewSuppliers] = useState<Proveedor[]>([]);
+
+  const handleOpenNewSupplierModal = () => {
+    setNewSupplierName(supplierSearch.trim());
+    setNewSupplierPhone('');
+    setNewSupplierEmail('');
+    setNewSupplierAddress('');
+    setShowNewSupplierModal(true);
+  };
+
+  const handleSaveNewSupplier = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSupplierName.trim()) {
+      toast.error('El nombre del proveedor es obligatorio');
+      return;
+    }
+    setSavingSupplier(true);
+    try {
+      const created = await crearProveedor({
+        nombre: newSupplierName.trim(),
+        telefono: newSupplierPhone.trim() || null,
+        correo: newSupplierEmail.trim() || null,
+        direccion: newSupplierAddress.trim() || null,
+      });
+      toast.success(`Proveedor "${created.nombre}" guardado y seleccionado`);
+      setLocalNewSuppliers((prev) => [created, ...prev]);
+      handleSelectSupplier(created);
+      setShowNewSupplierModal(false);
+      setNewSupplierName('');
+      setNewSupplierPhone('');
+      setNewSupplierEmail('');
+      setNewSupplierAddress('');
+      void onSupplierCreated?.(created);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al crear el proveedor');
+    } finally {
+      setSavingSupplier(false);
+    }
+  };
+
 
   // Sincronizar texto cuando cambia el supplierId seleccionado
   useEffect(() => {
@@ -119,9 +171,17 @@ export function PurchaseCreateView({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Combinar proveedores con los recién creados localmente
+  const allProveedores = useMemo(() => {
+    if (localNewSuppliers.length === 0) return proveedores;
+    const ids = new Set(proveedores.map((p) => p.id));
+    const extras = localNewSuppliers.filter((p) => !ids.has(p.id));
+    return [...extras, ...proveedores];
+  }, [proveedores, localNewSuppliers]);
+
   // Filtrar proveedores en tiempo real por nombre, código o teléfono
   const filteredProveedores = useMemo(() => {
-    if (!supplierSearch.trim()) return proveedores;
+    if (!supplierSearch.trim()) return allProveedores;
     const q = supplierSearch.toLowerCase().trim();
     return proveedores.filter(
       (p) =>
@@ -129,7 +189,7 @@ export function PurchaseCreateView({
         (p.codigo && p.codigo.toLowerCase().includes(q)) ||
         (p.telefono && p.telefono.includes(q))
     );
-  }, [proveedores, supplierSearch]);
+  }, [allProveedores, supplierSearch]);
 
   const handleSelectSupplier = (p: Proveedor) => {
     setSupplierId(p.id);
@@ -188,11 +248,22 @@ export function PurchaseCreateView({
           <div className="lg:col-span-2 card p-4 sm:p-5 space-y-3.5">
             <h3 className="font-semibold text-foreground text-sm sm:text-base">Información de la Compra</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              {/* Selector de Proveedor Autocompletable y Escribible */}
+              {/* Selector de Proveedor Autocompletable y Escribible con Botón de Creación */}
               <div className="relative" ref={supplierContainerRef}>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">
-                  Proveedor * <span className="font-normal text-muted-foreground/80">(escribe para buscar o selecciona)</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Proveedor * <span className="font-normal text-muted-foreground/80">(escribe o selecciona)</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleOpenNewSupplierModal}
+                    className="text-xs font-bold text-[#007052] dark:text-emerald-400 hover:underline inline-flex items-center gap-1 cursor-pointer transition active:scale-95"
+                    title="Crear un nuevo proveedor"
+                  >
+                    <Plus size={13} />
+                    Nuevo Proveedor
+                  </button>
+                </div>
                 <div className="relative flex items-center">
                   <Search size={14} className="absolute left-2.5 text-slate-400 pointer-events-none" />
                   <input
@@ -237,8 +308,19 @@ export function PurchaseCreateView({
                 {supplierDropdownOpen && (
                   <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl z-50 max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 animate-in fade-in zoom-in-95 duration-150">
                     {filteredProveedores.length === 0 ? (
-                      <div className="p-3 text-center text-xs text-muted-foreground">
-                        No se encontraron proveedores para &quot;{supplierSearch}&quot;
+                      <div className="p-3 text-center text-xs text-muted-foreground space-y-2">
+                        <p>No se encontraron proveedores para &quot;{supplierSearch}&quot;</p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSupplierDropdownOpen(false);
+                            handleOpenNewSupplierModal();
+                          }}
+                          className="px-2.5 py-1 rounded-md bg-[#007052] text-white text-[11px] font-bold inline-flex items-center gap-1 shadow-xs hover:bg-[#005c43] transition cursor-pointer"
+                        >
+                          <Plus size={12} />
+                          Crear proveedor &quot;{supplierSearch.trim()}&quot;
+                        </button>
                       </div>
                     ) : (
                       filteredProveedores.map((p, idx) => {
@@ -274,6 +356,19 @@ export function PurchaseCreateView({
                         );
                       })
                     )}
+                    <div className="p-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 sticky bottom-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSupplierDropdownOpen(false);
+                          handleOpenNewSupplierModal();
+                        }}
+                        className="w-full py-1.5 px-2.5 rounded-lg text-xs font-bold text-[#007052] dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Plus size={13} />
+                        {supplierSearch.trim() ? `Crear proveedor "${supplierSearch.trim()}"` : 'Crear nuevo proveedor'}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -738,6 +833,130 @@ export function PurchaseCreateView({
           )}
         </div>
       </div>
+
+      {/* Modal para Crear y Guardar Nuevo Proveedor */}
+      <ModalShell
+        open={showNewSupplierModal}
+        onClose={() => !savingSupplier && setShowNewSupplierModal(false)}
+        size="md"
+        className="p-5 sm:p-6"
+      >
+        <form onSubmit={handleSaveNewSupplier} className="space-y-4">
+          <div className="flex items-center justify-between border-b border-border pb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-[#007052] dark:text-emerald-400">
+                <Building2 size={20} />
+              </div>
+              <div>
+                <h3 className="font-bold text-foreground text-base">Nuevo Proveedor</h3>
+                <p className="text-xs text-muted-foreground">Registrar proveedor para órdenes de compra</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => !savingSupplier && setShowNewSupplierModal(false)}
+              className="p-1 text-muted-foreground hover:text-foreground rounded-lg transition cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-semibold text-foreground mb-1 block">
+                Nombre de la Empresa o Proveedor *
+              </label>
+              <input
+                type="text"
+                required
+                autoFocus
+                value={newSupplierName}
+                onChange={(e) => setNewSupplierName(e.target.value)}
+                placeholder="Ej. Distribuidora Corripio, Induveca, etc."
+                className="input-field text-xs h-9 w-full"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                  Teléfono / WhatsApp
+                </label>
+                <div className="relative flex items-center">
+                  <Phone size={14} className="absolute left-2.5 text-slate-400 pointer-events-none" />
+                  <input
+                    type="tel"
+                    value={newSupplierPhone}
+                    onChange={(e) => setNewSupplierPhone(e.target.value)}
+                    placeholder="809-555-0100"
+                    className="input-field text-xs pl-8 h-9 w-full"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                  Correo Electrónico
+                </label>
+                <div className="relative flex items-center">
+                  <Mail size={14} className="absolute left-2.5 text-slate-400 pointer-events-none" />
+                  <input
+                    type="email"
+                    value={newSupplierEmail}
+                    onChange={(e) => setNewSupplierEmail(e.target.value)}
+                    placeholder="ventas@proveedor.com"
+                    className="input-field text-xs pl-8 h-9 w-full"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                Dirección
+              </label>
+              <div className="relative flex items-center">
+                <MapPin size={14} className="absolute left-2.5 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={newSupplierAddress}
+                  onChange={(e) => setNewSupplierAddress(e.target.value)}
+                  placeholder="Av. 27 de Febrero #123, Santo Domingo"
+                  className="input-field text-xs pl-8 h-9 w-full"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-border">
+            <button
+              type="button"
+              disabled={savingSupplier}
+              onClick={() => setShowNewSupplierModal(false)}
+              className="btn-secondary text-xs py-2 px-3.5 cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={savingSupplier || !newSupplierName.trim()}
+              className="btn-primary text-xs py-2 px-4 font-bold flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+            >
+              {savingSupplier ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  Guardando…
+                </>
+              ) : (
+                <>
+                  <Check size={14} />
+                  Guardar y Seleccionar
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </ModalShell>
+
     </AppLayout>
   );
 }
