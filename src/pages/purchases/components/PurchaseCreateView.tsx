@@ -385,18 +385,23 @@ export function PurchaseCreateView({
                     Margen Venta
                     <span className="block text-[9px] font-normal text-emerald-600">% ganancia</span>
                   </th>
-                  <th className="text-right py-2.5 px-2 font-bold w-28 sm:w-32">
+                  <th className="text-right py-2.5 px-2 font-bold w-24 sm:w-28">
                     P. Mayor
                     <span className="block text-[9px] font-normal text-amber-600 dark:text-amber-400">mayorista</span>
                   </th>
-                  <th className="text-right py-2.5 px-3 font-bold w-28 sm:w-32">Subtotal</th>
+                  {/* Margen Mayor justo al lado de P. Mayor */}
+                  <th className="text-center py-2.5 px-2 font-bold w-20 sm:w-24">
+                    Margen Mayor
+                    <span className="block text-[9px] font-normal text-amber-600 dark:text-amber-400">% ganancia</span>
+                  </th>
+                  <th className="text-right py-2.5 px-3 font-bold w-24 sm:w-28">Subtotal</th>
                   <th className="text-center py-2.5 px-2 w-10"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
                 {purchaseItems.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-10 text-muted-foreground">
+                    <td colSpan={9} className="text-center py-10 text-muted-foreground">
                       No has agregado ningún producto a esta compra. Escribe en el buscador superior o haz clic en{' '}
                       <strong>Agregar producto</strong>.
                     </td>
@@ -489,25 +494,41 @@ export function PurchaseCreateView({
 
                         {/* Precio Al Por Mayor */}
                         <td className="py-2 px-2 text-right">
-                          <div className="inline-flex flex-col items-end">
-                            <div className="inline-flex items-center gap-1 justify-end">
-                              <span className="text-[9px] text-amber-600 font-semibold">RD$</span>
-                              <input
-                                type="number"
-                                min={0}
-                                step="0.01"
-                                value={item.wholesalePrice || 0}
-                                onChange={(e) => onUpdateLineWholesalePrice(item.id, Number(e.target.value))}
-                                className="input-field w-20 sm:w-24 text-right py-1 px-1.5 font-bold font-mono text-xs tabular-nums text-amber-600 dark:text-amber-400 border-amber-500/30"
-                                title="Precio de venta al por mayor"
-                              />
-                            </div>
-                            {item.wholesalePrice ? (
-                              <span className="text-[9px] font-mono text-amber-600 dark:text-amber-400 tabular-nums mt-0.5">
+                          <div className="inline-flex items-center gap-1 justify-end">
+                            <span className="text-[9px] text-amber-600 font-semibold">RD$</span>
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={item.wholesalePrice || 0}
+                              onChange={(e) => onUpdateLineWholesalePrice(item.id, Number(e.target.value))}
+                              className="input-field w-20 sm:w-24 text-right py-1 px-1.5 font-bold font-mono text-xs tabular-nums text-amber-600 dark:text-amber-400 border-amber-500/30"
+                              title="Precio de venta al por mayor"
+                            />
+                          </div>
+                        </td>
+
+                        {/* Margen Al Por Mayor justo al lado */}
+                        <td className="py-2 px-2 text-center">
+                          {item.wholesalePrice && item.wholesalePrice > 0 ? (
+                            <div className="flex flex-col items-center justify-center">
+                              <span
+                                className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-black tabular-nums leading-tight ${
+                                  wholesaleMarginAmt >= 0
+                                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                    : 'bg-danger-bg text-danger border border-danger/20'
+                                }`}
+                                title={`Ganancia mayorista unitaria: RD$ ${wholesaleMarginAmt.toFixed(2)}`}
+                              >
                                 {wholesaleMarginPct >= 0 ? `+${wholesaleMarginPct.toFixed(0)}%` : `${wholesaleMarginPct.toFixed(0)}%`}
                               </span>
-                            ) : null}
-                          </div>
+                              <span className="text-[9px] font-mono text-amber-600 dark:text-amber-400 mt-0.5 tabular-nums">
+                                {wholesaleMarginAmt >= 0 ? `+${wholesaleMarginAmt.toFixed(2)}` : `${wholesaleMarginAmt.toFixed(2)}`}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground italic">-</span>
+                          )}
                         </td>
 
                         {/* Subtotal */}
