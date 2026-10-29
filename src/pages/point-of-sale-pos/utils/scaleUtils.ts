@@ -59,6 +59,19 @@ export function findScaleProductByCode(catalog: ScaleProduct[], code: string): S
   const clean = String(code ?? '').trim();
   if (!clean) return undefined;
 
+  // 1. PRIORIDAD ABSOLUTA: Si existe un producto en catálogo cuyo código de barras o SKU coincide exactamente con el código escaneado,
+  // ese producto TIENE PRIORIDAD y NO debe confundirse con una etiqueta de balanza generada por azar.
+  const upper = clean.toUpperCase();
+  const exact = catalog.find((p) => {
+    const b = String(p.barcode ?? '').trim().toUpperCase();
+    const s = String(p.sku ?? '').trim().toUpperCase();
+    return (b && b === upper) || (s && s === upper);
+  });
+  if (exact) {
+    return exact;
+  }
+
+  // 2. Solo si NO hubo coincidencia exacta de código comercial, intentamos decodificar como etiqueta de peso de balanza
   const decoded = decodeVariableWeightBarcode(clean);
   if (decoded.isVariableWeight) {
     const byPlu = catalog.find((p) => productMatchesPlu(p, decoded.plu));
@@ -80,16 +93,36 @@ export function parseScaleBarcode(code: string, catalog?: ScaleProduct[]): Parse
 
   const productsToSearch = catalog || [];
   const decoded = decodeVariableWeightBarcode(clean);
-  const matchedProduct = findScaleProductByCode(productsToSearch, clean);
 
+  // Si no es un código de balanza válido (12-13 dígitos empezando por 20-29), no es ticket de balanza
+  if (!decoded.isVariableWeight) return null;
+
+  // Si existe un producto de catálogo cuyo código de barras exacto es este código numérico (ej: un galón con código comercial 2021321111336 o 2578901234902),
+  // y ese producto se vende por unidad, NUNCA debe parsearse como peso de balanza.
+  const upper = clean.toUpperCase();
+  const exactProduct = productsToSearch.find((p) => {
+    const b = String(p.barcode ?? '').trim().toUpperCase();
+    const s = String(p.sku ?? '').trim().toUpperCase();
+    return (b && b === upper) || (s && s === upper);
+  });
+
+  if (exactProduct) {
+    const isWeight =
+      exactProduct.isWeightProduct ||
+      Boolean((exactProduct as any).isWeighted) ||
+      (exactProduct as any).saleType === 'weight' ||
+      (exactProduct as any).saleType === 'both';
+    if (!isWeight) return null;
+  }
+
+  const matchedProduct = findScaleProductByCode(productsToSearch, clean);
   if (!matchedProduct) return null;
 
   const isActuallyWeighted =
     matchedProduct.isWeightProduct ||
     Boolean((matchedProduct as any).isWeighted) ||
     (matchedProduct as any).saleType === 'weight' ||
-    (matchedProduct as any).saleType === 'both' ||
-    ['lb', 'libra', 'kg', 'kilogramo'].includes((matchedProduct.unit || '').toLowerCase());
+    (matchedProduct as any).saleType === 'both';
 
   // Si el producto coincidente no está configurado para venta por peso / balanza,
   // NO debe interpretarse como etiqueta de peso variable.
@@ -97,7 +130,7 @@ export function parseScaleBarcode(code: string, catalog?: ScaleProduct[]): Parse
     return null;
   }
 
-  if (decoded.isVariableWeight) {
+  if (decoded.isVariableWeight && decoded.weight > 0) {
     const total = Math.round(matchedProduct.price * decoded.weight * 100) / 100;
     return {
       product: matchedProduct,
@@ -108,7 +141,5 @@ export function parseScaleBarcode(code: string, catalog?: ScaleProduct[]): Parse
     };
   }
 
-  const weight = 1.0;
-  const total = Math.round(matchedProduct.price * weight * 100) / 100;
-  return { product: matchedProduct, weight, price: matchedProduct.price, total, isFromEan13: false };
+  return null;
 }

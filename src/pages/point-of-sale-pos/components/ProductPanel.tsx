@@ -65,11 +65,10 @@ export default function ProductPanel({
       .filter((p) => p.status === 'active' || p.status === undefined)
       .map((p): Product => {
         const isWeight =
-          p.isWeightProduct ||
+          Boolean(p.isWeightProduct) ||
+          Boolean((p as any).es_pesado) ||
           p.saleType === 'weight' ||
-          p.saleType === 'both' ||
-          p.unit.toLowerCase().includes('lb') ||
-          p.unit.toLowerCase().includes('kg');
+          p.saleType === 'both';
         const resolvedUnit = isWeight
           ? (p.unit && !['unidad', 'ud', 'und', 'unidades'].includes(p.unit.toLowerCase()) ? p.unit : (p.weightUnit || 'lb'))
           : (p.unit || 'Und');
@@ -185,14 +184,7 @@ export default function ProductPanel({
       return;
     }
 
-    if (
-      (p.saleType === 'weight' ||
-        p.isWeighted ||
-        p.unit.toLowerCase() === 'libra' ||
-        p.unit.toLowerCase() === 'lb' ||
-        p.unit.toLowerCase() === 'kg') &&
-      onOpenScale
-    ) {
+    if ((p.saleType === 'weight' || p.isWeighted) && onOpenScale) {
       onOpenScale(p.id, 1.0, p);
       return;
     }

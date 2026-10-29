@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseScaleBarcode, type ScaleProduct } from '@/pages/point-of-sale-pos/utils/scaleUtils';
+import { parseScaleBarcode, findScaleProductByCode, type ScaleProduct } from '@/pages/point-of-sale-pos/utils/scaleUtils';
 import {
   decodeVariableWeightBarcode,
   extractPluFromCode,
@@ -134,6 +134,84 @@ describe('scaleBarcode (Decodificación de Códigos de Balanza mscale)', () => {
       expect(result?.weight).toBe(1.455);
       expect(result?.isFromEan13).toBe(true);
       expect(result?.product.name).toBe('Queso Cheddar');
+    });
+
+    it('no secuestra un producto comercial por coincidencia accidental de PLU', () => {
+      // Caso: Carne Molida Foods (barcode 2100003137715) vs Malagueta (PLU 3)
+      const mockCatalog: ScaleProduct[] = [
+        {
+          productId: 'prod-malagueta',
+          name: 'MALAGUETA',
+          sku: '3',
+          plu: '00003',
+          barcode: '3',
+          price: 310,
+          cost: 200,
+          tax: 0,
+          unit: 'Libra',
+          category: 'Especias',
+          isWeightProduct: true,
+        },
+        {
+          productId: 'prod-carne-foods',
+          name: 'CARNE MOLIDA FOODS',
+          sku: '2100003137715',
+          barcode: '2100003137715',
+          price: 165,
+          cost: 120,
+          tax: 0,
+          unit: 'Unidad',
+          category: 'Carnes',
+          isWeightProduct: false,
+        },
+      ];
+
+      const found = findScaleProductByCode(mockCatalog, '2100003137715');
+      expect(found).toBeDefined();
+      expect(found?.name).toBe('CARNE MOLIDA FOODS');
+
+      // Y parseScaleBarcode debe ser null para vender por unidad
+      const parsed = parseScaleBarcode('2100003137715', mockCatalog);
+      expect(parsed).toBeNull();
+    });
+
+    it('dos productos comerciales con código de 13 dígitos no se cruzan entre sí', () => {
+      const prodA = {
+        barcode: '2021321111336',
+        sku: '2021321111336',
+        plu: '',
+      };
+      const prodB = {
+        barcode: '2021321125300',
+        sku: '2021321125300',
+        plu: '',
+      };
+
+      // Escanear prodA no debe coincidir con prodB
+      expect(productMatchesScanCode(prodA, '2021321111336')).toBe(true);
+      expect(productMatchesScanCode(prodB, '2021321111336')).toBe(false);
+      expect(productMatchesScanCode(prodA, '2021321125300')).toBe(false);
+      expect(productMatchesScanCode(prodB, '2021321125300')).toBe(true);
+    });
+
+    it('productos de empaque fijo con unidad Libra pero no pesados no se tratan como balanza', () => {
+      const mockCatalog: ScaleProduct[] = [
+        {
+          productId: 'prod-arroz-1lib',
+          name: 'Arroz La Garza 1Lib',
+          sku: '10168',
+          barcode: '10168',
+          price: 50,
+          cost: 39.9,
+          tax: 0,
+          unit: 'Libra',
+          category: 'Abarrotes',
+          isWeightProduct: false,
+        },
+      ];
+
+      const parsed = parseScaleBarcode('10168', mockCatalog);
+      expect(parsed).toBeNull();
     });
   });
 });

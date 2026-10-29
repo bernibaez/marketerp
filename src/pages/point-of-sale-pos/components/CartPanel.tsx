@@ -283,10 +283,10 @@ export default function CartPanel({
     }
 
     const isWeight =
-      p.isWeightProduct ||
+      Boolean(p.isWeightProduct) ||
+      Boolean((p as any).es_pesado) ||
       p.saleType === 'weight' ||
-      p.saleType === 'both' ||
-      (p.unit && (p.unit.toLowerCase().includes('lb') || p.unit.toLowerCase().includes('kg')));
+      p.saleType === 'both';
 
     // Unidad corregida: productos de balanza pasan como 'lb' (o su unidad de peso), NUNCA 'Unidad' o 'ud'
     const resolvedUnit = isWeight
@@ -384,7 +384,13 @@ export default function CartPanel({
       // 1. Si hay coincidencia exacta por código de barras, SKU o PLU en los resultados:
       // (Priorizar siempre productos regulares para no confundir productos con código fijo
       // que empieza en 20-29 con etiquetas de peso de balanza)
-      const exactCode = searchResults.find((p) => productMatchesScanCode(p, valueToSubmit));
+      const upperSubmit = valueToSubmit.toUpperCase();
+      const exactCode =
+        searchResults.find((p) => {
+          const b = String(p.barcode ?? '').trim().toUpperCase();
+          const s = String(p.sku ?? '').trim().toUpperCase();
+          return (b && b === upperSubmit) || (s && s === upperSubmit);
+        }) || searchResults.find((p) => productMatchesScanCode(p, valueToSubmit));
       if (exactCode) {
         handleSelectProduct(exactCode);
         return;

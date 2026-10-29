@@ -81,11 +81,10 @@ export function usePOSScanner({
   const realScaleCatalog = useMemo(() => {
     const storeProducts = productosUi.map((p) => {
       const isWeight =
-        p.isWeightProduct ||
+        Boolean(p.isWeightProduct) ||
         p.saleType === 'weight' ||
         p.saleType === 'both' ||
-        p.unit.toLowerCase().includes('lb') ||
-        p.unit.toLowerCase().includes('kg');
+        Boolean((p as any).es_pesado);
       const resolvedUnit = isWeight
         ? (p.unit && !['unidad', 'ud', 'und', 'unidades'].includes(p.unit.toLowerCase()) ? p.unit : (p.weightUnit || 'lb'))
         : (p.unit || 'ud');
@@ -113,11 +112,10 @@ export function usePOSScanner({
     const demoExtras = storeProducts.length > 0 ? [] : initialProducts
       .map((ip) => {
         const isWeight =
-          ip.isWeightProduct ||
+          Boolean(ip.isWeightProduct) ||
           ip.saleType === 'weight' ||
           ip.saleType === 'both' ||
-          ip.unit.toLowerCase().includes('lb') ||
-          ip.unit.toLowerCase().includes('kg');
+          Boolean((ip as any).es_pesado);
         const resolvedUnit = isWeight
           ? (ip.unit && !['unidad', 'ud', 'und', 'unidades'].includes(ip.unit.toLowerCase()) ? ip.unit : (ip.weightUnit || 'lb'))
           : (ip.unit || 'ud');
@@ -233,11 +231,10 @@ export function usePOSScanner({
             if (fromDb) {
               const ui = productoAUi(fromDb);
               const isWeight =
-                ui.isWeightProduct ||
-                fromDb.es_pesado ||
+                Boolean(ui.isWeightProduct) ||
+                Boolean(fromDb.es_pesado) ||
                 fromDb.sale_type === 'weight' ||
-                fromDb.sale_type === 'both' ||
-                ['lb', 'libra', 'kg', 'kilogramo'].includes((ui.unit || '').toLowerCase());
+                fromDb.sale_type === 'both';
 
               if (isWeight) {
                 const inCart = cart.find(
@@ -275,11 +272,10 @@ export function usePOSScanner({
           outOfStock: p.stockStatus === 'out',
           plu: p.plu || '',
           isWeighted:
-            p.isWeightProduct ||
+            Boolean(p.isWeightProduct) ||
             p.saleType === 'weight' ||
             p.saleType === 'both' ||
-            p.unit.toLowerCase().includes('lb') ||
-            p.unit.toLowerCase().includes('kg'),
+            Boolean((p as any).es_pesado),
           saleType: p.saleType,
         }));
         const demoExtras = storeProducts.length > 0 ? [] : initialProducts
@@ -297,16 +293,24 @@ export function usePOSScanner({
             image: ip.image,
             outOfStock: ip.stockStatus === 'out',
             isWeighted:
-              ip.isWeightProduct ||
+              Boolean(ip.isWeightProduct) ||
               ip.saleType === 'weight' ||
               ip.saleType === 'both' ||
-              ip.unit.toLowerCase().includes('lb') ||
-              ip.unit.toLowerCase().includes('kg'),
+              Boolean((ip as any).es_pesado),
             saleType: ip.saleType,
           }));
         const allProds = [...storeProducts, ...demoExtras];
 
-        let matchedProd = allProds.find((p) => productMatchesScanCode(p, q));
+        const upperQ = q.toUpperCase();
+      let matchedProd = allProds.find((p) => {
+        const b = String(p.barcode ?? '').trim().toUpperCase();
+        const s = String(p.sku ?? '').trim().toUpperCase();
+        return (b && b === upperQ) || (s && s === upperQ);
+      });
+
+      if (!matchedProd) {
+        matchedProd = allProds.find((p) => productMatchesScanCode(p, q));
+      }
         if (!matchedProd) {
           matchedProd = allProds.find((p) => p.name.toLowerCase() === qLower);
         }
@@ -471,11 +475,10 @@ export function usePOSScanner({
           if (fromDb) {
             const ui = productoAUi(fromDb);
             const isWeight =
-              ui.isWeightProduct ||
-              fromDb.es_pesado ||
+              Boolean(ui.isWeightProduct) ||
+              Boolean(fromDb.es_pesado) ||
               fromDb.sale_type === 'weight' ||
-              fromDb.sale_type === 'both' ||
-              ['lb', 'libra', 'kg', 'kilogramo'].includes((ui.unit || '').toLowerCase());
+              fromDb.sale_type === 'both';
 
             if (isWeight) {
               if (ui.status === 'inactive' || ui.status === 'discontinued' || fromDb.estado === 'inactivo') {
@@ -501,6 +504,41 @@ export function usePOSScanner({
                 },
                 decoded.weight
               );
+            } else {
+              // Producto con código comercial de 12-13 dígitos empezando por 20-29 que se vende por unidad
+              if (ui.status === 'inactive' || ui.status === 'discontinued' || fromDb.estado === 'inactivo') {
+                toast.error(`El producto "${ui.name}" está inactivo y no se puede vender`);
+                return keepCodeSelected();
+              }
+              if (ui.stockStatus === 'out' || ui.currentStock <= 0) {
+                toast.error(`Producto sin existencias: ${ui.name}`);
+                return keepCodeSelected();
+              }
+              const shouldWholesale = isWholesaleMode && (ui.wholesalePrice || 0) > 0;
+              const itemPrice = shouldWholesale ? Number(ui.wholesalePrice) : ui.salePrice;
+
+              addToCart({
+                id: `cart-${ui.id}-${Date.now()}`,
+                productId: ui.id,
+                name: ui.name,
+                sku: ui.sku,
+                barcode: ui.barcode || '',
+                price: itemPrice,
+                regularPrice: ui.salePrice,
+                wholesalePrice: ui.wholesalePrice ? Number(ui.wholesalePrice) : undefined,
+                isWholesale: shouldWholesale,
+                cost: ui.costPrice,
+                tax: ui.tax,
+                image: ui.image || '',
+                unit: ui.unit || 'ud',
+                isWeighted: false,
+                status: ui.status,
+                outOfStock: false,
+              });
+              toast.success(`Producto agregado: ${ui.name}${shouldWholesale ? ' (Al por mayor)' : ''}`);
+              setSearchQuery('');
+              focusPosBarcodeInput();
+              return true;
             }
           }
         } catch {
@@ -510,11 +548,10 @@ export function usePOSScanner({
 
       const storeProducts = productosUi.map((p) => {
         const isWeight =
-          p.isWeightProduct ||
+          Boolean(p.isWeightProduct) ||
           p.saleType === 'weight' ||
           p.saleType === 'both' ||
-          p.unit.toLowerCase().includes('lb') ||
-          p.unit.toLowerCase().includes('kg');
+          Boolean((p as any).es_pesado);
         const resolvedUnit = isWeight
           ? (p.unit && !['unidad', 'ud', 'und', 'unidades'].includes(p.unit.toLowerCase()) ? p.unit : (p.weightUnit || 'lb'))
           : (p.unit || 'ud');
@@ -542,11 +579,10 @@ export function usePOSScanner({
       const demoExtras = storeProducts.length > 0 ? [] : initialProducts
         .map((ip) => {
           const isWeight =
-            ip.isWeightProduct ||
+            Boolean(ip.isWeightProduct) ||
             ip.saleType === 'weight' ||
             ip.saleType === 'both' ||
-            ip.unit.toLowerCase().includes('lb') ||
-            ip.unit.toLowerCase().includes('kg');
+            Boolean((ip as any).es_pesado);
           const resolvedUnit = isWeight
             ? (ip.unit && !['unidad', 'ud', 'und', 'unidades'].includes(ip.unit.toLowerCase()) ? ip.unit : (ip.weightUnit || 'lb'))
             : (ip.unit || 'ud');
@@ -574,7 +610,16 @@ export function usePOSScanner({
       const allProds = [...storeProducts, ...demoExtras];
       const qLower = q.toLowerCase();
 
-      let matchedProd = allProds.find((p) => productMatchesScanCode(p, q));
+      const upperQ = q.toUpperCase();
+      let matchedProd = allProds.find((p) => {
+        const b = String(p.barcode ?? '').trim().toUpperCase();
+        const s = String(p.sku ?? '').trim().toUpperCase();
+        return (b && b === upperQ) || (s && s === upperQ);
+      });
+
+      if (!matchedProd) {
+        matchedProd = allProds.find((p) => productMatchesScanCode(p, q));
+      }
 
       if (!matchedProd) {
         matchedProd = allProds.find((p) => (p.name || '').toLowerCase() === qLower);
@@ -654,11 +699,10 @@ export function usePOSScanner({
           }
 
           const isWeighted =
-            ui.isWeightProduct ||
+            Boolean(ui.isWeightProduct) ||
+            Boolean(fromDb.es_pesado) ||
             ui.saleType === 'weight' ||
-            ui.saleType === 'both' ||
-            ui.unit?.toLowerCase().includes('lb') ||
-            ui.unit?.toLowerCase().includes('kg');
+            ui.saleType === 'both';
 
           if (isWeighted && onOpenScale) {
             setSearchQuery('');

@@ -885,6 +885,14 @@ export async function buscarProductoPorCodigoEscaneado(
   if (error) throw errorSupabase(error);
 
   const rows = (data ?? []) as Producto[];
+  const upper = clean.toUpperCase();
+  const exactMatch = rows.find(
+    (p) =>
+      (p.codigo_barras && p.codigo_barras.trim().toUpperCase() === upper) ||
+      (p.sku && p.sku.trim().toUpperCase() === upper)
+  );
+  if (exactMatch) return exactMatch;
+
   const found = matchesLocal(rows);
   if (found) return found;
 

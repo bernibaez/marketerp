@@ -135,7 +135,6 @@ function pluFromBarcodeField(barcode: string): string {
   if (!digits) return '';
   if (digits.length <= 5) return normalizePlu(digits);
   if (digits.length === 7 && /^2[0-9]/.test(digits)) return digits.substring(2, 7);
-  if (/^2[0-9]/.test(scaleBody(digits))) return extractPluFromCode(digits);
   return '';
 }
 
@@ -172,16 +171,20 @@ export function productMatchesScanCode(product: ScalePluIdentity, rawCode: strin
   const sku = String(product.sku ?? '').trim();
   const plu = String(product.plu ?? '').trim();
 
-  // 1. Coincidencia exacta (insensible a mayúsculas)
+  // 1. Coincidencia exacta por código de barras, SKU o PLU explícito (insensible a mayúsculas)
   if (barcode && barcode.toUpperCase() === upper) return true;
   if (sku && sku.toUpperCase() === upper) return true;
   if (plu && (plu.toUpperCase() === upper || normalizePlu(plu) === normalizePlu(clean))) return true;
 
-  // 2. Coincidencia por PLU o código de balanza
-  const extracted = extractPluFromCode(clean);
-  if (extracted && productMatchesPlu(product, extracted)) return true;
+  // 2. Coincidencia por PLU o etiqueta de balanza: solo si el producto realmente tiene un identificador de PLU
+  // (evita que un producto comercial con código de 13 dígitos empezando por 20... se empareje por azar con otro producto)
+  const productPlus = collectProductPlus(product);
+  if (productPlus.length > 0) {
+    const extracted = extractPluFromCode(clean);
+    if (extracted && productPlus.includes(extracted)) return true;
+  }
 
-  // 3. Normalización de códigos numéricos (UPC-A de 12 dígitos vs EAN-13 de 13 dígitos y ceros a la izquierda)
+  // 3. Normalización de códigos numéricos comerciales (UPC-A de 12 dígitos vs EAN-13 de 13 dígitos y ceros a la izquierda)
   const cleanDigits = digitsOnly(clean);
   if (cleanDigits && cleanDigits.length >= 2) {
     const cleanNoZeros = cleanDigits.replace(/^0+/, '');
@@ -196,7 +199,7 @@ export function productMatchesScanCode(product: ScalePluIdentity, rawCode: strin
       ) {
         return true;
       }
-      // Mismos dígitos significativos (ej. "00123" vs "123") si tienen al menos 3 dígitos
+      // Mismos dígitos significativos si tienen al menos 3 dígitos y longitudes consistentes
       if (cleanNoZeros.length >= 3 && cleanNoZeros === barcodeDigits.replace(/^0+/, '')) {
         return true;
       }
