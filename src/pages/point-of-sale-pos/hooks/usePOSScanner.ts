@@ -482,7 +482,7 @@ export function usePOSScanner({
 
             if (isWeight) {
               if (ui.status === 'inactive' || ui.status === 'discontinued' || fromDb.estado === 'inactivo') {
-                toast.error(`El producto "${ui.name}" está inactivo y no se puede vender`);
+                toast.error(`"${ui.name}" está INACTIVO en el sistema. Debes activarlo en Gestión de Productos para poder venderlo.`, { duration: 4000 });
                 return keepCodeSelected();
               }
               if (ui.currentStock <= 0 || ui.stockStatus === 'out') {
@@ -507,7 +507,7 @@ export function usePOSScanner({
             } else {
               // Producto con código comercial de 12-13 dígitos empezando por 20-29 que se vende por unidad
               if (ui.status === 'inactive' || ui.status === 'discontinued' || fromDb.estado === 'inactivo') {
-                toast.error(`El producto "${ui.name}" está inactivo y no se puede vender`);
+                toast.error(`"${ui.name}" está INACTIVO en el sistema. Debes activarlo en Gestión de Productos para poder venderlo.`, { duration: 4000 });
                 return keepCodeSelected();
               }
               if (ui.stockStatus === 'out' || ui.currentStock <= 0) {
@@ -641,7 +641,7 @@ export function usePOSScanner({
 
       if (matchedProd) {
         if (matchedProd.status === 'inactive' || matchedProd.status === 'discontinued') {
-          toast.error(`El producto "${matchedProd.name}" está inactivo y no se puede vender`);
+          toast.error(`"${matchedProd.name}" está INACTIVO en el sistema. Debes activarlo en Gestión de Productos para poder venderlo.`, { duration: 4000 });
           return keepCodeSelected();
         }
 
@@ -689,7 +689,7 @@ export function usePOSScanner({
         if (fromDb) {
           const ui = productoAUi(fromDb);
           if (ui.status === 'inactive' || ui.status === 'discontinued' || fromDb.estado === 'inactivo') {
-            toast.error(`El producto "${ui.name}" está inactivo y no se puede vender`);
+            toast.error(`"${ui.name}" está INACTIVO en el sistema. Debes activarlo en Gestión de Productos para poder venderlo.`, { duration: 4000 });
             return keepCodeSelected();
           }
 

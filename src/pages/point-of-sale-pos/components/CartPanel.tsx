@@ -138,11 +138,11 @@ export default function CartPanel({
         const res = await obtenerProductos({
           busqueda: q,
           limite: 30,
-          estado: 'activo',
+          estado: 'todos',
           signal: abortCtrl.signal,
         });
         if (!abortCtrl.signal.aborted) {
-          setDbResults(res.datos.map(productoAUi).filter((p) => p.status === 'active'));
+          setDbResults(res.datos.map(productoAUi));
           setSearchingDb(false);
           setSelectedIndex(0);
         }
@@ -159,21 +159,13 @@ export default function CartPanel({
     };
   }, [searchQuery]);
 
-  // Resultados combinados: catálogo local instantáneo + resultados en vivo de la base de datos (solo activos)
+  // Resultados combinados: catálogo local instantáneo + resultados en vivo de la base de datos
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q || q.length < 1) return [];
 
     // 1. Filtrar en catálogo local
     const localMatches = allProducts.filter((p: any) => {
-      if (
-        p.status === 'inactive' ||
-        p.status === 'discontinued' ||
-        p.estado === 'inactivo' ||
-        p.estado === 'descontinuado'
-      ) {
-        return false;
-      }
       const name = (p.name || '').toLowerCase();
       const sku = (p.sku || '').toLowerCase();
       const barcode = (p.barcode || '').toLowerCase();
@@ -187,14 +179,6 @@ export default function CartPanel({
     const seenSkus = new Set(localMatches.map((p) => (p.sku || '').toLowerCase()));
 
     for (const dbItem of dbResults) {
-      if (
-        dbItem.status === 'inactive' ||
-        dbItem.status === 'discontinued' ||
-        dbItem.estado === 'inactivo' ||
-        dbItem.estado === 'descontinuado'
-      ) {
-        continue;
-      }
       if (!seenIds.has(dbItem.id) && !seenSkus.has((dbItem.sku || '').toLowerCase())) {
         combined.push(dbItem);
         seenIds.add(dbItem.id);
@@ -218,6 +202,11 @@ export default function CartPanel({
         if (name.includes(q)) return 3;
         return 4;
       };
+
+      // Priorizar productos activos sobre inactivos
+      const inactA = a.status === 'inactive' || a.status === 'discontinued' || a.estado === 'inactivo';
+      const inactB = b.status === 'inactive' || b.status === 'discontinued' || b.estado === 'inactivo';
+      if (inactA !== inactB) return inactA ? 1 : -1;
 
       const rankA = getRank(aName, aBarcode, aSku);
       const rankB = getRank(bName, bBarcode, bSku);
@@ -267,7 +256,7 @@ export default function CartPanel({
       p.estado === 'inactivo' ||
       p.estado === 'descontinuado'
     ) {
-      toast.error(`El producto "${p.name}" está inactivo y no se puede vender`);
+      toast.error(`"${p.name}" está INACTIVO en el sistema. Debes activarlo en Gestión de Productos para poder venderlo.`, { duration: 4000 });
       return;
     }
 
@@ -626,10 +615,16 @@ export default function CartPanel({
                     const unitStr = item.unit || 'Und';
                     const isOut = stockVal <= 0 || item.stockStatus === 'out';
                     const isLow = !isOut && (stockVal <= (item.minStock || 5) || item.stockStatus === 'low');
+                    const isInactive =
+                      item.status === 'inactive' ||
+                      item.status === 'discontinued' ||
+                      (item as any).estado === 'inactivo' ||
+                      (item as any).estado === 'descontinuado';
                     const isWeight =
-                      item.isWeightProduct ||
+                      Boolean(item.isWeightProduct) ||
+                      Boolean((item as any).es_pesado) ||
                       item.saleType === 'weight' ||
-                      (item.unit && (item.unit.toLowerCase().includes('lb') || item.unit.toLowerCase().includes('kg')));
+                      item.saleType === 'both';
 
                     return (
                       <button
@@ -638,7 +633,9 @@ export default function CartPanel({
                         onClick={() => handleSelectProduct(item)}
                         onMouseEnter={() => setSelectedIndex(index)}
                         className={`w-full text-left px-3.5 py-2.5 transition-all flex items-center justify-between gap-3 cursor-pointer group ${
-                          isSelected
+                          isInactive
+                            ? 'opacity-60 bg-slate-50/50 dark:bg-slate-900/50'
+                            : isSelected
                             ? 'bg-blue-50 dark:bg-blue-950/50 border-l-4 border-blue-600 pl-2.5'
                             : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
                         }`}
@@ -660,6 +657,11 @@ export default function CartPanel({
                               <p className="text-xs font-bold text-slate-900 dark:text-white leading-tight truncate">
                                 {item.name}
                               </p>
+                              {isInactive && (
+                                <span className="inline-flex items-center px-1.5 py-0.2 text-[9px] font-bold rounded-md bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300">
+                                  Inactivo
+                                </span>
+                              )}
                               {isWeight && (
                                 <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 text-[9px] font-bold rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
                                   <Scale size={10} /> Balanza
