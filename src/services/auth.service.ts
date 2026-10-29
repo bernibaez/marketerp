@@ -8,6 +8,8 @@ import type { AuthUser, UserRole } from '@/lib/auth';
 import {
   authenticate as localAuthenticate,
   authenticateByCode as localAuthenticateByCode,
+  verifySupervisorAdmin,
+  isAdminOrSuperAdmin,
 } from '@/lib/auth';
 
 export const ROL_DB_A_UI: Record<string, string> = {
@@ -147,4 +149,87 @@ export async function obtenerSesionActual(): Promise<AuthUser | null> {
 
 export async function obtenerPerfilPorId(id: string): Promise<Perfil | null> {
   return cargarPerfil(id);
+}
+
+export async function verificarAutorizacionSupervisor(credentials: {
+  code?: string;
+  usernameOrEmail?: string;
+  password?: string;
+}): Promise<{ ok: true; user: AuthUser } | { ok: false; error: string }> {
+  // 1. Probar credenciales locales / códigos demo
+  const localRes = verifySupervisorAdmin({
+    code: credentials.code,
+    username: credentials.usernameOrEmail,
+    password: credentials.password,
+  });
+  if (localRes.ok) return localRes;
+
+  const sb = tryGetSupabase();
+  if (!sb) {
+    return localRes;
+  }
+
+  // 2. Si se ingresó código PIN, buscar en perfiles de Supabase
+  if (credentials.code && credentials.code.trim()) {
+    try {
+      const { data, error } = await sb
+        .from('perfiles')
+        .select(PERFIL_COLUMNS)
+        .eq('codigo_acceso', credentials.code.trim())
+        .eq('activo', true)
+        .maybeSingle();
+
+      if (!error && data) {
+        const authUser = perfilToAuthUser(data as Perfil);
+        if (isAdminOrSuperAdmin(authUser)) {
+          return { ok: true, user: authUser };
+        }
+        return {
+          ok: false,
+          error: `El usuario "${authUser.name}" (${authUser.role}) no tiene permisos de Administrador o Super Administrador.`,
+        };
+      }
+    } catch {
+      // Ignorar y continuar a validación
+    }
+  }
+
+  // 3. Si se ingresó usuario/correo y contraseña en modo Supabase
+  if (credentials.usernameOrEmail && credentials.password) {
+    try {
+      const { createClient } = await import('@supabase/supabase-js');
+      const url = import.meta.env.VITE_SUPABASE_URL;
+      const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      if (url && key) {
+        // Cliente aislado sin persistencia para no cerrar la sesión del cajero actual
+        const tempClient = createClient(url, key, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const input = credentials.usernameOrEmail.trim();
+        const email = input.includes('@') ? input.toLowerCase() : `${input.toLowerCase()}@mercato.do`;
+        const { data: authData, error: authErr } = await tempClient.auth.signInWithPassword({
+          email,
+          password: credentials.password,
+        });
+
+        if (!authErr && authData?.user) {
+          const perfil = await cargarPerfil(authData.user.id);
+          if (perfil && perfil.activo) {
+            const authUser = perfilToAuthUser(perfil);
+            if (isAdminOrSuperAdmin(authUser)) {
+              return { ok: true, user: authUser };
+            }
+            return {
+              ok: false,
+              error: `El usuario "${authUser.name}" (${authUser.role}) no tiene permisos de Administrador o Super Administrador.`,
+            };
+          }
+        }
+      }
+    } catch {
+      // Continuar al fallo
+    }
+  }
+
+  return { ok: false, error: 'Código o credenciales de administrador incorrectos' };
 }

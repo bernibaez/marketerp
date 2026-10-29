@@ -9,6 +9,10 @@ import { POSBottomBar } from './POSBottomBar';
 import { POSModals } from './POSModals';
 import PosCashOpenModal from './PosCashOpenModal';
 import PosProductDiscountModal, { type PosProductDiscountData } from './PosProductDiscountModal';
+import PosEditPriceModal from './PosEditPriceModal';
+import SupervisorAuthModal from './SupervisorAuthModal';
+import { isAdminOrSuperAdmin, type AuthUser } from '@/lib/auth';
+import { logAuditEvent } from '@/lib/auditStore';
 
 import { usePOSCart } from '../hooks/usePOSCart';
 import { usePOSHeldSales } from '../hooks/usePOSHeldSales';
@@ -51,6 +55,9 @@ export interface CartItem {
   comboId?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   comboItems?: any[];
+  isCustomPrice?: boolean;
+  originalPrice?: number;
+  priceChangeReason?: string;
 }
 
 export interface Customer {
@@ -67,13 +74,7 @@ export interface Customer {
 export default function POSTerminal() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const roleNorm = (user?.role || '').trim().toLowerCase();
-  const isAdminUser =
-    roleNorm === 'administrador' ||
-    roleNorm === 'admin' ||
-    roleNorm === 'super administrador' ||
-    roleNorm === 'superadmin' ||
-    user?.role === 'Administrador';
+  const isAdminUser = isAdminOrSuperAdmin(user);
   const { registers, loading: registersLoading, refetch: refetchRegisters, markRegisterClosed } = useCashRegisters();
 
   // 1. Data Catalogs
@@ -99,6 +100,7 @@ export default function POSTerminal() {
     deductOrRemoveFromCart,
     updateQty,
     updateDiscount,
+    updateItemPrice,
     updateItemDiscountAndPrice,
     removeFromCart,
     clearCart,
@@ -288,26 +290,81 @@ export default function POSTerminal() {
     clearCart,
   });
 
-  // Modal de Descuento Manual para producto en carrito
+  // Modales de Modificación de Precio, Descuento y Autorización de Supervisor
+  const [priceEditModalOpen, setPriceEditModalOpen] = useState(false);
+  const [priceEditTargetItem, setPriceEditTargetItem] = useState<CartItem | null>(null);
   const [discountModalOpen, setDiscountModalOpen] = useState(false);
   const [discountTargetProduct, setDiscountTargetProduct] = useState<CartItem | null>(null);
+  const [supervisorAuthModalOpen, setSupervisorAuthModalOpen] = useState(false);
+  const [pendingSupervisorAction, setPendingSupervisorAction] = useState<{
+    type: 'price' | 'discount';
+    item: CartItem;
+  } | null>(null);
+  const [authorizedSupervisor, setAuthorizedSupervisor] = useState<AuthUser | null>(null);
+
+  const handleRequestPriceChange = (item: CartItem) => {
+    if (isAdminUser) {
+      setAuthorizedSupervisor(user);
+      setPriceEditTargetItem(item);
+      setPriceEditModalOpen(true);
+    } else {
+      setPendingSupervisorAction({ type: 'price', item });
+      setSupervisorAuthModalOpen(true);
+    }
+  };
 
   const handleOpenCartItemDiscount = (item: CartItem) => {
-    if (!isAdminUser) {
-      toast.error('Solo los administradores pueden aplicar descuentos manuales o modificar precios');
-      return;
+    if (isAdminUser) {
+      setDiscountTargetProduct(item);
+      setDiscountModalOpen(true);
+    } else {
+      setPendingSupervisorAction({ type: 'discount', item });
+      setSupervisorAuthModalOpen(true);
     }
-    setDiscountTargetProduct(item);
-    setDiscountModalOpen(true);
+  };
+
+  const handleSupervisorAuthorized = (adminUser: AuthUser) => {
+    setAuthorizedSupervisor(adminUser);
+    if (!pendingSupervisorAction) return;
+
+    if (pendingSupervisorAction.type === 'price') {
+      setPriceEditTargetItem(pendingSupervisorAction.item);
+      setPriceEditModalOpen(true);
+    } else if (pendingSupervisorAction.type === 'discount') {
+      setDiscountTargetProduct(pendingSupervisorAction.item);
+      setDiscountModalOpen(true);
+    }
+    setPendingSupervisorAction(null);
+  };
+
+  const handleConfirmPriceChange = (cartItemId: string, newPrice: number, reason?: string) => {
+    const item = cart.find((i) => i.id === cartItemId);
+    const oldPrice = item ? item.price : 0;
+
+    updateItemPrice(cartItemId, newPrice, reason);
+
+    const supervisorName = authorizedSupervisor?.name || user?.name || 'Administrador';
+    const supervisorRole = authorizedSupervisor?.role || user?.role || 'Administrador';
+
+    toast.success(`Precio de "${item?.name || 'producto'}" actualizado a RD$ ${newPrice.toFixed(2)}`);
+
+    logAuditEvent({
+      user: supervisorName,
+      role: supervisorRole,
+      action: 'Cambio de precio',
+      module: 'POS',
+      details: `Modificación de precio en POS: "${item?.name}" (SKU: ${item?.sku}) de RD$ ${oldPrice.toFixed(2)} a RD$ ${newPrice.toFixed(2)}${
+        reason ? ` | Motivo: ${reason}` : ''
+      }${authorizedSupervisor && authorizedSupervisor.id !== user?.id ? ` | Autorizado por: ${authorizedSupervisor.name}` : ''}`,
+      before: { price: oldPrice },
+      after: { price: newPrice, reason },
+    });
+
+    setPriceEditModalOpen(false);
+    setPriceEditTargetItem(null);
   };
 
   const handleConfirmDiscount = (data: PosProductDiscountData) => {
-    if (!isAdminUser) {
-      toast.error('Solo los administradores pueden aplicar descuentos manuales');
-      setDiscountModalOpen(false);
-      setDiscountTargetProduct(null);
-      return;
-    }
     if (!discountTargetProduct) return;
 
     updateItemDiscountAndPrice(discountTargetProduct.id, {
@@ -317,7 +374,7 @@ export default function POSTerminal() {
       discountValue: data.discountValue,
       professionalDiscount: data.professionalDiscount,
     });
-    toast.success(`Descuento actualizado para "${discountTargetProduct.name}"`);
+    toast.success(`Descuento y precio actualizados para "${discountTargetProduct.name}"`);
     setDiscountModalOpen(false);
     setDiscountTargetProduct(null);
   };
@@ -334,6 +391,8 @@ export default function POSTerminal() {
     closeCashModalOpen ||
     weightScanOpen ||
     discountModalOpen ||
+    priceEditModalOpen ||
+    supervisorAuthModalOpen ||
     Boolean(lastFiscalInvoice);
 
   return (
@@ -410,7 +469,8 @@ export default function POSTerminal() {
               onToggleWholesale={toggleWholesalePrice}
               onToggleAllWholesale={toggleAllWholesale}
               isWholesaleMode={isWholesaleMode}
-              onOpenDiscountModal={isAdminUser ? handleOpenCartItemDiscount : undefined}
+              onOpenDiscountModal={handleOpenCartItemDiscount}
+              onOpenPriceModal={handleRequestPriceChange}
               isAdmin={isAdminUser}
             />
           </div>
@@ -623,6 +683,33 @@ export default function POSTerminal() {
         product={discountTargetProduct}
         onConfirm={handleConfirmDiscount}
         isExistingCartItem={true}
+      />
+
+      <PosEditPriceModal
+        open={priceEditModalOpen}
+        onClose={() => {
+          setPriceEditModalOpen(false);
+          setPriceEditTargetItem(null);
+        }}
+        item={priceEditTargetItem}
+        onConfirm={handleConfirmPriceChange}
+        authorizedBy={authorizedSupervisor?.name}
+      />
+
+      <SupervisorAuthModal
+        open={supervisorAuthModalOpen}
+        onClose={() => {
+          setSupervisorAuthModalOpen(false);
+          setPendingSupervisorAction(null);
+        }}
+        onAuthorized={handleSupervisorAuthorized}
+        actionDescription={
+          pendingSupervisorAction?.type === 'price'
+            ? `Cambiar precio de "${pendingSupervisorAction.item.name}"`
+            : pendingSupervisorAction?.type === 'discount'
+              ? `Aplicar descuento a "${pendingSupervisorAction.item.name}"`
+              : undefined
+        }
       />
     </div>
   );

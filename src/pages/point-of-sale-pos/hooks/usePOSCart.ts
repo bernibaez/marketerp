@@ -176,14 +176,19 @@ export function usePOSCart() {
           shouldBeWholesale && wholesalePrice && wholesalePrice > 0
             ? wholesalePrice
             : existing
-              ? existing.isWholesale
+              ? existing.isCustomPrice
                 ? existing.price
-                : regularPrice
+                : existing.isWholesale
+                  ? existing.price
+                  : regularPrice
               : product.price;
 
         if (existing) {
           const updatedItem: CartItem = {
             ...existing,
+            isCustomPrice: existing.isCustomPrice,
+            originalPrice: existing.originalPrice ?? existing.regularPrice ?? regularPrice,
+            priceChangeReason: existing.priceChangeReason,
             qty: replaceQty
               ? safeQty
               : Math.round((existing.qty + safeQty) * 1000) / 1000,
@@ -302,6 +307,36 @@ export function usePOSCart() {
     );
   }, []);
 
+  const updateItemPrice = useCallback((cartId: string, newPrice: number, reason?: string) => {
+    const safePrice = Math.max(0, Math.round((Number(newPrice) || 0) * 100) / 100);
+    setCart((prev) =>
+      prev.map((item) => {
+        if (item.id !== cartId) return item;
+        const origPrice = item.originalPrice ?? item.regularPrice ?? item.price;
+        const isCustom = safePrice !== origPrice;
+
+        let effectivePct = item.discount;
+        let discountVal = item.discountValue || 0;
+        if (item.discountType === 'percentage') {
+          effectivePct = Math.min(100, Math.max(0, item.discountValue || item.discount || 0));
+        } else {
+          discountVal = Math.min(safePrice, item.discountValue || 0);
+          effectivePct = safePrice > 0 ? Math.min(100, Math.max(0, (discountVal / safePrice) * 100)) : 0;
+        }
+
+        return {
+          ...item,
+          price: safePrice,
+          originalPrice: origPrice,
+          isCustomPrice: isCustom,
+          priceChangeReason: reason ?? item.priceChangeReason,
+          discount: effectivePct,
+          discountValue: discountVal,
+        };
+      })
+    );
+  }, []);
+
   const updateItemDiscountAndPrice = useCallback(
     (
       cartId: string,
@@ -316,7 +351,9 @@ export function usePOSCart() {
       setCart((prev) =>
         prev.map((item) => {
           if (item.id !== cartId) return item;
+          const origPrice = item.originalPrice ?? item.regularPrice ?? item.price;
           const price = details.price !== undefined ? Math.max(0, details.price) : item.price;
+          const isCustom = details.price !== undefined && details.price !== origPrice;
           const qty = details.qty !== undefined ? Math.max(0, details.qty) : item.qty;
           const discountValue = Math.max(0, details.discountValue || 0);
           const professionalDiscount = Math.max(0, details.professionalDiscount || 0);
@@ -331,6 +368,8 @@ export function usePOSCart() {
           return {
             ...item,
             price,
+            originalPrice: origPrice,
+            isCustomPrice: isCustom || item.isCustomPrice,
             qty,
             discount: effectivePct,
             discountType: details.discountType,
@@ -383,6 +422,7 @@ export function usePOSCart() {
     deductOrRemoveFromCart,
     updateQty,
     updateDiscount,
+    updateItemPrice,
     updateItemDiscountAndPrice,
     removeFromCart,
     clearCart,

@@ -210,3 +210,59 @@ export function canAccessRoute(role: UserRole, pathname: string): boolean {
 export function canAccessNav(role: UserRole, href: string): boolean {
   return canAccessRoute(role, href);
 }
+
+export function isAdminOrSuperAdmin(
+  userOrRole?: { role?: string; rolDb?: string } | string | null
+): boolean {
+  if (!userOrRole) return false;
+  const roleStr =
+    typeof userOrRole === 'string'
+      ? userOrRole
+      : (userOrRole.role || userOrRole.rolDb || '');
+  const norm = roleStr.trim().toLowerCase();
+  return (
+    norm === 'administrador' ||
+    norm === 'admin' ||
+    norm === 'super administrador' ||
+    norm === 'superadministrador' ||
+    norm === 'superadmin' ||
+    norm === 'super_admin'
+  );
+}
+
+export function verifySupervisorAdmin(credentials: {
+  code?: string;
+  username?: string;
+  password?: string;
+}): { ok: true; user: AuthUser } | { ok: false; error: string } {
+  // 1. Validar por código de acceso rápido (PIN)
+  if (credentials.code && credentials.code.trim()) {
+    const codeResult = authenticateByCode(credentials.code.trim());
+    if (codeResult.ok) {
+      if (isAdminOrSuperAdmin(codeResult.user)) {
+        return { ok: true, user: codeResult.user };
+      }
+      return {
+        ok: false,
+        error: `El usuario "${codeResult.user.name}" (${codeResult.user.role}) no tiene permisos de Administrador o Super Administrador.`,
+      };
+    }
+  }
+
+  // 2. Validar por usuario y contraseña
+  if (credentials.username && credentials.password) {
+    const authResult = authenticate(credentials.username.trim(), credentials.password);
+    if (authResult.ok) {
+      if (isAdminOrSuperAdmin(authResult.user)) {
+        return { ok: true, user: authResult.user };
+      }
+      return {
+        ok: false,
+        error: `El usuario "${authResult.user.name}" (${authResult.user.role}) no tiene permisos de Administrador o Super Administrador.`,
+      };
+    }
+    return { ok: false, error: authResult.error };
+  }
+
+  return { ok: false, error: 'Código o credenciales de administrador incorrectos' };
+}

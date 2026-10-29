@@ -7,6 +7,7 @@ import {
   Info,
   X,
   Pencil,
+  DollarSign,
   Minus,
   Trash2,
   Banknote,
@@ -58,6 +59,7 @@ interface CartPanelProps {
   onToggleAllWholesale?: () => void;
   isWholesaleMode?: boolean;
   onOpenDiscountModal?: (item: CartItem) => void;
+  onOpenPriceModal?: (item: CartItem) => void;
   isAdmin?: boolean;
 }
 
@@ -86,6 +88,7 @@ export default function CartPanel({
   onToggleAllWholesale,
   isWholesaleMode = false,
   onOpenDiscountModal,
+  onOpenPriceModal,
   isAdmin = false,
 }: CartPanelProps) {
   const { clientes, refetch } = useClientes('');
@@ -849,46 +852,40 @@ export default function CartPanel({
                     )}
 
                     {hasDiscount ? (
-                      isAdmin ? (
-                        <button
-                          type="button"
-                          onClick={() => onOpenDiscountModal && onOpenDiscountModal(item)}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-all cursor-pointer shadow-2xs"
-                          title="Descuento aplicado. Clic para editar"
-                        >
-                          <Tag size={11} />
-                          <span>
-                            Desc: -{item.discountType === 'percentage'
-                              ? `${(item.discountValue !== undefined ? item.discountValue : item.discount).toFixed(0)}%`
-                              : `RD$ ${(item.discountValue || 0).toFixed(2)}`}
-                          </span>
-                        </button>
-                      ) : (
-                        <span
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shadow-2xs"
-                          title="Descuento aplicado"
-                        >
-                          <Tag size={11} />
-                          <span>
-                            Desc: -{item.discountType === 'percentage'
-                              ? `${(item.discountValue !== undefined ? item.discountValue : item.discount).toFixed(0)}%`
-                              : `RD$ ${(item.discountValue || 0).toFixed(2)}`}
-                          </span>
+                      <button
+                        type="button"
+                        onClick={() => onOpenDiscountModal && onOpenDiscountModal(item)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-all cursor-pointer shadow-2xs"
+                        title="Descuento aplicado. Clic para editar"
+                      >
+                        <Tag size={11} />
+                        <span>
+                          Desc: -{item.discountType === 'percentage'
+                            ? `${(item.discountValue !== undefined ? item.discountValue : item.discount).toFixed(0)}%`
+                            : `RD$ ${(item.discountValue || 0).toFixed(2)}`}
                         </span>
-                      )
+                      </button>
                     ) : (
-                      isAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => onOpenDiscountModal && onOpenDiscountModal(item)}
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold text-slate-400 hover:text-primary hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                          title="Agregar descuento a este producto"
-                        >
-                          <Tag size={10} />
-                          <span>+ Descuento</span>
-                        </button>
-                      )
+                      <button
+                        type="button"
+                        onClick={() => onOpenDiscountModal && onOpenDiscountModal(item)}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold text-slate-400 hover:text-primary hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                        title="Agregar descuento a este producto"
+                      >
+                        <Tag size={10} />
+                        <span>+ Descuento</span>
+                      </button>
                     )}
+
+                    <button
+                      type="button"
+                      onClick={() => onOpenPriceModal && onOpenPriceModal(item)}
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors cursor-pointer"
+                      title="Cambiar precio unitario (Solo Administradores)"
+                    >
+                      <DollarSign size={10} />
+                      <span>Cambiar precio</span>
+                    </button>
 
                     {hasWholesale && (
                       <button
@@ -912,19 +909,56 @@ export default function CartPanel({
                   </div>
 
                   {isWeightItem ? (
-                    <p className="text-xs sm:text-[13px] font-bold text-emerald-600 dark:text-emerald-400 truncate mt-0.5">
-                      {item.qty} {unitLabel} × RD$ {item.price}
-                    </p>
+                    <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                      <p className="text-xs sm:text-[13px] font-bold text-emerald-600 dark:text-emerald-400 truncate">
+                        {item.qty} {unitLabel} ×
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => onOpenPriceModal && onOpenPriceModal(item)}
+                        className="inline-flex items-center gap-1 text-xs sm:text-[13px] font-black text-emerald-700 dark:text-emerald-300 hover:text-blue-600 dark:hover:text-blue-400 hover:underline cursor-pointer group"
+                        title="Clic para cambiar precio por libra"
+                      >
+                        <span>RD$ {item.price.toFixed(2)}</span>
+                        <Pencil size={11} className="text-slate-400 group-hover:text-blue-500 transition-colors" />
+                      </button>
+                      {item.isCustomPrice && (
+                        <span
+                          className="text-[10px] font-extrabold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/50 px-1.5 py-0.2 rounded border border-blue-300 dark:border-blue-700 cursor-pointer"
+                          onClick={() => onOpenPriceModal && onOpenPriceModal(item)}
+                          title={`Precio original: RD$ ${(item.originalPrice ?? item.regularPrice ?? item.price).toFixed(2)}`}
+                        >
+                          Modificado (Orig: RD$ {(item.originalPrice ?? item.regularPrice ?? item.price).toFixed(2)})
+                        </span>
+                      )}
+                    </div>
                   ) : (
-                    <p className="text-xs sm:text-[13px] font-medium text-slate-500 dark:text-slate-400 truncate mt-0.5 tracking-wide flex items-center gap-1.5 flex-wrap">
+                    <div className="text-xs sm:text-[13px] font-medium text-slate-500 dark:text-slate-400 truncate mt-0.5 tracking-wide flex items-center gap-1.5 flex-wrap">
                       {codeToDisplay && <span className="font-mono">{codeToDisplay} ·</span>}
-                      <span className="font-bold text-slate-700 dark:text-slate-300">RD$ {item.price.toFixed(2)} c/u</span>
+                      <button
+                        type="button"
+                        onClick={() => onOpenPriceModal && onOpenPriceModal(item)}
+                        className="inline-flex items-center gap-1 font-black text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:underline cursor-pointer group"
+                        title="Clic para cambiar precio unitario"
+                      >
+                        <span>RD$ {item.price.toFixed(2)} c/u</span>
+                        <Pencil size={11} className="text-slate-400 group-hover:text-blue-500 transition-colors" />
+                      </button>
+                      {item.isCustomPrice && (
+                        <span
+                          className="text-[10px] font-extrabold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/50 px-1.5 py-0.2 rounded border border-blue-300 dark:border-blue-700 cursor-pointer"
+                          onClick={() => onOpenPriceModal && onOpenPriceModal(item)}
+                          title={`Precio original: RD$ ${(item.originalPrice ?? item.regularPrice ?? item.price).toFixed(2)}`}
+                        >
+                          Modificado (Orig: RD$ {(item.originalPrice ?? item.regularPrice ?? item.price).toFixed(2)})
+                        </span>
+                      )}
                       {isWholesaleActive && (
                         <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1 py-0.2 rounded border border-amber-300 dark:border-amber-700">
                           (Por mayor)
                         </span>
                       )}
-                    </p>
+                    </div>
                   )}
                 </div>
 
