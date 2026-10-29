@@ -114,7 +114,7 @@ export default function ReturnsFiltersBar({
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">Producto</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Factura, Dev. o Producto</label>
             <div className="relative">
               <Search
                 size={16}
@@ -122,7 +122,7 @@ export default function ReturnsFiltersBar({
               />
               <input
                 className="input-field !pl-9"
-                placeholder="Buscar producto..."
+                placeholder="No. factura, dev. o producto..."
                 value={product}
                 onChange={(e) => onProductChange(e.target.value)}
               />

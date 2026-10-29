@@ -75,12 +75,17 @@ export async function obtenerDevoluciones(params: {
     }
     if (params.busqueda?.trim()) {
       const q = params.busqueda.trim().toLowerCase();
-      list = list.filter(
-        (d) =>
+      const coreQ = q.replace(/^(?:fac|ven|vnt|vta|fact|factura|inv|doc)[-_:\s]*/i, '').trim();
+      list = list.filter((d) => {
+        const num = (d.numero_factura ?? '').toLowerCase();
+        const numCore = num.replace(/^(?:fac|ven|vnt|vta|fact|factura|inv|doc)[-_:\s]*/i, '').trim();
+        return (
           d.codigo.toLowerCase().includes(q) ||
-          (d.numero_factura ?? '').toLowerCase().includes(q) ||
+          num.includes(q) ||
+          (coreQ.length >= 2 && numCore.includes(coreQ)) ||
           (d.cliente_nombre ?? '').toLowerCase().includes(q)
-      );
+        );
+      });
     }
     return { datos: list.slice(desde, hasta + 1), total: list.length };
   }
@@ -95,8 +100,14 @@ export async function obtenerDevoluciones(params: {
     query = query.eq('estado', params.estado);
   }
   if (params.busqueda?.trim()) {
-    const q = params.busqueda.trim();
-    query = query.or(`codigo.ilike.%${q}%,numero_factura.ilike.%${q}%`);
+    const rawQ = params.busqueda.trim();
+    const safeQ = rawQ.replace(/[,()"]/g, '').trim();
+    const coreQ = safeQ.replace(/^(?:fac|ven|vnt|vta|fact|factura|inv|doc)[-_:\s]*/i, '').trim();
+    const orClauses = [`codigo.ilike.%${safeQ}%`, `numero_factura.ilike.%${safeQ}%`];
+    if (coreQ && coreQ !== safeQ && coreQ.length >= 2) {
+      orClauses.push(`numero_factura.ilike.%${coreQ}%`);
+    }
+    query = query.or(orClauses.join(','));
   }
   if (params.signal) {
     query = query.abortSignal(params.signal);

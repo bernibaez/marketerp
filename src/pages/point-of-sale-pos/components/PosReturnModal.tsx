@@ -70,7 +70,7 @@ export default function PosReturnModal({
   const convertVentaToLookup = (venta: VentaConDetalle): SaleLookup | null => {
     const items: SaleItem[] = (venta.detalle_ventas ?? []).map((d) => ({
       producto_id: d.producto_id,
-      sku: d.producto_id ? d.nombre_item.slice(0, 12) : d.nombre_item,
+      sku: (d as any).sku || (d.producto_id ? d.nombre_item.slice(0, 12) : d.nombre_item),
       name: d.nombre_item,
       price: d.precio_unitario,
       cost: d.costo_unitario,
@@ -132,9 +132,14 @@ export default function PosReturnModal({
     setLookingUp(true);
     try {
       const venta = await obtenerVentaPorNumeroFactura(codeKey);
-      if (!venta || venta.estado === 'anulada') {
+      if (!venta) {
         setLoadedSale(null);
-        toast.error(`No se encontró la factura "${codeKey}". Verifica el número o NCF impreso.`);
+        toast.error(`No se encontró la factura "${codeKey}". Verifica el número (FAC-..., VEN-...) o NCF.`);
+        return;
+      }
+      if (venta.estado === 'anulada') {
+        setLoadedSale(null);
+        toast.error(`La factura "${venta.numero_factura}" está anulada y no admite devoluciones.`);
         return;
       }
       applyVenta(venta);

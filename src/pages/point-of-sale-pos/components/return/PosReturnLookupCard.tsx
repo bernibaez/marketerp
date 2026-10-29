@@ -29,11 +29,11 @@ export const PosReturnLookupCard: React.FC<PosReturnLookupCardProps> = ({
         <div>
           <h2 className="font-bold text-slate-900 text-base">Buscar Factura Original</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Introduce el identificador de venta o NCF fiscal impreso en el comprobante
+            Introduce el número de factura de venta (VEN-...), comprobante POS (FAC-...) o NCF fiscal impreso
           </p>
         </div>
         <span className="px-3 py-1 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200/70 whitespace-nowrap">
-          NCF Formato e-CF / B02
+          Factura POS · Venta · NCF
         </span>
       </div>
 
@@ -44,7 +44,7 @@ export const PosReturnLookupCard: React.FC<PosReturnLookupCardProps> = ({
           <input
             type="text"
             className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 text-xs text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-[#007052] focus:ring-1 focus:ring-[#007052] outline-none font-mono transition"
-            placeholder="Ej: FAC-20261021-... o B02..."
+            placeholder="No. factura POS (FAC-...), venta (VEN-...) o NCF (B02...)"
             value={searchCode}
             onChange={(e) => setSearchCode(e.target.value)}
             onKeyDown={(e) => {

@@ -59,7 +59,13 @@ export default function ReturnsHistoryPage() {
         const matchProduct = r.products.some(
           (p) => p.name.toLowerCase().includes(q) || (p.sku?.toLowerCase().includes(q) ?? false)
         );
-        if (!matchProduct) return false;
+        const coreQ = q.replace(/^(?:fac|ven|vnt|vta|fact|factura|inv|doc)[-_:\s]*/i, '').trim();
+        const saleCodeClean = (r.saleCode || '').toLowerCase().replace(/^(?:fac|ven|vnt|vta|fact|factura|inv|doc)[-_:\s]*/i, '').trim();
+        const matchInvoice =
+          (r.saleCode && r.saleCode.toLowerCase().includes(q)) ||
+          (r.code && r.code.toLowerCase().includes(q)) ||
+          (coreQ.length >= 2 && saleCodeClean.includes(coreQ));
+        if (!matchProduct && !matchInvoice) return false;
       }
       return true;
     });

@@ -655,13 +655,18 @@ export async function obtenerHistorialVentas(params: {
     });
     if (params.busqueda?.trim()) {
       const q = params.busqueda.trim().toLowerCase();
-      list = list.filter(
-        (v) =>
-          v.numero_factura.toLowerCase().includes(q) ||
+      const coreQ = q.replace(/^(?:fac|ven|vnt|vta|fact|factura|inv|doc)[-_:\s]*/i, '').trim();
+      list = list.filter((v) => {
+        const num = (v.numero_factura || '').toLowerCase();
+        const numCore = num.replace(/^(?:fac|ven|vnt|vta|fact|factura|inv|doc)[-_:\s]*/i, '').trim();
+        return (
+          num.includes(q) ||
+          (coreQ.length >= 2 && numCore.includes(coreQ)) ||
           (v.ncf ?? '').toLowerCase().includes(q) ||
           (v.cliente_nombre ?? '').toLowerCase().includes(q) ||
           (v.cajero_nombre ?? '').toLowerCase().includes(q)
-      );
+        );
+      });
     }
     if (params.fechaInicio) {
       list = list.filter((v) => v.creado_en >= params.fechaInicio!);
@@ -701,8 +706,13 @@ export async function obtenerHistorialVentas(params: {
 
     if (params.busqueda?.trim()) {
       const term = params.busqueda.trim().replace(/[%,"']/g, '');
+      const coreTerm = term.replace(/^(?:fac|ven|vnt|vta|fact|factura|inv|doc)[-_:\s]*/i, '').trim();
       if (term) {
-        q = q.or(`numero_factura.ilike.%${term}%,ncf.ilike.%${term}%`);
+        const orClauses = [`numero_factura.ilike.%${term}%`, `ncf.ilike.%${term}%`];
+        if (coreTerm && coreTerm !== term && coreTerm.length >= 2) {
+          orClauses.push(`numero_factura.ilike.%${coreTerm}%`);
+        }
+        q = q.or(orClauses.join(','));
       }
     }
     if (params.fechaInicio) q = q.gte('creado_en', params.fechaInicio);
@@ -943,68 +953,217 @@ export async function obtenerVentasTurno(params: {
   }));
 }
 
+export interface NormalizedInvoiceLookup {
+  raw: string;
+  cleanUpper: string;
+  coreCode: string;
+  candidates: string[];
+}
+
+/**
+ * Normaliza cualquier formato de identificador de factura (de venta, POS, NCF, etc.)
+ * Remueve prefijos decorativos (#, No., Factura:), extrae el cuerpo central y genera
+ * candidatos cruzados (ej: busca FAC-..., VEN-..., o sin prefijo).
+ */
+export function normalizeInvoiceLookupKey(rawInput: string): NormalizedInvoiceLookup {
+  const raw = (rawInput || '').trim();
+  if (!raw) {
+    return { raw: '', cleanUpper: '', coreCode: '', candidates: [] };
+  }
+
+  // 1. Quitar prefijos decorativos comunes (#, No., Factura:, Fact:)
+  const unadorned = raw
+    .replace(/^[#\s]+/, '')
+    .replace(/^(?:No\.?|Num\.?|Número|Numero|Factura:?|Fact:?)\s*/i, '')
+    .trim();
+
+  const cleanUpper = unadorned.toUpperCase();
+
+  // 2. Extraer el código central despojando prefijos de sistema conocidos (FAC-, VEN-, VNT-, VTA-, FACT-, etc.)
+  const coreCode = cleanUpper
+    .replace(/^(?:FAC|VEN|VNT|VTA|FACT|FACTURA|INV|DOC)[-_:\s]*/i, '')
+    .trim();
+
+  // 3. Generar variantes cruzadas para buscar indistintamente número de factura POS o de venta
+  const set = new Set<string>();
+  if (cleanUpper) set.add(cleanUpper);
+
+  if (coreCode) {
+    set.add(coreCode);
+    set.add(`FAC-${coreCode}`);
+    set.add(`VEN-${coreCode}`);
+    set.add(`VNT-${coreCode}`);
+    set.add(`VTA-${coreCode}`);
+
+    // Si tiene segmentos (ej: 20261029-4F901A1C o 20261029-0001), agregar el sufijo final
+    const parts = coreCode.split('-');
+    if (parts.length > 1) {
+      const suffix = parts[parts.length - 1].trim();
+      if (suffix.length >= 2) set.add(suffix);
+    }
+  }
+
+  // Si tiene formato NCF (ej: B02-00000001 o B02 00000001)
+  const ncfClean = cleanUpper.replace(/[\s-]+/g, '');
+  if (/^[BE]\d{8,11}$/i.test(ncfClean)) {
+    set.add(ncfClean);
+  }
+
+  return {
+    raw,
+    cleanUpper,
+    coreCode,
+    candidates: Array.from(set),
+  };
+}
+
+/**
+ * Calcula la puntuación de coincidencia de una venta contra el identificador buscado.
+ * Prioriza coincidencias exactas y variantes cruzadas (FAC vs VEN).
+ */
+export function scoreVentaMatch(
+  venta: { id?: string; numero_factura?: string; ncf?: string | null },
+  lookup: NormalizedInvoiceLookup
+): number {
+  if (!venta || !lookup.raw) return 0;
+
+  const num = (venta.numero_factura || '').toUpperCase().trim();
+  const ncf = (venta.ncf || '').toUpperCase().trim();
+  const id = (venta.id || '').toLowerCase().trim();
+  const rawLower = lookup.raw.toLowerCase();
+  const targetUpper = lookup.cleanUpper;
+  const core = lookup.coreCode;
+
+  // 1. Coincidencia id / uuid exacto
+  if (id && id === rawLower) return 100;
+  if (id && targetUpper.length >= 8 && id.startsWith(targetUpper.toLowerCase())) return 96;
+
+  // 2. Coincidencia exacta directa con numero_factura o ncf
+  if (num && num === targetUpper) return 100;
+  if (ncf && ncf === targetUpper) return 100;
+  if (ncf && targetUpper.replace(/[\s-]+/g, '') === ncf) return 98;
+
+  // 3. Coincidencia exacta con candidatos generados (ej: buscar VEN-XXXX contra FAC-XXXX)
+  for (const cand of lookup.candidates) {
+    if (num && num === cand) return 95;
+    if (ncf && ncf === cand) return 95;
+  }
+
+  // 4. Coincidencia del core code contra el core del numero_factura
+  const numCore = num.replace(/^(?:FAC|VEN|VNT|VTA|FACT|FACTURA|INV|DOC)[-_:\s]*/i, '').trim();
+  if (core && numCore && numCore === core) return 92;
+
+  // 5. numero_factura termina con el core (ej: numero_factura="FAC-20261029-0001" y core="0001")
+  if (core && core.length >= 2) {
+    if (num.endsWith(`-${core}`) || num.endsWith(core)) return 85;
+    if (numCore.endsWith(`-${core}`) || numCore.endsWith(core)) return 85;
+  }
+
+  // 6. Contención parcial
+  if (core && core.length >= 3) {
+    if (num.includes(core)) return 75;
+    if (ncf && ncf.includes(core)) return 70;
+  }
+  if (targetUpper.length >= 3) {
+    if (num.includes(targetUpper)) return 65;
+    if (ncf && ncf.includes(targetUpper)) return 60;
+  }
+
+  return 0;
+}
+
+function sanitizePostgrestFilterTerm(term: string): string {
+  return term.replace(/[,()"]/g, '').trim();
+}
+
 export async function obtenerVentaPorNumeroFactura(
   numeroFactura: string
 ): Promise<VentaConDetalle | null> {
-  const raw = (numeroFactura || '').trim();
-  if (!raw) return null;
-
-  // Normalizar: remover prefijos como "No.", "#", espacios
-  const codigo = raw.replace(/^[#\s]+/, '').replace(/^No\.?\s*/i, '');
-  const codigoUpper = codigo.toUpperCase();
-  const cleanCode = codigoUpper.replace(/^FAC-?/i, '');
+  const lookup = normalizeInvoiceLookupKey(numeroFactura);
+  if (!lookup.raw) return null;
 
   const sb = tryGetSupabase();
   if (sb) {
     try {
-      // 1. Búsqueda directa o flexible en Supabase (por numero_factura exacto, NCF exacto, o coincidencias parciales)
-      const { data: ventas, error } = await sb
-        .from('ventas')
-        .select('id, numero_factura, ncf, creado_en')
-        .or(`numero_factura.ilike.${codigo},ncf.ilike.${codigo},numero_factura.ilike.%${cleanCode}%,ncf.ilike.%${codigo}%`)
-        .order('creado_en', { ascending: false })
-        .limit(5);
+      const filterTerms = new Set<string>();
+      const safeTarget = sanitizePostgrestFilterTerm(lookup.cleanUpper);
+      if (safeTarget) filterTerms.add(safeTarget);
 
-      if (!error && ventas && ventas.length > 0) {
-        // Priorizar coincidencia exacta
-        const exact =
-          ventas.find(
-            (v) =>
-              (v.numero_factura && v.numero_factura.toUpperCase() === codigoUpper) ||
-              (v.ncf && v.ncf.toUpperCase() === codigoUpper)
-          ) || ventas[0];
+      const safeCore = sanitizePostgrestFilterTerm(lookup.coreCode);
+      if (safeCore) {
+        filterTerms.add(safeCore);
+        filterTerms.add(`FAC-${safeCore}`);
+        filterTerms.add(`VEN-${safeCore}`);
+        const parts = safeCore.split('-');
+        if (parts.length > 1) {
+          const last = sanitizePostgrestFilterTerm(parts[parts.length - 1]);
+          if (last.length >= 2) filterTerms.add(last);
+        }
+      }
 
-        const full = await obtenerVentaPorId(String(exact.id));
-        if (full) return full;
+      const orParts: string[] = [];
+      for (const t of filterTerms) {
+        if (!t) continue;
+        orParts.push(`numero_factura.ilike.%${t}%`);
+        orParts.push(`ncf.ilike.%${t}%`);
+      }
+      if (isUUID(lookup.cleanUpper)) {
+        orParts.push(`id.eq.${lookup.cleanUpper.toLowerCase()}`);
+      }
+
+      if (orParts.length > 0) {
+        const { data: ventas, error } = await sb
+          .from('ventas')
+          .select('id, numero_factura, ncf, creado_en')
+          .or(orParts.join(','))
+          .order('creado_en', { ascending: false })
+          .limit(15);
+
+        if (!error && ventas && ventas.length > 0) {
+          const scored = ventas
+            .map((v) => ({
+              v,
+              score: scoreVentaMatch(v, lookup),
+            }))
+            .filter((item) => item.score > 0)
+            .sort((a, b) => {
+              if (b.score !== a.score) return b.score - a.score;
+              return new Date(b.v.creado_en).getTime() - new Date(a.v.creado_en).getTime();
+            });
+
+          if (scored.length > 0) {
+            const best = scored[0].v;
+            const full = await obtenerVentaPorId(String(best.id));
+            if (full) return full;
+          }
+        }
       }
     } catch {
       // Continuar con fallback local
     }
   }
 
-  // 2. Fallback a ventas locales (offline o guardadas localmente)
+  // 2. Fallback a ventas locales (offline o cache local)
   const list = getLocalVentas();
-  const found = list.find((v) => {
-    const num = (v.numero_factura || '').toUpperCase();
-    const ncf = (v.ncf || '').toUpperCase();
-    return (
-      num === codigoUpper ||
-      ncf === codigoUpper ||
-      (cleanCode && num.includes(cleanCode)) ||
-      (codigoUpper && ncf.includes(codigoUpper)) ||
-      (v.id && v.id.toLowerCase() === codigo.toLowerCase())
-    );
-  });
+  const scoredLocal = list
+    .map((v) => ({
+      v,
+      score: scoreVentaMatch(v, lookup),
+    }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return new Date(b.v.creado_en).getTime() - new Date(a.v.creado_en).getTime();
+    });
 
-  return found ?? null;
+  return scoredLocal.length > 0 ? scoredLocal[0].v : null;
 }
 
 export async function obtenerUltimasVentasParaDevolucion(limite = 8): Promise<VentaConDetalle[]> {
+  const localList = getLocalVentas().filter((v) => v.estado !== 'anulada');
   const sb = tryGetSupabase();
   if (!sb) {
-    return getLocalVentas()
-      .filter((v) => v.estado !== 'anulada')
-      .slice(0, limite);
+    return localList.slice(0, limite);
   }
 
   try {
@@ -1015,14 +1174,18 @@ export async function obtenerUltimasVentasParaDevolucion(limite = 8): Promise<Ve
       .order('creado_en', { ascending: false })
       .limit(limite);
 
-    if (error || !data) return getLocalVentas().slice(0, limite);
+    if (error || !data || data.length === 0) {
+      return localList.slice(0, limite);
+    }
 
     const ventas = await Promise.all(
       data.map((row) => obtenerVentaPorId(String(row.id)))
     );
-    return ventas.filter(Boolean) as VentaConDetalle[];
+    const valid = ventas.filter(Boolean) as VentaConDetalle[];
+    if (valid.length === 0) return localList.slice(0, limite);
+    return valid;
   } catch {
-    return getLocalVentas().slice(0, limite);
+    return localList.slice(0, limite);
   }
 }
 
