@@ -246,24 +246,29 @@ export function PurchaseCreateView({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           {/* Información General de la Compra y Observaciones */}
           <div className="lg:col-span-2 card p-4 sm:p-5 space-y-3.5">
-            <h3 className="font-semibold text-foreground text-sm sm:text-base">Información de la Compra</h3>
+            <div className="flex items-center justify-between border-b border-border/80 pb-3">
+              <div>
+                <h3 className="font-bold text-foreground text-base sm:text-lg">Información de la Compra</h3>
+                <p className="text-[11px] sm:text-xs text-muted-foreground mt-0.5">
+                  Datos generales del proveedor y comprobante
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenNewSupplierModal}
+                className="btn-primary flex items-center gap-1.5 text-xs sm:text-sm py-1.5 px-3.5 sm:px-4 shadow-sm bg-[#007052] hover:bg-[#005c43] text-white font-bold cursor-pointer transition shrink-0 rounded-xl"
+                title="Registrar un nuevo proveedor"
+              >
+                <Plus size={16} />
+                Nuevo Proveedor
+              </button>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              {/* Selector de Proveedor Autocompletable y Escribible con Botón de Creación */}
+              {/* Selector de Proveedor Autocompletable y Escribible */}
               <div className="relative" ref={supplierContainerRef}>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Proveedor * <span className="font-normal text-muted-foreground/80">(escribe o selecciona)</span>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleOpenNewSupplierModal}
-                    className="text-xs font-bold text-[#007052] dark:text-emerald-400 hover:underline inline-flex items-center gap-1 cursor-pointer transition active:scale-95"
-                    title="Crear un nuevo proveedor"
-                  >
-                    <Plus size={13} />
-                    Nuevo Proveedor
-                  </button>
-                </div>
+                <label className="text-xs font-semibold text-foreground mb-1 block">
+                  Proveedor * <span className="font-normal text-muted-foreground/80">(escribe para buscar o selecciona)</span>
+                </label>
                 <div className="relative flex items-center">
                   <Search size={14} className="absolute left-2.5 text-slate-400 pointer-events-none" />
                   <input
@@ -681,6 +686,8 @@ export function PurchaseCreateView({
                             step="0.001"
                             value={item.qty}
                             onChange={(e) => onUpdateLineQty(item.id, parseFloat(e.target.value) || 0)}
+                            onFocus={(e) => e.target.select()}
+                            onClick={(e) => (e.target as HTMLInputElement).select()}
                             className="input-field w-16 sm:w-20 text-center py-1 px-1 font-bold text-xs"
                           />
                         </td>
@@ -695,6 +702,8 @@ export function PurchaseCreateView({
                               step="0.01"
                               value={item.price}
                               onChange={(e) => onUpdateLinePrice(item.id, Number(e.target.value))}
+                              onFocus={(e) => e.target.select()}
+                              onClick={(e) => (e.target as HTMLInputElement).select()}
                               className="input-field w-20 sm:w-24 text-right py-1 px-1.5 font-bold font-mono text-xs tabular-nums"
                               title="Precio de compra / costo"
                             />
@@ -711,6 +720,8 @@ export function PurchaseCreateView({
                               step="0.01"
                               value={item.salePrice}
                               onChange={(e) => onUpdateLineSalePrice(item.id, Number(e.target.value))}
+                              onFocus={(e) => e.target.select()}
+                              onClick={(e) => (e.target as HTMLInputElement).select()}
                               className="input-field w-20 sm:w-24 text-right py-1 px-1.5 font-bold font-mono text-xs tabular-nums text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
                               title="Precio de venta"
                             />
@@ -746,6 +757,8 @@ export function PurchaseCreateView({
                               step="0.01"
                               value={item.wholesalePrice || 0}
                               onChange={(e) => onUpdateLineWholesalePrice(item.id, Number(e.target.value))}
+                              onFocus={(e) => e.target.select()}
+                              onClick={(e) => (e.target as HTMLInputElement).select()}
                               className="input-field w-20 sm:w-24 text-right py-1 px-1.5 font-bold font-mono text-xs tabular-nums text-amber-600 dark:text-amber-400 border-amber-500/30"
                               title="Precio de venta al por mayor"
                             />

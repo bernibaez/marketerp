@@ -481,6 +481,8 @@ export function PurchaseProductModal({
                     step="0.001"
                     value={modalQty}
                     onChange={(e) => setModalQty(parseFloat(e.target.value) || 0)}
+                    onFocus={(e) => e.target.select()}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
                     className="input-field text-lg font-black text-center h-12 flex-1 tabular-nums"
                   />
                   <button
@@ -519,6 +521,8 @@ export function PurchaseProductModal({
                     step="0.01"
                     value={modalPrice || ''}
                     onChange={(e) => setModalPrice(Number(e.target.value))}
+                    onFocus={(e) => e.target.select()}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
                     placeholder="0.00"
                     className="input-field text-base font-black text-right h-12 tabular-nums pl-14"
                   />
@@ -544,6 +548,8 @@ export function PurchaseProductModal({
                     step="0.01"
                     value={modalSalePrice || ''}
                     onChange={(e) => setModalSalePrice(Number(e.target.value))}
+                    onFocus={(e) => e.target.select()}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
                     placeholder="0.00"
                     className="input-field text-base font-black text-right h-12 tabular-nums pl-14 border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
                   />
@@ -569,6 +575,8 @@ export function PurchaseProductModal({
                     step="0.01"
                     value={modalWholesalePrice || ''}
                     onChange={(e) => setModalWholesalePrice(Number(e.target.value))}
+                    onFocus={(e) => e.target.select()}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
                     placeholder="0.00"
                     className="input-field text-base font-black text-right h-12 tabular-nums pl-14 border-amber-500/40 text-amber-600 dark:text-amber-400"
                   />
