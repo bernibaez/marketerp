@@ -97,9 +97,27 @@ export async function obtenerUnidadesMedida(params?: {
       if (params?.signal) query = query.abortSignal(params.signal);
 
       const { data, error } = await query;
-      if (!error && data && data.length > 0) {
-        saveStoredUnidades(data as UnidadMedida[]);
-        return data as UnidadMedida[];
+      if (!error && Array.isArray(data)) {
+        const currentLocal = getStoredUnidades();
+        const dbIds = new Set(data.map((d: any) => d.id));
+        const localOnly = currentLocal.filter((u) => !dbIds.has(u.id) && u.id.startsWith('uni-'));
+        const combined = [...data, ...localOnly] as UnidadMedida[];
+        saveStoredUnidades(combined);
+
+        let filtered = combined.filter((u) => u.activo !== false);
+        if (params?.tipo && params.tipo !== 'todas') {
+          filtered = filtered.filter((u) => u.tipo === params.tipo);
+        }
+        if (params?.busqueda?.trim()) {
+          const q = params.busqueda.trim().toLowerCase();
+          filtered = filtered.filter(
+            (u) =>
+              u.nombre.toLowerCase().includes(q) ||
+              u.codigo.toLowerCase().includes(q) ||
+              (u.abreviatura && u.abreviatura.toLowerCase().includes(q))
+          );
+        }
+        return filtered;
       }
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') throw err;

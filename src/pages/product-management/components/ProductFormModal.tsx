@@ -430,306 +430,306 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
     const finalBrand = (data.brand || '').trim() || (selectedBaseProduct?.brand || '');
 
     const saved: Product = {
-      id: product?.id ?? `prod-${Date.now()}`,
-      ...data,
-      sku: finalSku,
-      category: finalCategory,
-      brand: finalBrand,
-      plu: isWeight || isScaleProduct ? (cleanPlu || (product?.plu ?? '')) : '',
-      unit: isWeight ? (weightState.weightUnit === 'kg' ? 'Kilogramo' : weightState.weightUnit === 'lb' ? 'Libra' : data.unit) : data.unit,
-      costPrice: cost,
-      salePrice: sale,
-      wholesalePrice: Number(data.wholesalePrice),
-      tax: Number(data.tax),
-      minStock: minStk,
-      currentStock: isPresentation && baseProductId && selectedBaseProduct
-        ? Math.floor(selectedBaseProduct.currentStock / conversionFactor)
-        : stock,
-      stockStatus,
-      saleType: weightState.saleType,
-      weightUnit: weightState.weightUnit,
-      pricePerWeight: sale,
-      minWeight: weightState.minWeight,
-      maxWeight: weightState.maxWeight,
-      allowDecimal: weightState.allowDecimal,
-      generateScaleBarcode: weightState.generateScaleBarcode,
-      isWeightProduct: isWeight,
-      producto_base_id: isPresentation && baseProductId ? baseProductId : null,
-      factor_conversion: isPresentation && baseProductId ? Math.max(2, Number(conversionFactor) || 2) : 1,
-      unidad_base: isPresentation && selectedBaseProduct ? selectedBaseProduct.unit : undefined,
-    };
+  id: product?.id ?? `prod-${Date.now()}`,
+  ...data,
+  sku: finalSku,
+  category: finalCategory,
+  brand: finalBrand,
+  plu: isWeight || isScaleProduct ? (cleanPlu || (product?.plu ?? '')) : '',
+  unit: isWeight ? (weightState.weightUnit === 'kg' ? 'Kilogramo' : weightState.weightUnit === 'lb' ? 'Libra' : data.unit) : data.unit,
+  costPrice: cost,
+  salePrice: sale,
+  wholesalePrice: Number(data.wholesalePrice),
+  tax: Number(data.tax),
+  minStock: minStk,
+  currentStock: isPresentation && baseProductId && selectedBaseProduct
+    ? Math.floor(selectedBaseProduct.currentStock / conversionFactor)
+    : stock,
+  stockStatus,
+  saleType: weightState.saleType,
+  weightUnit: weightState.weightUnit,
+  pricePerWeight: sale,
+  minWeight: weightState.minWeight,
+  maxWeight: weightState.maxWeight,
+  allowDecimal: weightState.allowDecimal,
+  generateScaleBarcode: weightState.generateScaleBarcode,
+  isWeightProduct: isWeight,
+  producto_base_id: isPresentation && baseProductId ? baseProductId : null,
+  factor_conversion: isPresentation && baseProductId ? Math.max(2, Number(conversionFactor) || 2) : 1,
+  unidad_base: isPresentation && selectedBaseProduct ? selectedBaseProduct.unit : undefined,
+};
 
-    // System Audit Event
-    if (isEdit && product) {
-      const priceChanged = product.salePrice !== sale;
-      logAuditEvent({
-        user: 'Admin General',
-        role: 'Administrador',
-        action: priceChanged ? 'Cambio de precio' : 'Edición de producto',
-        module: 'Gestión de Productos',
-        details: priceChanged
-          ? `Precio cambiado para "${saved.name}" de RD$ ${product.salePrice} a RD$ ${sale}`
-          : `Producto "${saved.name}" actualizado`,
-        before: { name: product.name, salePrice: product.salePrice, costPrice: product.costPrice },
-        after: { name: saved.name, salePrice: saved.salePrice, costPrice: saved.costPrice },
-      });
-    } else {
-      logAuditEvent({
-        user: 'Admin General',
-        role: 'Administrador',
-        action: 'Edición de producto',
-        module: 'Gestión de Productos',
-        details: `Nuevo producto creado: "${saved.name}" (SKU: ${saved.sku})`,
-        after: { name: saved.name, sku: saved.sku, salePrice: saved.salePrice },
-      });
-    }
+// System Audit Event
+if (isEdit && product) {
+  const priceChanged = product.salePrice !== sale;
+  logAuditEvent({
+    user: 'Admin General',
+    role: 'Administrador',
+    action: priceChanged ? 'Cambio de precio' : 'Edición de producto',
+    module: 'Gestión de Productos',
+    details: priceChanged
+      ? `Precio cambiado para "${saved.name}" de RD$ ${product.salePrice} a RD$ ${sale}`
+      : `Producto "${saved.name}" actualizado`,
+    before: { name: product.name, salePrice: product.salePrice, costPrice: product.costPrice },
+    after: { name: saved.name, salePrice: saved.salePrice, costPrice: saved.costPrice },
+  });
+} else {
+  logAuditEvent({
+    user: 'Admin General',
+    role: 'Administrador',
+    action: 'Edición de producto',
+    module: 'Gestión de Productos',
+    details: `Nuevo producto creado: "${saved.name}" (SKU: ${saved.sku})`,
+    after: { name: saved.name, sku: saved.sku, salePrice: saved.salePrice },
+  });
+}
 
-    onSave(saved);
+onSave(saved);
   };
 
-  const costPrice = watch('costPrice');
-  const salePrice = watch('salePrice');
-  const selectedUnit = watch('unit') || product?.unit || 'Unidad';
+const costPrice = watch('costPrice');
+const salePrice = watch('salePrice');
+const selectedUnit = watch('unit') || product?.unit || 'Unidad';
 
-  // Resolver producto base seleccionado incluso si no vino en el subconjunto de allProducts
-  useEffect(() => {
-    if (!baseProductId) {
-      setBaseProductResolved(null);
-      return;
-    }
-    const foundInLocal =
-      allProducts.find((p) => p.id === baseProductId) ||
-      remoteBaseProducts.find((p) => p.id === baseProductId);
-    if (foundInLocal) {
-      setBaseProductResolved(foundInLocal);
-      return;
-    }
+// Resolver producto base seleccionado incluso si no vino en el subconjunto de allProducts
+useEffect(() => {
+  if (!baseProductId) {
+    setBaseProductResolved(null);
+    return;
+  }
+  const foundInLocal =
+    allProducts.find((p) => p.id === baseProductId) ||
+    remoteBaseProducts.find((p) => p.id === baseProductId);
+  if (foundInLocal) {
+    setBaseProductResolved(foundInLocal);
+    return;
+  }
 
+  let isMounted = true;
+  obtenerProductoPorId(baseProductId).then((p) => {
+    if (isMounted && p) {
+      setBaseProductResolved(productoAUi(p));
+    }
+  });
+  return () => {
+    isMounted = false;
+  };
+}, [baseProductId, allProducts, remoteBaseProducts]);
+
+// Cargar catálogo de productos base cuando el modal se abre o se activa la vinculación
+useEffect(() => {
+  if (!open || !isPresentation) return;
+  let isMounted = true;
+  buscarProductosParaVinculacion('', product?.id).then((list) => {
+    if (isMounted && list.length > 0) {
+      setRemoteBaseProducts(list.map(productoAUi));
+    }
+  });
+  return () => {
+    isMounted = false;
+  };
+}, [open, isPresentation, product?.id]);
+
+// Búsqueda en tiempo real contra Supabase al escribir con debounce de 180ms
+useEffect(() => {
+  if (!isPresentation || !isSearchOpen) return;
+  const term = baseProductSearch.trim();
+  if (!term) return;
+
+  setIsSearchingBase(true);
+  const timer = setTimeout(() => {
     let isMounted = true;
-    obtenerProductoPorId(baseProductId).then((p) => {
-      if (isMounted && p) {
-        setBaseProductResolved(productoAUi(p));
-      }
-    });
-    return () => {
-      isMounted = false;
-    };
-  }, [baseProductId, allProducts, remoteBaseProducts]);
-
-  // Cargar catálogo de productos base cuando el modal se abre o se activa la vinculación
-  useEffect(() => {
-    if (!open || !isPresentation) return;
-    let isMounted = true;
-    buscarProductosParaVinculacion('', product?.id).then((list) => {
-      if (isMounted && list.length > 0) {
-        setRemoteBaseProducts(list.map(productoAUi));
-      }
-    });
-    return () => {
-      isMounted = false;
-    };
-  }, [open, isPresentation, product?.id]);
-
-  // Búsqueda en tiempo real contra Supabase al escribir con debounce de 180ms
-  useEffect(() => {
-    if (!isPresentation || !isSearchOpen) return;
-    const term = baseProductSearch.trim();
-    if (!term) return;
-
-    setIsSearchingBase(true);
-    const timer = setTimeout(() => {
-      let isMounted = true;
-      buscarProductosParaVinculacion(term, product?.id)
-        .then((list) => {
-          if (isMounted) {
-            const mapped = list.map(productoAUi);
-            setRemoteBaseProducts((prev) => {
-              const map = new Map<string, Product>();
-              for (const p of prev) map.set(p.id, p);
-              for (const p of mapped) map.set(p.id, p);
-              return Array.from(map.values());
-            });
-          }
-        })
-        .finally(() => {
-          if (isMounted) setIsSearchingBase(false);
-        });
-    }, 180);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [baseProductSearch, isPresentation, isSearchOpen, product?.id]);
-
-  // Cerrar selector al hacer click fuera
-  useEffect(() => {
-    if (!isSearchOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
-        setIsSearchOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isSearchOpen]);
-
-  const selectedBaseProduct = React.useMemo(() => {
-    if (!baseProductId) return null;
-    return (
-      allProducts.find((p) => p.id === baseProductId) ||
-      remoteBaseProducts.find((p) => p.id === baseProductId) ||
-      baseProductResolved
-    );
-  }, [baseProductId, allProducts, remoteBaseProducts, baseProductResolved]);
-
-  // Catálogo unificado y deduplicado entre allProducts y productos remotos
-  const combinedBaseProducts = React.useMemo(() => {
-    const map = new Map<string, Product>();
-    for (const p of allProducts) {
-      if (!product || p.id !== product.id) map.set(p.id, p);
-    }
-    for (const p of remoteBaseProducts) {
-      if (!product || p.id !== product.id) map.set(p.id, p);
-    }
-    return Array.from(map.values());
-  }, [allProducts, remoteBaseProducts, product]);
-
-  const filteredBaseProducts = React.useMemo(() => {
-    const rawQ = baseProductSearch.trim();
-    if (!rawQ) {
-      return combinedBaseProducts.slice(0, 50);
-    }
-
-    const normalizeStr = (s: string) =>
-      (s || '')
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase()
-        .trim();
-
-    const tokens = normalizeStr(rawQ).split(/\s+/).filter(Boolean);
-
-    return combinedBaseProducts
-      .filter((p) => {
-        const normName = normalizeStr(p.name);
-        const normSku = normalizeStr(p.sku);
-        const normBarcode = normalizeStr(p.barcode);
-        const normCategory = normalizeStr(p.category);
-        const normBrand = normalizeStr(p.brand);
-
-        return tokens.every(
-          (t) =>
-            normName.includes(t) ||
-            normSku.includes(t) ||
-            normBarcode.includes(t) ||
-            normCategory.includes(t) ||
-            normBrand.includes(t)
-        );
+    buscarProductosParaVinculacion(term, product?.id)
+      .then((list) => {
+        if (isMounted) {
+          const mapped = list.map(productoAUi);
+          setRemoteBaseProducts((prev) => {
+            const map = new Map<string, Product>();
+            for (const p of prev) map.set(p.id, p);
+            for (const p of mapped) map.set(p.id, p);
+            return Array.from(map.values());
+          });
+        }
       })
-      .slice(0, 60);
-  }, [combinedBaseProducts, baseProductSearch]);
+      .finally(() => {
+        if (isMounted) setIsSearchingBase(false);
+      });
+  }, 180);
 
-  const handleSelectBaseProduct = (baseProd: Product) => {
-    setBaseProductId(baseProd.id);
-    setIsSearchOpen(false);
-    setBaseProductSearch('');
+  return () => {
+    clearTimeout(timer);
+  };
+}, [baseProductSearch, isPresentation, isSearchOpen, product?.id]);
 
-    // Auto-generate presentation SKU if current SKU is empty or an auto-generated SKU
-    const currentSku = (getValues('sku') || '').trim();
-    if (!currentSku || /^(FDO|CTN|CAJ|PQT|BLS|CMB|PACK|SKU)-/i.test(currentSku)) {
-      const generatedSku = generatePresentationSku(selectedUnit, baseProd.sku, baseProd.name);
-      setValue('sku', generatedSku, { shouldValidate: true, shouldDirty: true });
-    }
-
-    // Auto-fill category, brand, and name if empty
-    if (!getValues('category') && baseProd.category) {
-      setValue('category', baseProd.category, { shouldDirty: true });
-    }
-    if (!getValues('brand') && baseProd.brand) {
-      setValue('brand', baseProd.brand, { shouldDirty: true });
-    }
-    if (!getValues('name')) {
-      setValue('name', `${selectedUnit} de ${baseProd.name}`, { shouldDirty: true, shouldValidate: true });
-    }
-
-    // Si aún no se indicó cuántas unidades trae, sugerirlo por costos (el usuario puede cambiarlo)
-    if (conversionFactor <= 1) {
-      const currentCost = Number(getValues('costPrice') || 0);
-      const baseCost = Number(baseProd.costPrice || 0);
-      if (currentCost > 0 && baseCost > 0 && currentCost > baseCost) {
-        const calcFactor = Math.round(currentCost / baseCost);
-        if (calcFactor >= 2) {
-          setConversionFactor(calcFactor);
-          toast.info(`Sugerencia por costos: ${calcFactor} unidades. Ajústalo si no es correcto.`);
-        }
-      }
+// Cerrar selector al hacer click fuera
+useEffect(() => {
+  if (!isSearchOpen) return;
+  const handleClickOutside = (e: MouseEvent) => {
+    if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+      setIsSearchOpen(false);
     }
   };
-
-  const handleUnitSelection = (val: string) => {
-    setValue('unit', val, { shouldValidate: true, shouldDirty: true });
-    if (isPackUnitItem(val)) {
-      // Al elegir Fardo, Cartón, Caja, etc. se abre automáticamente la gestión del empaque
-      setIsPresentation(true);
-      if (selectedBaseProduct) {
-        const currentSku = (getValues('sku') || '').trim();
-        if (!currentSku || /^(FDO|CTN|CAJ|PQT|BLS|CMB|PACK|SKU)-/i.test(currentSku)) {
-          const generatedSku = generatePresentationSku(val, selectedBaseProduct.sku, selectedBaseProduct.name);
-          setValue('sku', generatedSku, { shouldValidate: true, shouldDirty: true });
-        }
-      }
-    } else {
-      setIsPresentation(false);
-      setBaseProductId('');
-      setConversionFactorText('');
-    }
+  document.addEventListener('mousedown', handleClickOutside);
+  return () => {
+    document.removeEventListener('mousedown', handleClickOutside);
   };
+}, [isSearchOpen]);
 
-  const margin = costPrice && salePrice && Number(costPrice) > 0
-    ? (((Number(salePrice) - Number(costPrice)) / Number(salePrice)) * 100).toFixed(1)
-    : '0.0';
-
-  const isWeighted = weightState.saleType === 'weight' || weightState.saleType === 'both';
-  const weightUnitShort = weightState.weightUnit ? weightState.weightUnit.toUpperCase() : 'LB';
-
-  if (!open) return null;
-
+const selectedBaseProduct = React.useMemo(() => {
+  if (!baseProductId) return null;
   return (
-    <div className="space-y-6 slide-up">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">
-            {isEdit ? `Editar: ${product?.name}` : 'Nuevo Producto'}
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {isEdit ? `SKU: ${product?.sku}` : 'Completa todos los campos requeridos'}
-          </p>
-        </div>
-        <button type="button" onClick={onClose} className="btn-secondary" disabled={isSubmitting}>
-          ← Volver a Productos
-        </button>
-      </div>
+    allProducts.find((p) => p.id === baseProductId) ||
+    remoteBaseProducts.find((p) => p.id === baseProductId) ||
+    baseProductResolved
+  );
+}, [baseProductId, allProducts, remoteBaseProducts, baseProductResolved]);
 
-      <form id="product-form" onSubmit={handleSubmit(onSubmit)} className="card p-5 sm:p-6 space-y-6">
-        {/* Basic Info */}
-        <div>
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Package size={14} className="text-primary" />
-            </div>
-            <h3 className="text-sm font-semibold text-foreground">Información Básica</h3>
+// Catálogo unificado y deduplicado entre allProducts y productos remotos
+const combinedBaseProducts = React.useMemo(() => {
+  const map = new Map<string, Product>();
+  for (const p of allProducts) {
+    if (!product || p.id !== product.id) map.set(p.id, p);
+  }
+  for (const p of remoteBaseProducts) {
+    if (!product || p.id !== product.id) map.set(p.id, p);
+  }
+  return Array.from(map.values());
+}, [allProducts, remoteBaseProducts, product]);
+
+const filteredBaseProducts = React.useMemo(() => {
+  const rawQ = baseProductSearch.trim();
+  if (!rawQ) {
+    return combinedBaseProducts.slice(0, 50);
+  }
+
+  const normalizeStr = (s: string) =>
+    (s || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+
+  const tokens = normalizeStr(rawQ).split(/\s+/).filter(Boolean);
+
+  return combinedBaseProducts
+    .filter((p) => {
+      const normName = normalizeStr(p.name);
+      const normSku = normalizeStr(p.sku);
+      const normBarcode = normalizeStr(p.barcode);
+      const normCategory = normalizeStr(p.category);
+      const normBrand = normalizeStr(p.brand);
+
+      return tokens.every(
+        (t) =>
+          normName.includes(t) ||
+          normSku.includes(t) ||
+          normBarcode.includes(t) ||
+          normCategory.includes(t) ||
+          normBrand.includes(t)
+      );
+    })
+    .slice(0, 60);
+}, [combinedBaseProducts, baseProductSearch]);
+
+const handleSelectBaseProduct = (baseProd: Product) => {
+  setBaseProductId(baseProd.id);
+  setIsSearchOpen(false);
+  setBaseProductSearch('');
+
+  // Auto-generate presentation SKU if current SKU is empty or an auto-generated SKU
+  const currentSku = (getValues('sku') || '').trim();
+  if (!currentSku || /^(FDO|CTN|CAJ|PQT|BLS|CMB|PACK|SKU)-/i.test(currentSku)) {
+    const generatedSku = generatePresentationSku(selectedUnit, baseProd.sku, baseProd.name);
+    setValue('sku', generatedSku, { shouldValidate: true, shouldDirty: true });
+  }
+
+  // Auto-fill category, brand, and name if empty
+  if (!getValues('category') && baseProd.category) {
+    setValue('category', baseProd.category, { shouldDirty: true });
+  }
+  if (!getValues('brand') && baseProd.brand) {
+    setValue('brand', baseProd.brand, { shouldDirty: true });
+  }
+  if (!getValues('name')) {
+    setValue('name', `${selectedUnit} de ${baseProd.name}`, { shouldDirty: true, shouldValidate: true });
+  }
+
+  // Si aún no se indicó cuántas unidades trae, sugerirlo por costos (el usuario puede cambiarlo)
+  if (conversionFactor <= 1) {
+    const currentCost = Number(getValues('costPrice') || 0);
+    const baseCost = Number(baseProd.costPrice || 0);
+    if (currentCost > 0 && baseCost > 0 && currentCost > baseCost) {
+      const calcFactor = Math.round(currentCost / baseCost);
+      if (calcFactor >= 2) {
+        setConversionFactor(calcFactor);
+        toast.info(`Sugerencia por costos: ${calcFactor} unidades. Ajústalo si no es correcto.`);
+      }
+    }
+  }
+};
+
+const handleUnitSelection = (val: string) => {
+  setValue('unit', val, { shouldValidate: true, shouldDirty: true });
+  if (isPackUnitItem(val)) {
+    // Al elegir Fardo, Cartón, Caja, etc. se abre automáticamente la gestión del empaque
+    setIsPresentation(true);
+    if (selectedBaseProduct) {
+      const currentSku = (getValues('sku') || '').trim();
+      if (!currentSku || /^(FDO|CTN|CAJ|PQT|BLS|CMB|PACK|SKU)-/i.test(currentSku)) {
+        const generatedSku = generatePresentationSku(val, selectedBaseProduct.sku, selectedBaseProduct.name);
+        setValue('sku', generatedSku, { shouldValidate: true, shouldDirty: true });
+      }
+    }
+  } else {
+    setIsPresentation(false);
+    setBaseProductId('');
+    setConversionFactorText('');
+  }
+};
+
+const margin = costPrice && salePrice && Number(costPrice) > 0
+  ? (((Number(salePrice) - Number(costPrice)) / Number(salePrice)) * 100).toFixed(1)
+  : '0.0';
+
+const isWeighted = weightState.saleType === 'weight' || weightState.saleType === 'both';
+const weightUnitShort = weightState.weightUnit ? weightState.weightUnit.toUpperCase() : 'LB';
+
+if (!open) return null;
+
+return (
+  <div className="space-y-6 slide-up">
+    <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">
+          {isEdit ? `Editar: ${product?.name}` : 'Nuevo Producto'}
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          {isEdit ? `SKU: ${product?.sku}` : 'Completa todos los campos requeridos'}
+        </p>
+      </div>
+      <button type="button" onClick={onClose} className="btn-secondary" disabled={isSubmitting}>
+        ← Volver a Productos
+      </button>
+    </div>
+
+    <form id="product-form" onSubmit={handleSubmit(onSubmit)} className="card p-5 sm:p-6 space-y-6">
+      {/* Basic Info */}
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
+            <Package size={14} className="text-primary" />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormField label="Nombre del Producto" name="name" error={errors.name?.message} required>
-              <input
-                id="name"
-                {...register('name', { required: 'El nombre es obligatorio', minLength: { value: 3, message: 'Mínimo 3 caracteres' } })}
-                className="input-field"
-                placeholder="Ej: Arroz Selecto 5lb"
-              />
-            </FormField>
+          <h3 className="text-sm font-semibold text-foreground">Información Básica</h3>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <FormField label="Nombre del Producto" name="name" error={errors.name?.message} required>
+            <input
+              id="name"
+              {...register('name', { required: 'El nombre es obligatorio', minLength: { value: 3, message: 'Mínimo 3 caracteres' } })}
+              className="input-field"
+              placeholder="Ej: Arroz Selecto 5lb"
+            />
+          </FormField>
 
             <FormField
               label="SKU (Opcional)"
@@ -1124,328 +1124,328 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
                 </div>
               </div>
             )}
-          </div>
         </div>
+      </div>
 
-        <div className="border-t border-border" />
+      <div className="border-t border-border" />
 
-        {/* Section: Tipo de Venta (Peso / Unidad) */}
-        <WeightProductForm
-          values={weightState}
-          onChange={(updates) => setWeightState((prev) => ({ ...prev, ...updates }))}
-          baseSalePrice={Number(salePrice || 0)}
-        />
+      {/* Section: Tipo de Venta (Peso / Unidad) */}
+      <WeightProductForm
+        values={weightState}
+        onChange={(updates) => setWeightState((prev) => ({ ...prev, ...updates }))}
+        baseSalePrice={Number(salePrice || 0)}
+      />
 
-        <div className="border-t border-border" />
+      <div className="border-t border-border" />
 
-        {/* Pricing */}
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-success-bg flex items-center justify-center">
-                <span className="text-success text-xs font-bold">$</span>
-              </div>
-              <h3 className="text-sm font-semibold text-foreground">Precios e Impuestos</h3>
+      {/* Pricing */}
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-success-bg flex items-center justify-center">
+              <span className="text-success text-xs font-bold">$</span>
             </div>
-            {Number(costPrice) > 0 && Number(salePrice) > 0 && (
-              <div className="flex items-center gap-1.5 bg-success-bg px-2.5 py-1 rounded-lg">
-                <span className="text-xs text-muted-foreground">Margen:</span>
-                <span className="text-xs font-bold text-success tabular-nums">{margin}%</span>
-              </div>
-            )}
+            <h3 className="text-sm font-semibold text-foreground">Precios e Impuestos</h3>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormField label={isWeighted ? `Precio de Compra por ${weightUnitShort} (RD$)` : "Precio de Compra (RD$)"} name="costPrice" error={errors.costPrice?.message} required>
-              <input
-                id="costPrice"
-                type="number"
-                step="0.01"
-                min={0}
-                {...register('costPrice', {
-                  required: 'El precio de compra es obligatorio',
-                  min: { value: 0, message: 'Debe ser mayor o igual a 0' },
-                })}
-                className="input-field tabular-nums"
-                placeholder="0.00"
-              />
-            </FormField>
-
-            <FormField label={isWeighted ? `Precio de Venta por ${weightUnitShort} (RD$)` : "Precio de Venta (RD$)"} name="salePrice" error={errors.salePrice?.message} required>
-              <input
-                id="salePrice"
-                type="number"
-                step="0.01"
-                min={0}
-                {...register('salePrice', {
-                  required: 'El precio de venta es obligatorio',
-                  min: { value: 0, message: 'Debe ser mayor o igual a 0' },
-                })}
-                className="input-field tabular-nums"
-                placeholder="0.00"
-              />
-            </FormField>
-
-            <FormField
-              label={isWeighted ? `Precio Mayorista por ${weightUnitShort} (RD$)` : "Precio Mayorista (RD$)"}
-              name="wholesalePrice"
-              error={errors.wholesalePrice?.message}
-              hint={isWeighted ? `Precio por ${weightUnitShort} para compras al por mayor` : "Precio para compras al por mayor"}
-            >
-              <input
-                id="wholesalePrice"
-                type="number"
-                step="0.01"
-                min={0}
-                {...register('wholesalePrice', {
-                  min: { value: 0, message: 'Debe ser mayor o igual a 0' },
-                })}
-                className="input-field tabular-nums"
-                placeholder="0.00"
-              />
-            </FormField>
-
-            <FormField label="ITBIS (%)" name="tax" error={errors.tax?.message} hint="Impuesto sobre Transferencia de Bienes Industrializados">
-              <select id="tax" {...register('tax')} className="input-field">
-                {taxOptions.map((t) => (
-                  <option key={`tax-opt-${t}`} value={t}>{t === 0 ? 'Exento (0%)' : `${t}%`}</option>
-                ))}
-              </select>
-            </FormField>
-          </div>
+          {Number(costPrice) > 0 && Number(salePrice) > 0 && (
+            <div className="flex items-center gap-1.5 bg-success-bg px-2.5 py-1 rounded-lg">
+              <span className="text-xs text-muted-foreground">Margen:</span>
+              <span className="text-xs font-bold text-success tabular-nums">{margin}%</span>
+            </div>
+          )}
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <FormField label={isWeighted ? `Precio de Compra por ${weightUnitShort} (RD$)` : "Precio de Compra (RD$)"} name="costPrice" error={errors.costPrice?.message} required>
+            <input
+              id="costPrice"
+              type="number"
+              step="0.01"
+              min={0}
+              {...register('costPrice', {
+                required: 'El precio de compra es obligatorio',
+                min: { value: 0, message: 'Debe ser mayor o igual a 0' },
+              })}
+              className="input-field tabular-nums"
+              placeholder="0.00"
+            />
+          </FormField>
 
-        <div className="border-t border-border" />
+          <FormField label={isWeighted ? `Precio de Venta por ${weightUnitShort} (RD$)` : "Precio de Venta (RD$)"} name="salePrice" error={errors.salePrice?.message} required>
+            <input
+              id="salePrice"
+              type="number"
+              step="0.01"
+              min={0}
+              {...register('salePrice', {
+                required: 'El precio de venta es obligatorio',
+                min: { value: 0, message: 'Debe ser mayor o igual a 0' },
+              })}
+              className="input-field tabular-nums"
+              placeholder="0.00"
+            />
+          </FormField>
 
-        {/* Inventory */}
-        <div>
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-7 h-7 rounded-lg bg-info-bg flex items-center justify-center">
-              <Package size={14} className="text-info" />
-            </div>
-            <h3 className="text-sm font-semibold text-foreground">Inventario y Vencimiento</h3>
+          <FormField
+            label={isWeighted ? `Precio Mayorista por ${weightUnitShort} (RD$)` : "Precio Mayorista (RD$)"}
+            name="wholesalePrice"
+            error={errors.wholesalePrice?.message}
+            hint={isWeighted ? `Precio por ${weightUnitShort} para compras al por mayor` : "Precio para compras al por mayor"}
+          >
+            <input
+              id="wholesalePrice"
+              type="number"
+              step="0.01"
+              min={0}
+              {...register('wholesalePrice', {
+                min: { value: 0, message: 'Debe ser mayor o igual a 0' },
+              })}
+              className="input-field tabular-nums"
+              placeholder="0.00"
+            />
+          </FormField>
+
+          <FormField label="ITBIS (%)" name="tax" error={errors.tax?.message} hint="Impuesto sobre Transferencia de Bienes Industrializados">
+            <select id="tax" {...register('tax')} className="input-field">
+              {taxOptions.map((t) => (
+                <option key={`tax-opt-${t}`} value={t}>{t === 0 ? 'Exento (0%)' : `${t}%`}</option>
+              ))}
+            </select>
+          </FormField>
+        </div>
+      </div>
+
+      <div className="border-t border-border" />
+
+      {/* Inventory */}
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-7 h-7 rounded-lg bg-info-bg flex items-center justify-center">
+            <Package size={14} className="text-info" />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormField
-              label={isWeighted ? `Stock Actual (${weightUnitShort})` : "Stock Actual"}
-              name="currentStock"
-              error={errors.currentStock?.message}
-              required={!isEdit && !(isPresentation && baseProductId)}
-              hint={
-                isPresentation && selectedBaseProduct
-                  ? `Calculado dinámicamente desde ${selectedBaseProduct.name} (~${Math.floor(selectedBaseProduct.currentStock / conversionFactor)} ${selectedUnit}s disponibles)`
-                  : isEdit
+          <h3 className="text-sm font-semibold text-foreground">Inventario y Vencimiento</h3>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <FormField
+            label={isWeighted ? `Stock Actual (${weightUnitShort})` : "Stock Actual"}
+            name="currentStock"
+            error={errors.currentStock?.message}
+            required={!isEdit && !(isPresentation && baseProductId)}
+            hint={
+              isPresentation && selectedBaseProduct
+                ? `Calculado dinámicamente desde ${selectedBaseProduct.name} (~${Math.floor(selectedBaseProduct.currentStock / conversionFactor)} ${selectedUnit}s disponibles)`
+                : isEdit
                   ? 'No editable aquí — usa Ajustes de Stock para cambiar existencias'
                   : (isWeighted ? `Cantidad de ${weightUnitShort} actualmente en inventario` : 'Cantidad actual en inventario')
-              }
-            >
-              <input
-                id="currentStock"
-                type="number"
-                min={0}
-                disabled={isEdit || (isPresentation && !!baseProductId)}
-                value={isPresentation && selectedBaseProduct ? Math.floor(selectedBaseProduct.currentStock / conversionFactor) : undefined}
-                {...register('currentStock', {
-                  required: isEdit || (isPresentation && baseProductId) ? false : 'El stock actual es obligatorio',
-                  min: { value: 0, message: 'No puede ser negativo' },
-                })}
-                className={`input-field tabular-nums ${(isEdit || (isPresentation && baseProductId)) ? 'opacity-60 cursor-not-allowed' : ''}`}
-                placeholder="0"
-              />
-            </FormField>
+            }
+          >
+            <input
+              id="currentStock"
+              type="number"
+              min={0}
+              disabled={isEdit || (isPresentation && !!baseProductId)}
+              value={isPresentation && selectedBaseProduct ? Math.floor(selectedBaseProduct.currentStock / conversionFactor) : undefined}
+              {...register('currentStock', {
+                required: isEdit || (isPresentation && baseProductId) ? false : 'El stock actual es obligatorio',
+                min: { value: 0, message: 'No puede ser negativo' },
+              })}
+              className={`input-field tabular-nums ${(isEdit || (isPresentation && baseProductId)) ? 'opacity-60 cursor-not-allowed' : ''}`}
+              placeholder="0"
+            />
+          </FormField>
 
-            <FormField
-              label={isWeighted ? `Stock Mínimo (${weightUnitShort})` : "Stock Mínimo"}
-              name="minStock"
-              error={errors.minStock?.message}
-              required
-              hint={isWeighted ? `Alerta cuando las ${weightUnitShort} bajen de este nivel` : "Alerta cuando el stock baje de este nivel"}
-            >
-              <input
-                id="minStock"
-                type="number"
-                min={0}
-                {...register('minStock', {
-                  required: 'El stock mínimo es obligatorio',
-                  min: { value: 0, message: 'No puede ser negativo' },
-                })}
-                className="input-field tabular-nums"
-                placeholder="10"
-              />
-            </FormField>
+          <FormField
+            label={isWeighted ? `Stock Mínimo (${weightUnitShort})` : "Stock Mínimo"}
+            name="minStock"
+            error={errors.minStock?.message}
+            required
+            hint={isWeighted ? `Alerta cuando las ${weightUnitShort} bajen de este nivel` : "Alerta cuando el stock baje de este nivel"}
+          >
+            <input
+              id="minStock"
+              type="number"
+              min={0}
+              {...register('minStock', {
+                required: 'El stock mínimo es obligatorio',
+                min: { value: 0, message: 'No puede ser negativo' },
+              })}
+              className="input-field tabular-nums"
+              placeholder="10"
+            />
+          </FormField>
 
-            <FormField
-              label="Fecha de Vencimiento"
-              name="expiryDate"
-              error={errors.expiryDate?.message}
-              hint="Dejar vacío si el producto no tiene vencimiento"
-            >
-              <input
-                id="expiryDate"
-                type="date"
-                {...register('expiryDate')}
-                className="input-field"
-              />
-            </FormField>
+          <FormField
+            label="Fecha de Vencimiento"
+            name="expiryDate"
+            error={errors.expiryDate?.message}
+            hint="Dejar vacío si el producto no tiene vencimiento"
+          >
+            <input
+              id="expiryDate"
+              type="date"
+              {...register('expiryDate')}
+              className="input-field"
+            />
+          </FormField>
 
-            <FormField
-              label="Garantía"
-              name="warranty"
-              error={errors.warranty?.message}
-              hint="Período de garantía del producto"
-            >
-              <input
-                id="warranty"
-                {...register('warranty')}
-                className="input-field"
-                placeholder="Ej: 6 meses, 1 año, N/A"
-              />
-            </FormField>
-          </div>
+          <FormField
+            label="Garantía"
+            name="warranty"
+            error={errors.warranty?.message}
+            hint="Período de garantía del producto"
+          >
+            <input
+              id="warranty"
+              {...register('warranty')}
+              className="input-field"
+              placeholder="Ej: 6 meses, 1 año, N/A"
+            />
+          </FormField>
         </div>
+      </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 border-t border-border">
-          <div className="flex items-center gap-2 flex-wrap">
-            {isEdit && product && onPrintLabel && (
-              <button
-                type="button"
-                onClick={() => onPrintLabel(product)}
-                className="btn-secondary text-xs flex items-center gap-1.5 py-1.5"
-              >
-                <Printer size={14} /> Imprimir Etiqueta
-              </button>
-            )}
-            <p className="text-xs text-muted-foreground">
-              Los campos con <span className="text-danger">*</span> son obligatorios
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="btn-secondary" disabled={isSubmitting}>
-              Cancelar
-            </button>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 border-t border-border">
+        <div className="flex items-center gap-2 flex-wrap">
+          {isEdit && product && onPrintLabel && (
             <button
-              type="submit"
-              disabled={isSubmitting}
-              className="btn-primary flex items-center gap-2 min-w-28 justify-center"
+              type="button"
+              onClick={() => onPrintLabel(product)}
+              className="btn-secondary text-xs flex items-center gap-1.5 py-1.5"
             >
-              {isSubmitting ? (
-                <>
-                  <span className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-                  Guardando...
-                </>
-              ) : (
-                <>{isEdit ? 'Guardar Cambios' : 'Crear Producto'}</>
-              )}
+              <Printer size={14} /> Imprimir Etiqueta
             </button>
-          </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Los campos con <span className="text-danger">*</span> son obligatorios
+          </p>
         </div>
-      </form>
+        <div className="flex gap-2">
+          <button type="button" onClick={onClose} className="btn-secondary" disabled={isSubmitting}>
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="btn-primary flex items-center gap-2 min-w-28 justify-center"
+          >
+            {isSubmitting ? (
+              <>
+                <span className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                Guardando...
+              </>
+            ) : (
+              <>{isEdit ? 'Guardar Cambios' : 'Crear Producto'}</>
+            )}
+          </button>
+        </div>
+      </div>
+    </form>
 
-      {/* Mini Modal de Registro Rápido */}
-      {quickAddType && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-card w-full max-w-md rounded-2xl border border-border shadow-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-border">
-              <h4 className="text-sm font-bold text-foreground">
-                {quickAddType === 'category'
-                  ? 'Nueva Categoría Rápida'
-                  : quickAddType === 'brand'
+    {/* Mini Modal de Registro Rápido */}
+    {quickAddType && typeof document !== 'undefined' && createPortal(
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
+        <div className="bg-card w-full max-w-md rounded-2xl border border-border shadow-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between pb-2 border-b border-border">
+            <h4 className="text-sm font-bold text-foreground">
+              {quickAddType === 'category'
+                ? 'Nueva Categoría Rápida'
+                : quickAddType === 'brand'
                   ? 'Nueva Marca Rápida'
                   : quickAddType === 'supplier'
-                  ? 'Nuevo Proveedor Rápido'
-                  : 'Nueva Unidad de Medida'}
-              </h4>
+                    ? 'Nuevo Proveedor Rápido'
+                    : 'Nueva Unidad de Medida'}
+            </h4>
+            <button
+              type="button"
+              onClick={() => setQuickAddType(null)}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground"
+            >
+              ✕
+            </button>
+          </div>
+
+          <form onSubmit={handleQuickAddSubmit} className="space-y-3">
+            <div>
+              <label className="text-xs font-semibold text-foreground mb-1 block">
+                Nombre <span className="text-danger">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                placeholder={
+                  quickAddType === 'category'
+                    ? 'Ej. Enlatados'
+                    : quickAddType === 'brand'
+                      ? 'Ej. Induveca'
+                      : quickAddType === 'supplier'
+                        ? 'Ej. Distribuidora Central'
+                        : 'Ej. Cartón, Combo, Libra, Kilogramo...'
+                }
+                value={quickAddName}
+                onChange={(e) => setQuickAddName(e.target.value)}
+                className="input-field text-xs !h-9"
+                autoFocus
+              />
+            </div>
+
+            {quickAddType === 'unit' && (
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1 block">
+                  Tipo de Unidad <span className="text-danger">*</span>
+                </label>
+                <select
+                  value={quickAddUnitType}
+                  onChange={(e) => setQuickAddUnitType(e.target.value as TipoUnidadMedida)}
+                  className="input-field text-xs !h-9"
+                >
+                  <option value="unidad">Unidad simple (unidad, combo, docena)</option>
+                  <option value="empaque">Empaque múltiple (cartón, fardo, caja, paquete)</option>
+                  <option value="peso">Peso / Balanza (libra, kg)</option>
+                  <option value="volumen">Volumen / Líquido (litro, galón)</option>
+                </select>
+              </div>
+            )}
+
+            <div>
+              <label className="text-xs font-semibold text-foreground mb-1 block">
+                {quickAddType === 'supplier' ? 'Teléfono (Opcional)' : 'Descripción (Opcional)'}
+              </label>
+              <input
+                type="text"
+                placeholder={
+                  quickAddType === 'supplier'
+                    ? 'Ej. 809-555-0123'
+                    : quickAddType === 'unit'
+                      ? 'Ej. Empaque de 30 unidades, balanza, etc.'
+                      : 'Breve detalle...'
+                }
+                value={quickAddExtra}
+                onChange={(e) => setQuickAddExtra(e.target.value)}
+                className="input-field text-xs !h-9"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setQuickAddType(null)}
-                className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground"
+                className="btn-secondary !h-8 text-xs px-3"
+                disabled={quickAddLoading}
               >
-                ✕
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="btn-primary !h-8 text-xs px-4 font-bold"
+                disabled={quickAddLoading}
+              >
+                {quickAddLoading ? 'Guardando...' : 'Guardar y Seleccionar'}
               </button>
             </div>
-
-            <form onSubmit={handleQuickAddSubmit} className="space-y-3">
-              <div>
-                <label className="text-xs font-semibold text-foreground mb-1 block">
-                  Nombre <span className="text-danger">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder={
-                    quickAddType === 'category'
-                      ? 'Ej. Enlatados'
-                      : quickAddType === 'brand'
-                      ? 'Ej. Induveca'
-                      : quickAddType === 'supplier'
-                      ? 'Ej. Distribuidora Central'
-                      : 'Ej. Cartón, Combo, Libra, Kilogramo...'
-                  }
-                  value={quickAddName}
-                  onChange={(e) => setQuickAddName(e.target.value)}
-                  className="input-field text-xs !h-9"
-                  autoFocus
-                />
-              </div>
-
-              {quickAddType === 'unit' && (
-                <div>
-                  <label className="text-xs font-semibold text-foreground mb-1 block">
-                    Tipo de Unidad <span className="text-danger">*</span>
-                  </label>
-                  <select
-                    value={quickAddUnitType}
-                    onChange={(e) => setQuickAddUnitType(e.target.value as TipoUnidadMedida)}
-                    className="input-field text-xs !h-9"
-                  >
-                    <option value="unidad">Unidad simple (unidad, combo, docena)</option>
-                    <option value="empaque">Empaque múltiple (cartón, fardo, caja, paquete)</option>
-                    <option value="peso">Peso / Balanza (libra, kg)</option>
-                    <option value="volumen">Volumen / Líquido (litro, galón)</option>
-                  </select>
-                </div>
-              )}
-
-              <div>
-                <label className="text-xs font-semibold text-foreground mb-1 block">
-                  {quickAddType === 'supplier' ? 'Teléfono (Opcional)' : 'Descripción (Opcional)'}
-                </label>
-                <input
-                  type="text"
-                  placeholder={
-                    quickAddType === 'supplier'
-                      ? 'Ej. 809-555-0123'
-                      : quickAddType === 'unit'
-                      ? 'Ej. Empaque de 30 unidades, balanza, etc.'
-                      : 'Breve detalle...'
-                  }
-                  value={quickAddExtra}
-                  onChange={(e) => setQuickAddExtra(e.target.value)}
-                  className="input-field text-xs !h-9"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setQuickAddType(null)}
-                  className="btn-secondary !h-8 text-xs px-3"
-                  disabled={quickAddLoading}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="btn-primary !h-8 text-xs px-4 font-bold"
-                  disabled={quickAddLoading}
-                >
-                  {quickAddLoading ? 'Guardando...' : 'Guardar y Seleccionar'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>,
-        document.body
-      )}
-    </div>
-  );
-}
+          </form>
+        </div>
+      </div>,
+      document.body
+    )}
+  </div>
+);
+}
