@@ -14,6 +14,7 @@ import {
   informeCaja,
   informeGananciasProducto,
   informeCombos,
+  obtenerInformeStockGeneral,
 } from '@/services/informes.service';
 
 type ReportId =
@@ -103,21 +104,23 @@ export async function exportReportPdf(
       break;
     }
     case 'stock-detail': {
-      const items = await informeStockDetalle();
+      const d = await obtenerInformeStockGeneral();
       exportTableToPdf({
-        title: label,
-        subtitle,
-        filename: `informe-stock-${dateFrom}-${dateTo}`,
-        headers: ['SKU', 'Producto', 'Categoría', 'Stock', 'Mín.', 'Valor', 'Estado'],
-        rows: items.map((p) => [
-          p.sku,
-          p.name,
-          p.category,
-          String(p.stock),
-          String(p.min),
-          formatMoneyPdf(p.value),
-          stockEstado(p.stock, p.min),
+        title: 'Informe de Stock y Valoración',
+        subtitle: `Stock Cierre (Compra): ${formatMoneyPdf(d.stock_cierre_compra)} | Venta: ${formatMoneyPdf(d.stock_cierre_venta)} | Margen: ${d.profit_margin_pct.toFixed(2)}%`,
+        filename: `informe-stock-general-${dateFrom}-${dateTo}`,
+        headers: ['SKU', 'Producto', 'Categoría', 'Ubicación', 'Precio Venta', 'Stock Actual', 'Valor Compra', 'Valor Venta'],
+        rows: d.items.map((p) => [
+          p.sku || '-',
+          p.nombre,
+          p.categoria,
+          p.ubicacion,
+          formatMoneyPdf(p.precio_venta),
+          `${p.stock_actual.toFixed(2)} ${p.unidad}`,
+          formatMoneyPdf(p.valor_compra),
+          formatMoneyPdf(p.valor_venta),
         ]),
+        landscape: true,
       });
       break;
     }

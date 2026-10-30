@@ -8,7 +8,8 @@ interface AppLayoutProps {
 }
 
 export default function AppLayout({ children }: AppLayoutProps) {
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const { pathname } = location;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
@@ -49,7 +50,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
           collapsed={sidebarCollapsed}
           mobileOpen={mobileSidebarOpen}
           onMobileClose={() => setMobileSidebarOpen(false)}
-          currentPath={pathname}
+          currentPath={pathname + (location.search || '')}
         />
       </div>
 

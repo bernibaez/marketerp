@@ -4,7 +4,7 @@ import AppLogo from './ui/AppLogo';
 import {
   LayoutDashboard, ShoppingCart, Package, Users, UserCheck, ShoppingBag, ArrowLeftRight, Sliders,
   BarChart2, Settings, ChevronRight, ChevronDown, Store, FileText, DollarSign, HandCoins, Wallet, Monitor,
-  RotateCcw, Briefcase, Lock, ShieldCheck, Filter, Boxes, X
+  RotateCcw, Briefcase, Lock, ShieldCheck, Filter, Boxes, X, ClipboardList
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { canAccessNav } from '@/lib/auth';
@@ -28,6 +28,7 @@ const navItems: NavItem[] = [
   { id: 'nav-combos', label: 'Combos', icon: <Boxes size={20} />, href: '/combos', group: 'Inventario' },
   { id: 'nav-stock-transfer', label: 'Transferencias', icon: <ArrowLeftRight size={20} />, href: '/stock-transfers', group: 'Inventario' },
   { id: 'nav-stock-adjust', label: 'Ajustes Stock', icon: <Sliders size={20} />, href: '/stock-adjustments', group: 'Inventario' },
+  { id: 'nav-stock-report', label: 'Informe de Stock', icon: <ClipboardList size={20} />, href: '/reports?tab=stock-detail', group: 'Inventario' },
   { id: 'nav-cajas', label: 'Cajas Registradoras', icon: <Monitor size={20} />, href: '/cajas', group: 'Finanzas' },
   { id: 'nav-contacts', label: 'Contactos', icon: <Users size={20} />, href: '/contacts', group: 'CRM' },
   { id: 'nav-cash-closure', label: 'Cierre de Caja', icon: <Lock size={20} />, href: '/cash-closure', group: 'Finanzas' },
@@ -71,6 +72,8 @@ export default function Sidebar({ collapsed, mobileOpen, onMobileClose, currentP
 
   const isActive = (href: string) => {
     if (href === '/') return currentPath === '/';
+    if (href.includes('?')) return currentPath === href;
+    if (href === '/reports') return currentPath === '/reports' || (currentPath.startsWith('/reports?') && !currentPath.includes('tab=stock-detail'));
     return currentPath.startsWith(href);
   };
 

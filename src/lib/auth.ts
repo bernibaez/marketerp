@@ -203,8 +203,9 @@ export function canAccessRoute(role: UserRole, pathname: string): boolean {
   }
   const fromMatrix = routesFromPermissions(role);
   if (fromMatrix === '*') return true;
-  if (pathname === '/') return fromMatrix.includes('/');
-  return fromMatrix.some((route) => route !== '/' && pathname.startsWith(route));
+  const cleanPath = pathname.split('?')[0];
+  if (cleanPath === '/') return fromMatrix.includes('/');
+  return fromMatrix.some((route) => route !== '/' && cleanPath.startsWith(route));
 }
 
 export function canAccessNav(role: UserRole, href: string): boolean {

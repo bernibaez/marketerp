@@ -8,3 +8,4 @@ export * from './informes/informesVentas.service';
 export * from './informes/informesInventario.service';
 export * from './informes/informesComprasGastos.service';
 export * from './informes/informesCajaFiscal.service';
+export * from './informes/informesStockMovimientos.service';

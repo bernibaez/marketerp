@@ -59,7 +59,7 @@ const reportTypes: { id: ReportId; label: string; icon: React.ReactNode; color: 
   { id: 'sales', label: 'Ventas', icon: <ShoppingCart size={18} />, color: 'text-info' },
   { id: 'purchases', label: 'Compras', icon: <ShoppingBag size={18} />, color: 'text-warning' },
   { id: 'stock', label: 'Inventario', icon: <Package size={18} />, color: 'text-primary' },
-  { id: 'stock-detail', label: 'Informe Stock', icon: <ClipboardList size={18} />, color: 'text-primary' },
+  { id: 'stock-detail', label: 'Informe de Stock', icon: <ClipboardList size={18} />, color: 'text-primary' },
   { id: 'adjustments', label: 'Informe Ajustes', icon: <Sliders size={18} />, color: 'text-warning' },
   { id: 'expenses', label: 'Gastos', icon: <DollarSign size={18} />, color: 'text-danger' },
   { id: 'customers', label: 'Clientes', icon: <Users size={18} />, color: 'text-info' },
@@ -114,7 +114,16 @@ function defaultDateRange() {
 
 export default function ReportsPage() {
   const defaults = defaultDateRange();
-  const [activeReport, setActiveReport] = useState<ReportId>('profit-loss');
+  const [activeReport, setActiveReport] = useState<ReportId>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get('tab');
+      if (tab && reportTypes.some((r) => r.id === tab)) {
+        return tab as ReportId;
+      }
+    }
+    return 'profit-loss';
+  });
   const [dateFrom, setDateFrom] = useState(defaults.desde);
   const [dateTo, setDateTo] = useState(defaults.hasta);
   const [branch, setBranch] = useState('all');
@@ -166,6 +175,11 @@ export default function ReportsPage() {
                 onClick={() => {
                   setActiveReport(r.id);
                   setGenerated(true);
+                  if (typeof window !== 'undefined') {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('tab', r.id);
+                    window.history.replaceState(null, '', url.toString());
+                  }
                 }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all text-left ${
                   activeReport === r.id
