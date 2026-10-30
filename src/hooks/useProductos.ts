@@ -98,6 +98,9 @@ export function useProductos(params: ProductosFiltro = {}) {
         maxWeight: product.maxWeight,
         generateScaleBarcode: product.generateScaleBarcode,
         isWeightProduct: product.isWeightProduct,
+        producto_base_id: product.producto_base_id,
+        factor_conversion: product.factor_conversion,
+        unidad_base: product.unidad_base,
         id,
       });
       await actualizarProducto(id, patch);

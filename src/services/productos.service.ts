@@ -301,6 +301,18 @@ export function uiAProductoInsert(p: Omit<Product, 'id' | 'stockStatus'> & { id?
     garantia: p.warranty,
     imagen_url: p.image || null,
     estado: estadoMap[p.status],
+    // Vínculo de presentación (fardo, cartón, etc.) con su producto base.
+    // Solo se envía cuando viene definido para no borrar vínculos existentes
+    // en flujos que no manejan estos campos (p. ej. importación masiva).
+    ...(p.producto_base_id !== undefined
+      ? {
+          producto_base_id: esUuid(p.producto_base_id) ? p.producto_base_id : null,
+          factor_conversion: esUuid(p.producto_base_id)
+            ? Math.max(1, Number(p.factor_conversion) || 1)
+            : 1,
+        }
+      : {}),
+    ...(p.unidad_base ? { unidad_base: p.unidad_base } : {}),
   };
 }
 
