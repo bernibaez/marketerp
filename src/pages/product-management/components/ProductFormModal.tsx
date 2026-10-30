@@ -322,7 +322,9 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
       wholesalePrice: Number(data.wholesalePrice),
       tax: Number(data.tax),
       minStock: minStk,
-      currentStock: stock,
+      currentStock: isPresentation && baseProductId && selectedBaseProduct
+        ? Math.floor(selectedBaseProduct.currentStock / conversionFactor)
+        : stock,
       stockStatus,
       saleType: weightState.saleType,
       weightUnit: weightState.weightUnit,
@@ -366,6 +368,27 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
 
   const costPrice = watch('costPrice');
   const salePrice = watch('salePrice');
+  const selectedUnit = watch('unit') || product?.unit || 'Unidad';
+  const isPresentationUnit = ['Fardo', 'Cartón', 'Caja', 'Paquete', 'Bolsa'].includes(selectedUnit);
+
+  const selectedBaseProduct = React.useMemo(() => {
+    if (!baseProductId) return null;
+    return allProducts.find((p) => p.id === baseProductId) || null;
+  }, [baseProductId, allProducts]);
+
+  const handleUnitSelection = (val: string) => {
+    setValue('unit', val, { shouldValidate: true, shouldDirty: true });
+    const isPreset = ['Fardo', 'Cartón', 'Caja', 'Paquete', 'Bolsa'].includes(val);
+    if (isPreset) {
+      setIsPresentation(true);
+      if (val === 'Fardo' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(20);
+      else if (val === 'Cartón' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(2);
+      else if (val === 'Caja' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(12);
+      else if (val === 'Paquete' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(6);
+      else if (val === 'Bolsa' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(10);
+    }
+  };
+
   const margin = costPrice && salePrice && Number(costPrice) > 0
     ? (((Number(salePrice) - Number(costPrice)) / Number(salePrice)) * 100).toFixed(1)
     : '0.0';
@@ -506,7 +529,15 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
             </div>
 
             <FormField label="Unidad de Medida" name="unit" error={errors.unit?.message} required>
-              <select id="unit" {...register('unit', { required: true })} className="input-field">
+              <select
+                id="unit"
+                {...register('unit', { required: true })}
+                className="input-field"
+                onChange={(e) => {
+                  register('unit').onChange(e);
+                  handleUnitSelection(e.target.value);
+                }}
+              >
                 {units.map((u) => (
                   <option key={`unit-opt-${u}`} value={u}>{u}</option>
                 ))}
@@ -549,6 +580,90 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
                 <option value="discontinued">Descontinuado</option>
               </select>
             </FormField>
+
+            {/* Configuración contextual de Presentación al seleccionar Fardo, Cartón, etc. */}
+            {(isPresentationUnit || isPresentation) && (
+              <div className="sm:col-span-2 bg-primary/5 dark:bg-primary/10 border border-primary/25 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <Layers size={14} className="text-primary" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-foreground">
+                        Presentación comercial: {selectedUnit}
+                      </span>
+                      <p className="text-[11px] text-muted-foreground">
+                        Vincula este {selectedUnit.toLowerCase()} al producto base para compartir inventario automáticamente.
+                      </p>
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs font-medium cursor-pointer text-foreground select-none bg-background px-2.5 py-1 rounded-md border border-border">
+                    <input
+                      type="checkbox"
+                      checked={isPresentation}
+                      onChange={(e) => setIsPresentation(e.target.checked)}
+                      className="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5"
+                    />
+                    <span>Vincular a producto base</span>
+                  </label>
+                </div>
+
+                {isPresentation && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-primary/15">
+                    <div>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Producto Base del que depende *
+                      </label>
+                      <select
+                        className="input-field text-xs w-full"
+                        value={baseProductId}
+                        onChange={(e) => setBaseProductId(e.target.value)}
+                      >
+                        <option value="">Selecciona el producto base (ej. Botella de Agua, Medio Cartón)...</option>
+                        {allProducts
+                          .filter((p) => p.id !== product?.id)
+                          .map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} {p.sku ? `(${p.sku})` : ''} — Stock: {p.currentStock} {p.unit}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Unidades base por cada {selectedUnit} * (Factor de conversión)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        step="any"
+                        className="input-field text-xs w-full font-mono"
+                        placeholder={`Ej: ${selectedUnit === 'Fardo' ? '20' : selectedUnit === 'Cartón' ? '2' : '12'}`}
+                        value={conversionFactor}
+                        onChange={(e) => setConversionFactor(Math.max(1, Number(e.target.value)))}
+                      />
+                    </div>
+
+                    {selectedBaseProduct ? (
+                      <div className="sm:col-span-2 text-xs bg-background p-2.5 rounded-lg border border-primary/20 text-foreground flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <span className="text-muted-foreground">
+                          💡 Al vender 1 <strong>{selectedUnit}</strong> se descontarán <strong>{conversionFactor} {selectedBaseProduct.unit}</strong> de <strong>{selectedBaseProduct.name}</strong>.
+                        </span>
+                        <span className="font-bold text-primary whitespace-nowrap bg-primary/10 px-2 py-0.5 rounded">
+                          Stock disponible: ~{Math.floor(selectedBaseProduct.currentStock / conversionFactor)} {selectedUnit}s
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="sm:col-span-2 text-xs text-muted-foreground italic">
+                        Selecciona el producto base para calcular existencias automáticamente.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -560,81 +675,6 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
           onChange={(updates) => setWeightState((prev) => ({ ...prev, ...updates }))}
           baseSalePrice={Number(salePrice || 0)}
         />
-
-        <div className="border-t border-border" />
-
-        {/* Section: Presentación Comercial y Conversión de Unidades */}
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-info/10 flex items-center justify-center">
-              <Layers size={14} className="text-info" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">Unidad de Medida y Conversión (Presentación)</h3>
-              <p className="text-xs text-muted-foreground">
-                Permite comprar y vender en presentaciones comerciales (ej: Fardo, Cartón) vinculadas al inventario base.
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-secondary/20 p-4 rounded-xl border border-border/60 space-y-3">
-            <label className="flex items-center gap-2.5 cursor-pointer text-sm font-medium text-foreground select-none">
-              <input
-                type="checkbox"
-                checked={isPresentation}
-                onChange={(e) => setIsPresentation(e.target.checked)}
-                className="rounded border-border text-primary focus:ring-primary h-4 w-4"
-              />
-              <span>Este producto es una presentación comercial vinculada a una unidad base</span>
-            </label>
-
-            {isPresentation && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border/50">
-                <div>
-                  <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                    Producto / Unidad Base de Inventario *
-                  </label>
-                  <select
-                    className="input-field text-xs w-full"
-                    value={baseProductId}
-                    onChange={(e) => setBaseProductId(e.target.value)}
-                  >
-                    <option value="">Seleccionar producto base (ej: Botella, Medio Cartón)...</option>
-                    {allProducts
-                      .filter((p) => p.id !== product?.id)
-                      .map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} {p.sku ? `(SKU: ${p.sku})` : ''} — Stock: {p.currentStock} {p.unit}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                    Factor de Conversión * (Unidades base contenidas)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    step="any"
-                    className="input-field text-xs w-full font-mono"
-                    placeholder="Ej: 20 para Fardo de agua, 2 para Cartón"
-                    value={conversionFactor}
-                    onChange={(e) => setConversionFactor(Math.max(1, Number(e.target.value)))}
-                  />
-                </div>
-
-                <div className="sm:col-span-2 text-xs bg-card/60 p-2.5 rounded-lg border border-border text-muted-foreground">
-                  💡 <span className="font-semibold text-foreground">Regla de Inventario: </span>
-                  Al vender 1 unidad de esta presentación comercial, el sistema descontará automáticamente{' '}
-                  <span className="font-bold text-primary font-mono">{conversionFactor}</span> unidades del producto base seleccionado. En compras, sumará{' '}
-                  <span className="font-bold text-primary font-mono">{conversionFactor}</span> unidades al inventario base.
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
 
         <div className="border-t border-border" />
 
@@ -729,19 +769,26 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
               label={isWeighted ? `Stock Actual (${weightUnitShort})` : "Stock Actual"}
               name="currentStock"
               error={errors.currentStock?.message}
-              required={!isEdit}
-              hint={isEdit ? 'No editable aquí — usa Ajustes de Stock para cambiar existencias' : (isWeighted ? `Cantidad de ${weightUnitShort} actualmente en inventario` : 'Cantidad actual en inventario')}
+              required={!isEdit && !(isPresentation && baseProductId)}
+              hint={
+                isPresentation && selectedBaseProduct
+                  ? `Calculado dinámicamente desde ${selectedBaseProduct.name} (~${Math.floor(selectedBaseProduct.currentStock / conversionFactor)} ${selectedUnit}s disponibles)`
+                  : isEdit
+                  ? 'No editable aquí — usa Ajustes de Stock para cambiar existencias'
+                  : (isWeighted ? `Cantidad de ${weightUnitShort} actualmente en inventario` : 'Cantidad actual en inventario')
+              }
             >
               <input
                 id="currentStock"
                 type="number"
                 min={0}
-                disabled={isEdit}
+                disabled={isEdit || (isPresentation && !!baseProductId)}
+                value={isPresentation && selectedBaseProduct ? Math.floor(selectedBaseProduct.currentStock / conversionFactor) : undefined}
                 {...register('currentStock', {
-                  required: isEdit ? false : 'El stock actual es obligatorio',
+                  required: isEdit || (isPresentation && baseProductId) ? false : 'El stock actual es obligatorio',
                   min: { value: 0, message: 'No puede ser negativo' },
                 })}
-                className={`input-field tabular-nums ${isEdit ? 'opacity-60 cursor-not-allowed' : ''}`}
+                className={`input-field tabular-nums ${(isEdit || (isPresentation && baseProductId)) ? 'opacity-60 cursor-not-allowed' : ''}`}
                 placeholder="0"
               />
             </FormField>
