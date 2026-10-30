@@ -525,9 +525,16 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     monto_descuento: exactDiscount,
     monto_total: exactTotal,
     costo_total: exactCostoTotal,
+    monto_pagado: round2(payload.monto_pagado ?? exactTotal),
+    monto_efectivo: round2(payload.monto_efectivo ?? 0),
+    monto_tarjeta: round2(payload.monto_tarjeta ?? 0),
+    monto_transferencia: round2(payload.monto_transferencia ?? 0),
+    monto_credito: round2(payload.monto_credito ?? 0),
+    devuelta_entregada: round2(payload.devuelta_entregada ?? 0),
     sucursal_id: isUUID(payload.sucursal_id) ? payload.sucursal_id : null,
     cajero_id: isUUID(effectiveCajeroId) ? effectiveCajeroId : null,
     cliente_id: isUUID(payload.cliente_id) ? payload.cliente_id : null,
+    caja_id: payload.caja_id ? String(payload.caja_id) : null,
     items: payload.items.map((it) => ({
       ...it,
       precio_unitario: round2(it.precio_unitario),
@@ -544,7 +551,15 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
 
   const sb = getSupabase();
   const { data, error } = await sb.rpc('procesar_venta_pos', { p_payload: sanitizedPayload });
-  if (error) throw error;
+  if (error) {
+    console.error('Error al ejecutar procesar_venta_pos en Supabase:', error);
+    if (error.code === '23502' || error.message?.includes('monto_pagado')) {
+      throw new Error(
+        'Error de base de datos: La función procesar_venta_pos requiere aplicar la migración 023 en Supabase para registrar el monto_pagado correctamente.'
+      );
+    }
+    throw new Error(error.message || 'Error al registrar la venta en la base de datos');
+  }
   const resultado = data as ResultadoVenta;
 
   if (resultado?.venta_id) {

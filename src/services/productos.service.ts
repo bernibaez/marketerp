@@ -1203,3 +1203,124 @@ export async function buscarProductoPorCodigoEscaneado(
 
   return null;
 }
+
+export async function obtenerProductoPorId(id: string, signal?: AbortSignal): Promise<Producto | null> {
+  const cleanId = (id || '').trim();
+  if (!cleanId) return null;
+
+  for (const entry of masterCatalogCache.values()) {
+    const found = entry.data.find((p) => p.id === cleanId);
+    if (found) return found;
+  }
+  for (const entry of productosCache.values()) {
+    const found = entry.result.datos.find((p) => p.id === cleanId);
+    if (found) return found;
+  }
+
+  const sb = tryGetSupabase();
+  if (!sb) {
+    return demoAsProductos().find((p) => p.id === cleanId) ?? null;
+  }
+
+  try {
+    let query = sb.from('productos').select('*').eq('id', cleanId);
+    if (signal) query = query.abortSignal(signal);
+    const { data, error } = await query.maybeSingle();
+    if (!error && data) {
+      return data as Producto;
+    }
+  } catch (err) {
+    if (isAbortError(err)) throw err;
+    console.warn('Error en obtenerProductoPorId:', err);
+  }
+
+  return null;
+}
+
+export async function buscarProductosParaVinculacion(
+  busqueda: string,
+  excludeId?: string,
+  signal?: AbortSignal
+): Promise<Producto[]> {
+  const qClean = (busqueda || '').trim();
+  const qTokens = qClean
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  // 1. Revisar si tenemos productos en catálogo maestro
+  let masterList: Producto[] = [];
+  for (const entry of masterCatalogCache.values()) {
+    if (entry.data && entry.data.length > masterList.length) {
+      masterList = entry.data;
+    }
+  }
+
+  if (masterList.length > 0) {
+    let filtered = masterList.filter((p) => !excludeId || p.id !== excludeId);
+    if (qTokens.length > 0) {
+      filtered = filtered.filter((p) => {
+        const normName = (p.nombre || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        const normSku = (p.sku || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        const normBar = (p.codigo_barras || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        const normCat = (p.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        return qTokens.every(
+          (t) => normName.includes(t) || normSku.includes(t) || normBar.includes(t) || normCat.includes(t)
+        );
+      });
+    }
+    if (filtered.length > 0 || masterList.length >= 1000) {
+      return filtered.slice(0, 60);
+    }
+  }
+
+  // 2. Consulta directa a Supabase
+  const sb = tryGetSupabase();
+  if (!sb) {
+    const demo = demoAsProductos().filter((p) => !excludeId || p.id !== excludeId);
+    if (qTokens.length === 0) return demo.slice(0, 50);
+    return demo.filter((p) => {
+      const normName = (p.nombre || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      const normSku = (p.sku || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      return qTokens.every((t) => normName.includes(t) || normSku.includes(t));
+    }).slice(0, 50);
+  }
+
+  try {
+    let query = sb
+      .from('productos')
+      .select('*')
+      .order('nombre');
+
+    if (excludeId) {
+      query = query.neq('id', excludeId);
+    }
+
+    const sanitized = sanitizarBusquedaPostgrest(busqueda || '');
+    const tokens = sanitized.split(' ').filter(Boolean);
+
+    if (tokens.length === 1) {
+      const t = tokens[0];
+      query = query.or(`nombre.ilike.%${t}%,sku.ilike.%${t}%,codigo_barras.ilike.%${t}%,categoria.ilike.%${t}%`);
+    } else if (tokens.length > 1) {
+      for (const t of tokens) {
+        query = query.or(`nombre.ilike.%${t}%,sku.ilike.%${t}%,codigo_barras.ilike.%${t}%`);
+      }
+    }
+
+    if (signal) query = query.abortSignal(signal);
+
+    const { data, error } = await query.limit(60);
+    if (!error && data) {
+      return (data as Producto[]) ?? [];
+    }
+  } catch (err) {
+    if (isAbortError(err)) throw err;
+    console.warn('Error en buscarProductosParaVinculacion:', err);
+  }
+
+  return [];
+}
+

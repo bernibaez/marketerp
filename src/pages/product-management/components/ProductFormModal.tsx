@@ -1,14 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useForm } from 'react-hook-form';
 import type { Product } from './ProductManagementScreen';
-import { Package, Printer, Sparkles, Layers, Search, X } from 'lucide-react';
+import { Package, Printer, Sparkles, Layers, Search, X, Loader2 } from 'lucide-react';
 import { generateUniqueBarcode } from '@/lib/barcodeUtils';
 import { normalizePlu } from '@/lib/scaleBarcode';
 import { logAuditEvent } from '@/lib/auditStore';
 import { toast } from '@/lib/toast';
 import WeightProductForm, { type WeightFormState } from '@/components/weight/WeightProductForm';
 import type { SaleType, WeightUnit } from '@/types/database';
+import { buscarProductosParaVinculacion, obtenerProductoPorId, productoAUi } from '@/services/productos.service';
 
 import { useCategorias } from '@/hooks/useCategorias';
 import { useMarcas } from '@/hooks/useMarcas';
@@ -106,6 +107,10 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
 
   const [isPresentation, setIsPresentation] = useState(false);
   const [baseProductId, setBaseProductId] = useState('');
+  const [baseProductResolved, setBaseProductResolved] = useState<Product | null>(null);
+  const [remoteBaseProducts, setRemoteBaseProducts] = useState<Product[]>([]);
+  const [isSearchingBase, setIsSearchingBase] = useState(false);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
   const [conversionFactor, setConversionFactor] = useState(1);
   const [baseProductSearch, setBaseProductSearch] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -376,25 +381,145 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
   const salePrice = watch('salePrice');
   const selectedUnit = watch('unit') || product?.unit || 'Unidad';
 
+  // Resolver producto base seleccionado incluso si no vino en el subconjunto de allProducts
+  useEffect(() => {
+    if (!baseProductId) {
+      setBaseProductResolved(null);
+      return;
+    }
+    const foundInLocal =
+      allProducts.find((p) => p.id === baseProductId) ||
+      remoteBaseProducts.find((p) => p.id === baseProductId);
+    if (foundInLocal) {
+      setBaseProductResolved(foundInLocal);
+      return;
+    }
+
+    let isMounted = true;
+    obtenerProductoPorId(baseProductId).then((p) => {
+      if (isMounted && p) {
+        setBaseProductResolved(productoAUi(p));
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [baseProductId, allProducts, remoteBaseProducts]);
+
+  // Cargar catálogo de productos base cuando el modal se abre o se activa la vinculación
+  useEffect(() => {
+    if (!open || !isPresentation) return;
+    let isMounted = true;
+    buscarProductosParaVinculacion('', product?.id).then((list) => {
+      if (isMounted && list.length > 0) {
+        setRemoteBaseProducts(list.map(productoAUi));
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [open, isPresentation, product?.id]);
+
+  // Búsqueda en tiempo real contra Supabase al escribir con debounce de 180ms
+  useEffect(() => {
+    if (!isPresentation || !isSearchOpen) return;
+    const term = baseProductSearch.trim();
+    if (!term) return;
+
+    setIsSearchingBase(true);
+    const timer = setTimeout(() => {
+      let isMounted = true;
+      buscarProductosParaVinculacion(term, product?.id)
+        .then((list) => {
+          if (isMounted) {
+            const mapped = list.map(productoAUi);
+            setRemoteBaseProducts((prev) => {
+              const map = new Map<string, Product>();
+              for (const p of prev) map.set(p.id, p);
+              for (const p of mapped) map.set(p.id, p);
+              return Array.from(map.values());
+            });
+          }
+        })
+        .finally(() => {
+          if (isMounted) setIsSearchingBase(false);
+        });
+    }, 180);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [baseProductSearch, isPresentation, isSearchOpen, product?.id]);
+
+  // Cerrar selector al hacer click fuera
+  useEffect(() => {
+    if (!isSearchOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setIsSearchOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isSearchOpen]);
+
   const selectedBaseProduct = React.useMemo(() => {
     if (!baseProductId) return null;
-    return allProducts.find((p) => p.id === baseProductId) || null;
-  }, [baseProductId, allProducts]);
+    return (
+      allProducts.find((p) => p.id === baseProductId) ||
+      remoteBaseProducts.find((p) => p.id === baseProductId) ||
+      baseProductResolved
+    );
+  }, [baseProductId, allProducts, remoteBaseProducts, baseProductResolved]);
+
+  // Catálogo unificado y deduplicado entre allProducts y productos remotos
+  const combinedBaseProducts = React.useMemo(() => {
+    const map = new Map<string, Product>();
+    for (const p of allProducts) {
+      if (!product || p.id !== product.id) map.set(p.id, p);
+    }
+    for (const p of remoteBaseProducts) {
+      if (!product || p.id !== product.id) map.set(p.id, p);
+    }
+    return Array.from(map.values());
+  }, [allProducts, remoteBaseProducts, product]);
 
   const filteredBaseProducts = React.useMemo(() => {
-    const q = baseProductSearch.trim().toLowerCase();
-    const available = allProducts.filter((p) => p.id !== product?.id);
-    if (!q) return available.slice(0, 25);
-    return available
-      .filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          (p.sku && p.sku.toLowerCase().includes(q)) ||
-          (p.barcode && p.barcode.toLowerCase().includes(q)) ||
-          (p.category && p.category.toLowerCase().includes(q))
-      )
-      .slice(0, 30);
-  }, [allProducts, product?.id, baseProductSearch]);
+    const rawQ = baseProductSearch.trim();
+    if (!rawQ) {
+      return combinedBaseProducts.slice(0, 50);
+    }
+
+    const normalizeStr = (s: string) =>
+      (s || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+
+    const tokens = normalizeStr(rawQ).split(/\s+/).filter(Boolean);
+
+    return combinedBaseProducts
+      .filter((p) => {
+        const normName = normalizeStr(p.name);
+        const normSku = normalizeStr(p.sku);
+        const normBarcode = normalizeStr(p.barcode);
+        const normCategory = normalizeStr(p.category);
+        const normBrand = normalizeStr(p.brand);
+
+        return tokens.every(
+          (t) =>
+            normName.includes(t) ||
+            normSku.includes(t) ||
+            normBarcode.includes(t) ||
+            normCategory.includes(t) ||
+            normBrand.includes(t)
+        );
+      })
+      .slice(0, 60);
+  }, [combinedBaseProducts, baseProductSearch]);
 
   const handleSelectBaseProduct = (baseProd: Product) => {
     setBaseProductId(baseProd.id);
@@ -706,7 +831,7 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
                         </button>
                       </div>
                     ) : (
-                      <div className="relative">
+                      <div className="relative" ref={searchContainerRef}>
                         <div className="relative">
                           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                           <input
@@ -718,25 +843,53 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
                               if (!isSearchOpen) setIsSearchOpen(true);
                             }}
                             onFocus={() => setIsSearchOpen(true)}
-                            placeholder="Escribe el producto (ej: Botella de agua, Arroz, Huevo)..."
-                            className="input-field pl-8 pr-7 text-xs w-full font-medium"
+                            placeholder="Escribe el producto (ej: Botella de agua, Arroz, Aceite, Huevo)..."
+                            className="input-field pl-8 pr-14 text-xs w-full font-medium"
                           />
-                          {baseProductSearch && (
-                            <button
-                              type="button"
-                              onClick={() => setBaseProductSearch('')}
-                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5"
-                            >
-                              <X size={13} />
-                            </button>
-                          )}
+                          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                            {isSearchingBase && (
+                              <Loader2 size={13} className="animate-spin text-primary" />
+                            )}
+                            {baseProductSearch && (
+                              <button
+                                type="button"
+                                onClick={() => setBaseProductSearch('')}
+                                className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                                title="Limpiar búsqueda"
+                              >
+                                <X size={13} />
+                              </button>
+                            )}
+                          </div>
                         </div>
 
                         {isSearchOpen && (
-                          <div className="absolute z-30 left-0 right-0 mt-1 max-h-52 overflow-y-auto bg-card border border-border rounded-xl shadow-xl divide-y divide-border/50 animate-fadeIn">
+                          <div className="absolute z-30 left-0 right-0 mt-1 max-h-64 overflow-y-auto bg-card border border-border rounded-xl shadow-xl divide-y divide-border/50 animate-fadeIn scrollbar-thin">
+                            <div className="px-3 py-1.5 bg-secondary/40 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between sticky top-0 backdrop-blur-xs z-10 border-b border-border/50">
+                              <span>
+                                {baseProductSearch
+                                  ? `${filteredBaseProducts.length} resultado(s) para "${baseProductSearch}"`
+                                  : `Catálogo (${filteredBaseProducts.length} productos disponibles)`}
+                              </span>
+                              {isSearchingBase && (
+                                <span className="flex items-center gap-1 text-primary lowercase font-normal">
+                                  <Loader2 size={10} className="animate-spin" /> buscando...
+                                </span>
+                              )}
+                            </div>
+
                             {filteredBaseProducts.length === 0 ? (
-                              <div className="p-3 text-xs text-muted-foreground text-center">
-                                No se encontraron productos con &quot;{baseProductSearch}&quot;
+                              <div className="p-4 text-xs text-muted-foreground text-center space-y-1">
+                                <p className="font-medium text-foreground">
+                                  {isSearchingBase
+                                    ? 'Buscando en el catálogo completo...'
+                                    : `No se encontraron productos con "${baseProductSearch}"`}
+                                </p>
+                                {!isSearchingBase && (
+                                  <p className="text-[11px]">
+                                    Prueba escribiendo otra palabra clave, marca o código de barras.
+                                  </p>
+                                )}
                               </div>
                             ) : (
                               filteredBaseProducts.map((p) => (
@@ -744,32 +897,35 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
                                   key={p.id}
                                   type="button"
                                   onClick={() => handleSelectBaseProduct(p)}
-                                  className="w-full text-left p-2.5 hover:bg-secondary/40 transition-colors flex items-center justify-between text-xs group"
+                                  className="w-full text-left p-2.5 hover:bg-secondary/40 transition-colors flex items-center justify-between text-xs group cursor-pointer"
                                 >
                                   <div className="min-w-0 pr-2">
                                     <div className="font-semibold text-foreground group-hover:text-primary transition-colors truncate">
                                       {p.name}
                                     </div>
-                                    <div className="text-[11px] text-muted-foreground">
-                                      {p.sku ? `SKU: ${p.sku} • ` : ''}
-                                      Stock: <strong className="text-foreground">{p.currentStock} {p.unit}</strong>
-                                      {p.costPrice > 0 ? ` • Costo: RD$ ${p.costPrice}` : ''}
+                                    <div className="text-[11px] text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                                      {p.sku && <span>SKU: {p.sku}</span>}
+                                      {p.category && <span className="text-muted-foreground/80">• {p.category}</span>}
+                                      <span>
+                                        • Stock: <strong className="text-foreground">{p.currentStock} {p.unit}</strong>
+                                      </span>
+                                      {p.costPrice > 0 && <span>• Costo: RD$ {p.costPrice}</span>}
                                     </div>
                                   </div>
-                                  <span className="shrink-0 text-[11px] font-semibold text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <span className="shrink-0 text-[11px] font-semibold text-primary opacity-0 group-hover:opacity-100 transition-opacity bg-primary/10 px-2 py-0.5 rounded-md">
                                     Vincular →
                                   </span>
                                 </button>
                               ))
                             )}
                             {selectedBaseProduct && (
-                              <div className="p-1.5 bg-secondary/20 text-center">
+                              <div className="p-1.5 bg-secondary/20 text-center sticky bottom-0 border-t border-border/50 backdrop-blur-xs">
                                 <button
                                   type="button"
                                   onClick={() => setIsSearchOpen(false)}
-                                  className="text-[11px] text-muted-foreground hover:text-foreground"
+                                  className="text-[11px] text-muted-foreground hover:text-foreground font-medium cursor-pointer"
                                 >
-                                  Mantener actual
+                                  Mantener actual ({selectedBaseProduct.name})
                                 </button>
                               </div>
                             )}
