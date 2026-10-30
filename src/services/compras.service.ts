@@ -1,6 +1,7 @@
 import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupabase';
 import { actualizarProducto } from './productos.service';
 import { crearCxpDesdeCompra } from './cxp.service';
+import { movimientoInventarioPresentacion } from './presentaciones.service';
 
 export type CompraLista = {
   id: string;
@@ -168,10 +169,16 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
       .eq('id', linea.producto_id)
       .maybeSingle();
 
-    const factor = Number((prod as any)?.factor_conversion || 1);
-    const baseId = (prod as any)?.producto_base_id;
-    const targetProdId = baseId || linea.producto_id;
-    const addQty = factor > 1 && baseId ? linea.cantidad * factor : linea.cantidad;
+    const movimiento = movimientoInventarioPresentacion(
+      {
+        id: linea.producto_id,
+        producto_base_id: (prod as { producto_base_id?: string | null } | null)?.producto_base_id,
+        factor_conversion: (prod as { factor_conversion?: number } | null)?.factor_conversion,
+      },
+      linea.cantidad
+    );
+    const targetProdId = movimiento.productoId;
+    const addQty = movimiento.cantidad;
 
     const { data: targetProd } = await sb
       .from('productos')

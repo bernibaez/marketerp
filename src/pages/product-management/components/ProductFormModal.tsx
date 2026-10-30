@@ -14,6 +14,8 @@ import { buscarProductosParaVinculacion, obtenerProductoPorId, productoAUi } fro
 import { useCategorias } from '@/hooks/useCategorias';
 import { useMarcas } from '@/hooks/useMarcas';
 import { useProveedores } from '@/hooks/useProveedores';
+import { useUnidadesMedida } from '@/hooks/useUnidadesMedida';
+import type { TipoUnidadMedida } from '@/services/unidadesMedida.service';
 
 interface ProductFormModalProps {
   open: boolean;
@@ -29,6 +31,24 @@ type FormValues = Omit<Product, 'id' | 'stockStatus'>;
 
 const units = ['Unidad', 'Botella', 'Fardo', 'Cartón', 'Medio cartón', 'Libra', 'Kilogramo', 'Litro', 'Paquete', 'Caja', 'Bolsa'];
 const taxOptions = [0, 18];
+
+/** Unidades que representan un empaque que contiene varias unidades de otro producto. */
+const PACK_UNITS = ['Fardo', 'Cartón', 'Medio cartón', 'Caja', 'Paquete', 'Bolsa', 'Combo'];
+
+/** Normaliza una unidad guardada (ej: "Fardo (20 unidades)") a su nombre base ("Fardo"). */
+function baseUnitName(unit: string | null | undefined): string {
+  return (unit || '').replace(/\s*\(.*\)\s*$/, '').trim();
+}
+
+function isPackUnit(unit: string | null | undefined): boolean {
+  const u = baseUnitName(unit)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  return PACK_UNITS.some(
+    (p) => p.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() === u
+  );
+}
 
 
 function FormField({
@@ -65,10 +85,12 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
   const { categorias, crear: crearCatDirecto } = useCategorias();
   const { marcas, crear: crearMarcaDirecto } = useMarcas();
   const { proveedores, crear: crearProvDirecto } = useProveedores();
+  const { unidades, crear: crearUnidadDirecto } = useUnidadesMedida();
 
-  const [quickAddType, setQuickAddType] = useState<'category' | 'brand' | 'supplier' | null>(null);
+  const [quickAddType, setQuickAddType] = useState<'category' | 'brand' | 'supplier' | 'unit' | null>(null);
   const [quickAddName, setQuickAddName] = useState('');
   const [quickAddExtra, setQuickAddExtra] = useState('');
+  const [quickAddUnitType, setQuickAddUnitType] = useState<TipoUnidadMedida>('unidad');
   const [quickAddLoading, setQuickAddLoading] = useState(false);
 
   const categoryOptions = React.useMemo(() => {
@@ -95,6 +117,21 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
     return Array.from(names);
   }, [proveedores, product?.supplier]);
 
+  const unitOptions = React.useMemo(() => {
+    const names = new Set(unidades.map((u) => u.nombre));
+    if (product?.unit && !names.has(product.unit)) {
+      return [product.unit, ...Array.from(names)];
+    }
+    return names.size > 0 ? Array.from(names) : units;
+  }, [unidades, product?.unit]);
+
+  const isPackUnitItem = (val: string | null | undefined): boolean => {
+    if (isPackUnit(val)) return true;
+    const base = baseUnitName(val).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const found = unidades.find((u) => u.nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() === base);
+    return found?.tipo === 'empaque';
+  };
+
   const [weightState, setWeightState] = useState<WeightFormState>({
     saleType: defaultIsScaleProduct ? 'weight' : 'unit',
     weightUnit: 'lb',
@@ -111,7 +148,9 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
   const [remoteBaseProducts, setRemoteBaseProducts] = useState<Product[]>([]);
   const [isSearchingBase, setIsSearchingBase] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
-  const [conversionFactor, setConversionFactor] = useState(1);
+  const [conversionFactorText, setConversionFactorText] = useState('');
+  const conversionFactor = Math.max(1, Math.floor(Number(conversionFactorText) || 0) || 1);
+  const setConversionFactor = (n: number) => setConversionFactorText(n > 1 ? String(n) : '');
   const [baseProductSearch, setBaseProductSearch] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
@@ -154,7 +193,7 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
         name: product.name,
         category: product.category,
         brand: product.brand,
-        unit: product.unit,
+        unit: units.includes(baseUnitName(product.unit)) ? baseUnitName(product.unit) : product.unit,
         supplier: product.supplier,
         costPrice: product.costPrice,
         salePrice: product.salePrice,
@@ -176,9 +215,13 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
         allowDecimal: product.allowDecimal ?? true,
         generateScaleBarcode: product.generateScaleBarcode ?? false,
       });
-      setIsPresentation(Boolean(product.producto_base_id));
+      setIsPresentation(Boolean(product.producto_base_id) || isPackUnitItem(product.unit));
       setBaseProductId(product.producto_base_id || '');
-      setConversionFactor(product.factor_conversion || 1);
+      setConversionFactorText(
+        product.factor_conversion && product.factor_conversion > 1
+          ? String(product.factor_conversion)
+          : ''
+      );
       setBaseProductSearch('');
       setIsSearchOpen(false);
     } else {
@@ -213,7 +256,7 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
       });
       setIsPresentation(false);
       setBaseProductId('');
-      setConversionFactor(1);
+      setConversionFactorText('');
       setBaseProductSearch('');
       setIsSearchOpen(false);
     }
@@ -241,10 +284,20 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
         const sup = await crearProvDirecto({ nombre: cleanName, telefono: quickAddExtra.trim() || null });
         setValue('supplier', sup.nombre, { shouldValidate: true, shouldDirty: true });
         toast.success(`Proveedor "${sup.nombre}" creado y seleccionado`);
+      } else if (quickAddType === 'unit') {
+        const unit = await crearUnidadDirecto({
+          nombre: cleanName,
+          tipo: quickAddUnitType,
+          descripcion: quickAddExtra.trim() || null,
+        });
+        setValue('unit', unit.nombre, { shouldValidate: true, shouldDirty: true });
+        handleUnitSelection(unit.nombre);
+        toast.success(`Unidad "${unit.nombre}" creada y seleccionada`);
       }
       setQuickAddType(null);
       setQuickAddName('');
       setQuickAddExtra('');
+      setQuickAddUnitType('unidad');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al crear elemento');
     } finally {
@@ -312,6 +365,18 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
       }
     }
 
+    if (isPresentation) {
+      const packLabel = (getValues('unit') || 'empaque').toLowerCase();
+      if (!baseProductId) {
+        toast.error(`Selecciona el producto que contiene este ${packLabel}, o desmarca la vinculación.`);
+        return;
+      }
+      if (conversionFactor < 2) {
+        toast.error(`Indica cuántas unidades van en cada ${packLabel} (mínimo 2).`);
+        return;
+      }
+    }
+
     // Validation 5: Unique SKU validation
     if (cleanSku && allProducts && allProducts.length > 0) {
       const duplicate = allProducts.find(
@@ -326,7 +391,7 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
     const saved: Product = {
       id: product?.id ?? `prod-${Date.now()}`,
       ...data,
-      plu: cleanPlu || (product?.plu ?? ''),
+      plu: isWeight || isScaleProduct ? (cleanPlu || (product?.plu ?? '')) : '',
       unit: isWeight ? (weightState.weightUnit === 'kg' ? 'Kilogramo' : weightState.weightUnit === 'lb' ? 'Libra' : data.unit) : data.unit,
       costPrice: cost,
       salePrice: sale,
@@ -346,7 +411,8 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
       generateScaleBarcode: weightState.generateScaleBarcode,
       isWeightProduct: isWeight,
       producto_base_id: isPresentation && baseProductId ? baseProductId : null,
-      factor_conversion: isPresentation && baseProductId ? Math.max(1, Number(conversionFactor) || 1) : 1,
+      factor_conversion: isPresentation && baseProductId ? Math.max(2, Number(conversionFactor) || 2) : 1,
+      unidad_base: isPresentation && selectedBaseProduct ? selectedBaseProduct.unit : undefined,
     };
 
     // System Audit Event
@@ -526,40 +592,30 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
     setIsSearchOpen(false);
     setBaseProductSearch('');
 
-    // Detección automática inteligente del factor de conversión por costos
-    const currentCost = Number(getValues('costPrice') || 0);
-    const baseCost = Number(baseProd.costPrice || 0);
-    if (currentCost > 0 && baseCost > 0 && currentCost > baseCost) {
-      const calcFactor = Math.round(currentCost / baseCost);
-      if (calcFactor >= 2) {
-        setConversionFactor(calcFactor);
-        toast.info(`Factor de conversión detectado automáticamente: ${calcFactor} unidades`);
-        return;
-      }
-    }
-
-    // Sugerencia según unidad si aún no tiene un factor asignado
-    const curUnit = getValues('unit') || selectedUnit;
+    // Si aún no se indicó cuántas unidades trae, sugerirlo por costos (el usuario puede cambiarlo)
     if (conversionFactor <= 1) {
-      if (curUnit === 'Fardo' || (product?.name || '').toLowerCase().includes('fardo')) {
-        setConversionFactor(20);
-      } else if (curUnit === 'Cartón' || (product?.name || '').toLowerCase().includes('carton') || (product?.name || '').toLowerCase().includes('cartón')) {
-        setConversionFactor(2);
-      } else if (curUnit === 'Caja') {
-        setConversionFactor(12);
-      } else if (curUnit === 'Paquete') {
-        setConversionFactor(6);
+      const currentCost = Number(getValues('costPrice') || 0);
+      const baseCost = Number(baseProd.costPrice || 0);
+      if (currentCost > 0 && baseCost > 0 && currentCost > baseCost) {
+        const calcFactor = Math.round(currentCost / baseCost);
+        if (calcFactor >= 2) {
+          setConversionFactor(calcFactor);
+          toast.info(`Sugerencia por costos: ${calcFactor} unidades. Ajústalo si no es correcto.`);
+        }
       }
     }
   };
 
   const handleUnitSelection = (val: string) => {
     setValue('unit', val, { shouldValidate: true, shouldDirty: true });
-    if (val === 'Fardo' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(20);
-    else if (val === 'Cartón' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(2);
-    else if (val === 'Caja' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(12);
-    else if (val === 'Paquete' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(6);
-    else if (val === 'Bolsa' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(10);
+    if (isPackUnitItem(val)) {
+      // Al elegir Fardo, Cartón, Caja, etc. se abre automáticamente la gestión del empaque
+      setIsPresentation(true);
+    } else {
+      setIsPresentation(false);
+      setBaseProductId('');
+      setConversionFactorText('');
+    }
   };
 
   const margin = costPrice && salePrice && Number(costPrice) > 0
@@ -702,9 +758,23 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="unit" className="block text-sm font-semibold text-foreground">
-                Unidad de Medida <span className="text-danger ml-0.5">*</span>
-              </label>
+              <div className="flex items-center justify-between">
+                <label htmlFor="unit" className="block text-sm font-semibold text-foreground">
+                  Unidad de Medida <span className="text-danger ml-0.5">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuickAddType('unit');
+                    setQuickAddName('');
+                    setQuickAddExtra('');
+                    setQuickAddUnitType('unidad');
+                  }}
+                  className="text-xs text-primary font-bold hover:underline inline-flex items-center gap-0.5"
+                >
+                  + Nueva
+                </button>
+              </div>
               <select
                 id="unit"
                 {...register('unit', { required: true })}
@@ -714,7 +784,7 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
                   handleUnitSelection(e.target.value);
                 }}
               >
-                {units.map((u) => (
+                {unitOptions.map((u) => (
                   <option key={`unit-opt-${u}`} value={u}>{u}</option>
                 ))}
               </select>
@@ -733,7 +803,7 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
                   }}
                   className="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5"
                 />
-                <span>¿Vincular inventario a otro producto base? (Opcional)</span>
+                <span>¿Este empaque descuenta de otro producto? (ej. fardo de botellas)</span>
               </label>
             </div>
 
@@ -941,12 +1011,13 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
                     </label>
                     <input
                       type="number"
-                      min={1}
-                      step="any"
+                      min={2}
+                      step={1}
+                      inputMode="numeric"
                       className="input-field text-xs w-full font-mono"
                       placeholder={`Ej: ${selectedUnit === 'Fardo' ? '20' : selectedUnit === 'Cartón' ? '2' : '12'}`}
-                      value={conversionFactor}
-                      onChange={(e) => setConversionFactor(Math.max(1, Number(e.target.value)))}
+                      value={conversionFactorText}
+                      onChange={(e) => setConversionFactorText(e.target.value.replace(/[^\d]/g, ''))}
                     />
                   </div>
 
@@ -1193,7 +1264,9 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
                   ? 'Nueva Categoría Rápida'
                   : quickAddType === 'brand'
                   ? 'Nueva Marca Rápida'
-                  : 'Nuevo Proveedor Rápido'}
+                  : quickAddType === 'supplier'
+                  ? 'Nuevo Proveedor Rápido'
+                  : 'Nueva Unidad de Medida'}
               </h4>
               <button
                 type="button"
@@ -1217,7 +1290,9 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
                       ? 'Ej. Enlatados'
                       : quickAddType === 'brand'
                       ? 'Ej. Induveca'
-                      : 'Ej. Distribuidora Central'
+                      : quickAddType === 'supplier'
+                      ? 'Ej. Distribuidora Central'
+                      : 'Ej. Cartón, Combo, Libra, Kilogramo...'
                   }
                   value={quickAddName}
                   onChange={(e) => setQuickAddName(e.target.value)}
@@ -1225,6 +1300,24 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
                   autoFocus
                 />
               </div>
+
+              {quickAddType === 'unit' && (
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1 block">
+                    Tipo de Unidad <span className="text-danger">*</span>
+                  </label>
+                  <select
+                    value={quickAddUnitType}
+                    onChange={(e) => setQuickAddUnitType(e.target.value as TipoUnidadMedida)}
+                    className="input-field text-xs !h-9"
+                  >
+                    <option value="unidad">Unidad simple (unidad, combo, docena)</option>
+                    <option value="empaque">Empaque múltiple (cartón, fardo, caja, paquete)</option>
+                    <option value="peso">Peso / Balanza (libra, kg)</option>
+                    <option value="volumen">Volumen / Líquido (litro, galón)</option>
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="text-xs font-semibold text-foreground mb-1 block">
@@ -1235,6 +1328,8 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
                   placeholder={
                     quickAddType === 'supplier'
                       ? 'Ej. 809-555-0123'
+                      : quickAddType === 'unit'
+                      ? 'Ej. Empaque de 30 unidades, balanza, etc.'
                       : 'Breve detalle...'
                   }
                   value={quickAddExtra}

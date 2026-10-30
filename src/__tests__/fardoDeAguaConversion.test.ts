@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { applyPresentationConversions } from '@/services/productos.service';
-import { calcularStockPresentacion, convertirAUnidadBase } from '@/services/presentaciones.service';
+import {
+  calcularStockPresentacion,
+  convertirAUnidadBase,
+  movimientoInventarioPresentacion,
+} from '@/services/presentaciones.service';
 import type { Producto } from '@/types/database';
 
 describe('Requerimientos 2 y 6: Unidades de Medida, Conversión y Fardo de Agua', () => {
@@ -276,5 +280,138 @@ describe('Requerimientos 2 y 6: Unidades de Medida, Conversión y Fardo de Agua'
 
     // La botella base conserva sus 1000 botellas
     expect(botella?.stock_actual).toBe(1000);
+  });
+
+  it('soporta flujo completo de Paquete (ej. Galletas x6) y Caja (ej. Leche x12)', () => {
+    // 1. Producto Base: Galleta Individual (125 unidades)
+    const galletaBase: Producto = {
+      id: 'galleta-ind-id',
+      codigo_barras: '746001002001',
+      sku: 'GAL-001',
+      nombre: 'Galleta de Chocolate Individual',
+      categoria: 'Snacks',
+      marca: 'ChocoRico',
+      unidad: 'Unidad',
+      proveedor_id: null,
+      precio_costo: 10,
+      precio_venta: 15,
+      precio_mayorista: 12,
+      porcentaje_impuesto: 18,
+      stock_minimo: 20,
+      stock_actual: 125,
+      es_pesado: false,
+      fecha_vencimiento: null,
+      garantia: null,
+      imagen_url: null,
+      estado: 'activo',
+    };
+
+    // 2. Presentación: Paquete de Galletas x6
+    const paqueteGalletas: Producto = {
+      id: 'paquete-galleta-x6-id',
+      codigo_barras: '746001002006',
+      sku: 'PAQ-GAL-6',
+      nombre: 'Paquete de Galletas (6 unidades)',
+      categoria: 'Snacks',
+      marca: 'ChocoRico',
+      unidad: 'Paquete',
+      proveedor_id: null,
+      precio_costo: 55,
+      precio_venta: 80,
+      precio_mayorista: 75,
+      porcentaje_impuesto: 18,
+      stock_minimo: 5,
+      stock_actual: 0,
+      es_pesado: false,
+      fecha_vencimiento: null,
+      garantia: null,
+      imagen_url: null,
+      estado: 'activo',
+      producto_base_id: 'galleta-ind-id',
+      factor_conversion: 6,
+    };
+
+    // 3. Producto Base: Litro de Leche (48 litros)
+    const lecheBase: Producto = {
+      id: 'leche-litro-id',
+      codigo_barras: '746003001001',
+      sku: 'LEC-LIT-01',
+      nombre: 'Leche Entera 1 Litro',
+      categoria: 'Lácteos',
+      marca: 'Lacty',
+      unidad: 'Litro',
+      proveedor_id: null,
+      precio_costo: 60,
+      precio_venta: 75,
+      precio_mayorista: 70,
+      porcentaje_impuesto: 0,
+      stock_minimo: 24,
+      stock_actual: 48,
+      es_pesado: false,
+      fecha_vencimiento: null,
+      garantia: null,
+      imagen_url: null,
+      estado: 'activo',
+    };
+
+    // 4. Presentación: Caja de Leche x12
+    const cajaLeche: Producto = {
+      id: 'caja-leche-x12-id',
+      codigo_barras: '746003001012',
+      sku: 'CAJ-LEC-12',
+      nombre: 'Caja de Leche Entera (12 unidades)',
+      categoria: 'Lácteos',
+      marca: 'Lacty',
+      unidad: 'Caja',
+      proveedor_id: null,
+      precio_costo: 680,
+      precio_venta: 850,
+      precio_mayorista: 820,
+      porcentaje_impuesto: 0,
+      stock_minimo: 2,
+      stock_actual: 0,
+      es_pesado: false,
+      fecha_vencimiento: null,
+      garantia: null,
+      imagen_url: null,
+      estado: 'activo',
+      producto_base_id: 'leche-litro-id',
+      factor_conversion: 12,
+    };
+
+    const catalogo = applyPresentationConversions([galletaBase, paqueteGalletas, lecheBase, cajaLeche]);
+
+    // Verificación 1: Stock dinámico inicial
+    // Galletas: 125 / 6 = 20 paquetes disponibles
+    const paqCalculado = catalogo.find((p) => p.sku === 'PAQ-GAL-6');
+    expect(paqCalculado?.stock_actual).toBe(20);
+
+    // Leche: 48 / 12 = 4 cajas disponibles
+    const cajaCalculada = catalogo.find((p) => p.sku === 'CAJ-LEC-12');
+    expect(cajaCalculada?.stock_actual).toBe(4);
+
+    // Verificación 2: Venta en POS de 3 paquetes de galletas
+    const movVentaPaquetes = movimientoInventarioPresentacion(paqueteGalletas, 3);
+    expect(movVentaPaquetes.productoId).toBe('galleta-ind-id');
+    expect(movVentaPaquetes.cantidad).toBe(18); // 3 * 6 = 18 unidades base
+
+    // El stock base de galletas pasa de 125 a 107
+    const nuevoStockGalletas = galletaBase.stock_actual - movVentaPaquetes.cantidad;
+    expect(nuevoStockGalletas).toBe(107);
+
+    // Con 107 galletas, ahora quedan 107 / 6 = 17 paquetes
+    expect(calcularStockPresentacion(nuevoStockGalletas, 6)).toBe(17);
+
+    // Verificación 3: Compra a proveedor de 5 cajas de leche
+    const movCompraCajas = movimientoInventarioPresentacion(cajaLeche, 5);
+    expect(movCompraCajas.productoId).toBe('leche-litro-id');
+    expect(movCompraCajas.cantidad).toBe(60); // 5 * 12 = 60 litros agregados
+
+    // El stock base de leche pasa de 48 a 108 litros
+    const nuevoStockLeche = lecheBase.stock_actual + movCompraCajas.cantidad;
+    expect(nuevoStockLeche).toBe(108);
+
+    // Con 108 litros, ahora hay 108 / 12 = 9 cajas de leche disponibles
+    expect(calcularStockPresentacion(nuevoStockLeche, 12)).toBe(9);
   });
 });

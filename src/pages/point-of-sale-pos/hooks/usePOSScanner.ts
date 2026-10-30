@@ -506,6 +506,15 @@ export function usePOSScanner({
               );
             } else {
               // Producto con código comercial de 12-13 dígitos empezando por 20-29 que se vende por unidad
+              const cleanUpperQ = q.toUpperCase();
+              const isCommercialMatch =
+                (ui.barcode && ui.barcode.trim().toUpperCase() === cleanUpperQ) ||
+                (ui.sku && ui.sku.trim().toUpperCase() === cleanUpperQ);
+
+              if (!isCommercialMatch) {
+                // Si el producto no tiene exactamente este código como código comercial, no debe asignarse como unidad ante una etiqueta de balanza
+                return false;
+              }
               if (ui.status === 'inactive' || ui.status === 'discontinued' || fromDb.estado === 'inactivo') {
                 toast.error(`"${ui.name}" está INACTIVO en el sistema. Debes activarlo en Gestión de Productos para poder venderlo.`, { duration: 4000 });
                 return keepCodeSelected();

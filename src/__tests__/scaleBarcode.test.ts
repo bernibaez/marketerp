@@ -213,5 +213,51 @@ describe('scaleBarcode (Decodificación de Códigos de Balanza mscale)', () => {
       const parsed = parseScaleBarcode('10168', mockCatalog);
       expect(parsed).toBeNull();
     });
+
+    it('prioriza producto pesado (Jamon Estelar PLU 70) sobre producto por unidad (Funda de Papel #4 con codigo 0070) al escanear ticket de balanza', () => {
+      // Simula el orden alfabético donde 'FUNDA DE PAPEL #4' está antes de 'JAMON ESTELAR INDUVECA'
+      const mockCatalog: ScaleProduct[] = [
+        {
+          productId: 'prod-funda-4',
+          name: 'FUNDA DE PAPEL #4',
+          sku: '00702000',
+          barcode: '0070',
+          plu: undefined,
+          price: 45,
+          cost: 32.5,
+          tax: 0,
+          unit: 'Paquete',
+          category: 'Abarrotes',
+          isWeightProduct: false,
+        },
+        {
+          productId: 'prod-jamon-estelar',
+          name: 'JAMON ESTELAR INDUVECA',
+          sku: '70',
+          barcode: '70',
+          plu: '00070',
+          price: 100,
+          cost: 84.44,
+          tax: 0,
+          unit: 'lb',
+          category: 'Embutidos',
+          isWeightProduct: true,
+        },
+      ];
+
+      // Código de balanza: 20 + 00070 (PLU 70) + 00500 (0.500 lb) + 1 (check)
+      const scaleTicket = '2000070005001';
+      const parsed = parseScaleBarcode(scaleTicket, mockCatalog);
+
+      expect(parsed).not.toBeNull();
+      expect(parsed?.product.name).toBe('JAMON ESTELAR INDUVECA');
+      expect(parsed?.product.productId).toBe('prod-jamon-estelar');
+      expect(parsed?.weight).toBe(0.5);
+      expect(parsed?.isFromEan13).toBe(true);
+
+      const found = findScaleProductByCode(mockCatalog, scaleTicket);
+      expect(found).toBeDefined();
+      expect(found?.name).toBe('JAMON ESTELAR INDUVECA');
+    });
   });
 });

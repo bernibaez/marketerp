@@ -120,6 +120,25 @@ export interface ScalePluIdentity {
   plu?: string | null;
   barcode?: string | null;
   sku?: string | null;
+  isWeightProduct?: boolean;
+  es_pesado?: boolean;
+  saleType?: string;
+  sale_type?: string;
+  unit?: string;
+}
+
+export function isExplicitUnitOnlyProduct(product: ScalePluIdentity): boolean {
+  if (product.isWeightProduct === true || product.es_pesado === true) return false;
+  const st = String(product.saleType || product.sale_type || '').toLowerCase();
+  if (st === 'weight' || st === 'both') return false;
+  const unit = String(product.unit || '').toLowerCase();
+  if (['lb', 'libra', 'kg', 'kilogramo'].includes(unit)) return false;
+
+  return (
+    product.isWeightProduct === false ||
+    product.es_pesado === false ||
+    st === 'unit'
+  );
 }
 
 function pluFromSku(sku: string): string {
@@ -147,11 +166,15 @@ export function collectProductPlus(product: ScalePluIdentity): string[] {
     if (n) found.add(n);
   }
 
-  const fromBarcode = pluFromBarcodeField(String(product.barcode ?? ''));
-  if (fromBarcode) found.add(fromBarcode);
+  // Si el producto es explícitamente vendido únicamente por unidad (no pesado),
+  // su SKU o código de barras numérico no debe interpretarse como PLU de balanza.
+  if (!isExplicitUnitOnlyProduct(product)) {
+    const fromBarcode = pluFromBarcodeField(String(product.barcode ?? ''));
+    if (fromBarcode) found.add(fromBarcode);
 
-  const fromSku = pluFromSku(String(product.sku ?? ''));
-  if (fromSku) found.add(fromSku);
+    const fromSku = pluFromSku(String(product.sku ?? ''));
+    if (fromSku) found.add(fromSku);
+  }
 
   return [...found];
 }
@@ -175,6 +198,12 @@ export function productMatchesScanCode(product: ScalePluIdentity, rawCode: strin
   if (barcode && barcode.toUpperCase() === upper) return true;
   if (sku && sku.toUpperCase() === upper) return true;
   if (plu && (plu.toUpperCase() === upper || normalizePlu(plu) === normalizePlu(clean))) return true;
+
+  // Si el código escaneado es una etiqueta de balanza (variable weight, 12-13 dígitos empezando por 20-29):
+  // Un producto configurado exclusivamente para venta por unidad NO debe emparejarse por PLU extraído.
+  if (isVariableWeightBarcode(clean) && isExplicitUnitOnlyProduct(product)) {
+    return false;
+  }
 
   // 2. Coincidencia por PLU o etiqueta de balanza: solo si el producto realmente tiene un identificador de PLU
   // (evita que un producto comercial con código de 13 dígitos empezando por 20... se empareje por azar con otro producto)

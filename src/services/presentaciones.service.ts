@@ -112,6 +112,31 @@ export function convertirAUnidadBase(cantidadPresentacion: number, factorConvers
   return Math.round((Number(cantidadPresentacion || 0) * (factorConversion || 1)) * 1000) / 1000;
 }
 
+export function esPresentacionVinculada(producto: {
+  producto_base_id?: string | null;
+  factor_conversion?: number | null;
+}): boolean {
+  return Boolean(producto.producto_base_id) && Number(producto.factor_conversion || 1) > 1;
+}
+
+/** Al vender/comprar un fardo o cartón vinculado, el movimiento va al producto contenido. */
+export function movimientoInventarioPresentacion(
+  producto: {
+    id: string;
+    producto_base_id?: string | null;
+    factor_conversion?: number | null;
+  },
+  cantidad: number
+): { productoId: string; cantidad: number } {
+  if (esPresentacionVinculada(producto) && producto.producto_base_id) {
+    return {
+      productoId: producto.producto_base_id,
+      cantidad: convertirAUnidadBase(cantidad, Number(producto.factor_conversion)),
+    };
+  }
+  return { productoId: producto.id, cantidad: Number(cantidad || 0) };
+}
+
 export async function obtenerPresentaciones(productoBaseId?: string): Promise<PresentacionProducto[]> {
   const sb = tryGetSupabase();
   if (!sb) {

@@ -6,6 +6,8 @@ import { crearCxcDesdeVenta } from './cxc.service';
 import { AUTH_ACCOUNTS } from '@/lib/auth';
 import { isAbortError } from '@/lib/isAbortError';
 import { logAuditEvent } from '@/lib/auditStore';
+import { movimientoInventarioPresentacion } from './presentaciones.service';
+import { invalidarCacheProductos } from './productos.service';
 
 function isUUID(str: string | null | undefined): boolean {
   return Boolean(
@@ -502,16 +504,11 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     // Descontar stock local (soporta cantidades fraccionarias exactas y presentaciones)
     for (const item of payload.items) {
       if (item.tipo_item === 'producto' && item.producto_id) {
-        let deductId = item.producto_id;
-        let deductQty = item.cantidad;
         const stored = getStoredProducts().find((p) => p.id === item.producto_id);
-        const baseId = (stored as any)?.producto_base_id;
-        const factor = Number((stored as any)?.factor_conversion || 1);
-        if (baseId && factor > 1) {
-          deductId = baseId;
-          deductQty = item.cantidad * factor;
-        }
-        updateProductStockInStore(deductId, -deductQty);
+        const movimiento = stored
+          ? movimientoInventarioPresentacion(stored, item.cantidad)
+          : { productoId: item.producto_id, cantidad: item.cantidad };
+        updateProductStockInStore(movimiento.productoId, -movimiento.cantidad);
       }
     }
 
@@ -645,6 +642,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     }
   }
 
+  invalidarCacheProductos();
   return resultado;
 }
 

@@ -78,7 +78,7 @@ export default function POSTerminal() {
   const { registers, loading: registersLoading, refetch: refetchRegisters, markRegisterClosed } = useCashRegisters();
 
   // 1. Data Catalogs
-  const { productosUi } = useProductos({ pagina: 1, limite: 5000, estado: 'activo' });
+  const { productosUi, refetch: refetchProductos } = useProductos({ pagina: 1, limite: 5000, estado: 'activo' });
   const { combos } = useCombos(true);
 
   // 2. Cart & Calculations Hook
@@ -227,6 +227,7 @@ export default function POSTerminal() {
     navigate,
     onSaleSuccess: () => {
       void refetchRegisters();
+      void refetchProductos();
     },
   });
 

@@ -110,6 +110,9 @@ export function addProductToStore(
     warranty: input.warranty || 'N/A',
     status: input.status ?? 'active',
     stockStatus,
+    producto_base_id: input.producto_base_id ?? null,
+    factor_conversion: input.factor_conversion ?? 1,
+    unidad_base: input.unidad_base,
   };
 
   saveStoredProducts([product, ...products]);

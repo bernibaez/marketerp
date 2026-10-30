@@ -24,6 +24,7 @@ import { ProductDetailModal } from './ProductDetailModal';
 import OperationProgressModal, { type OperationProgressState } from './OperationProgressModal';
 import CategoryManagementModal from './CategoryManagementModal';
 import BrandManagementModal from './BrandManagementModal';
+import UnitManagementModal from './UnitManagementModal';
 import { useCategorias } from '@/hooks/useCategorias';
 
 export default function ProductManagementScreen() {
@@ -54,6 +55,7 @@ export default function ProductManagementScreen() {
   const [operationProgress, setOperationProgress] = useState<OperationProgressState | null>(null);
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [brandModalOpen, setBrandModalOpen] = useState(false);
+  const [unitModalOpen, setUnitModalOpen] = useState(false);
 
   const { categorias } = useCategorias();
 
@@ -490,6 +492,7 @@ export default function ProductManagementScreen() {
         }}
         onManageCategories={() => setCategoryModalOpen(true)}
         onManageBrands={() => setBrandModalOpen(true)}
+        onManageUnits={() => setUnitModalOpen(true)}
         totalProducts={products.length}
         activeProducts={products.filter((p) => p.status === 'active').length}
         lowStockCount={products.filter((p) => p.stockStatus === 'low' || p.stockStatus === 'out').length}
@@ -684,6 +687,13 @@ export default function ProductManagementScreen() {
         <BrandManagementModal
           open={brandModalOpen}
           onClose={() => setBrandModalOpen(false)}
+        />
+      )}
+
+      {unitModalOpen && (
+        <UnitManagementModal
+          open={unitModalOpen}
+          onClose={() => setUnitModalOpen(false)}
         />
       )}
     </div>

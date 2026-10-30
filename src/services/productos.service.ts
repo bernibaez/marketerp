@@ -10,6 +10,7 @@ import {
   productMatchesScanCode,
 } from '@/lib/scaleBarcode';
 import { isAbortError } from '@/lib/isAbortError';
+import { calcularStockPresentacion } from './presentaciones.service';
 
 export type ProductosFiltro = {
   pagina?: number;
@@ -143,7 +144,11 @@ async function writeProducto(
   id?: string
 ): Promise<{ data: Producto | null; error: unknown }> {
   const sb = getSupabase();
-  const body = omitMissingProductoColumns(payload);
+  const coerced =
+    payload.producto_base_id != null && !esUuid(String(payload.producto_base_id))
+      ? { ...payload, producto_base_id: null, factor_conversion: 1 }
+      : payload;
+  const body = omitMissingProductoColumns(coerced);
   const run = async (row: Record<string, any>) => {
     if (action === 'insert') {
       return sb.from('productos').insert(row).select('*').single();
@@ -156,7 +161,7 @@ async function writeProducto(
   if (!isSchemaColumnError(first.error)) return { data: null, error: first.error };
 
   rememberMissingColumnsFromError(first.error);
-  const retryBody = omitMissingProductoColumns(stripExtendedColumns(payload));
+  const retryBody = omitMissingProductoColumns(stripExtendedColumns(coerced));
   const retry = await run(retryBody);
   if (!retry.error) return { data: retry.data as Producto, error: null };
   return { data: null, error: retry.error };
@@ -306,8 +311,8 @@ export function uiAProductoInsert(p: Omit<Product, 'id' | 'stockStatus'> & { id?
     // en flujos que no manejan estos campos (p. ej. importación masiva).
     ...(p.producto_base_id !== undefined
       ? {
-          producto_base_id: esUuid(p.producto_base_id) ? p.producto_base_id : null,
-          factor_conversion: esUuid(p.producto_base_id)
+          producto_base_id: p.producto_base_id || null,
+          factor_conversion: p.producto_base_id
             ? Math.max(1, Number(p.factor_conversion) || 1)
             : 1,
         }
@@ -356,6 +361,9 @@ function demoAsProductos(): Producto[] {
       garantia: p.warranty || null,
       imagen_url: p.image || null,
       estado: (p.status === 'active' ? 'activo' : p.status === 'inactive' ? 'inactivo' : 'descontinuado') as EstadoProducto,
+      producto_base_id: p.producto_base_id ?? null,
+      factor_conversion: Number(p.factor_conversion ?? 1),
+      unidad_base: p.unidad_base,
     };
   });
 }
@@ -392,6 +400,9 @@ function localAsProductos(): Producto[] {
       garantia: p.warranty || null,
       imagen_url: p.image || null,
       estado: (p.status === 'active' ? 'activo' : p.status === 'inactive' ? 'inactivo' : 'descontinuado') as EstadoProducto,
+      producto_base_id: p.producto_base_id ?? null,
+      factor_conversion: Number(p.factor_conversion ?? 1),
+      unidad_base: p.unidad_base,
     };
   });
 }
@@ -413,21 +424,29 @@ export function invalidarCacheProductos(): void {
   masterCatalogCache.clear();
 }
 
-export function applyPresentationConversions(products: Producto[]): Producto[] {
+export function applyPresentationConversions(
+  products: Producto[],
+  extraCatalog: Producto[] = []
+): Producto[] {
   const byId = new Map<string, Producto>();
   const bySku = new Map<string, Producto>();
-  for (const p of products) {
+  const index = (p: Producto) => {
     if (p.id) byId.set(p.id, p);
     if (p.sku) bySku.set(p.sku.toLowerCase().trim(), p);
     if (p.codigo_barras) bySku.set(p.codigo_barras.toLowerCase().trim(), p);
+  };
+  for (const entry of masterCatalogCache.values()) {
+    for (const p of entry.data) index(p);
   }
+  for (const p of extraCatalog) index(p);
+  for (const p of products) index(p);
 
   return products.map((p) => {
     let baseProd: Producto | undefined;
-    let factor = Number((p as any).factor_conversion || 1);
+    let factor = Number(p.factor_conversion || 1);
 
-    if ((p as any).producto_base_id) {
-      baseProd = byId.get((p as any).producto_base_id);
+    if (p.producto_base_id) {
+      baseProd = byId.get(p.producto_base_id);
     }
 
     const nameLower = (p.nombre || '').toLowerCase();
@@ -447,16 +466,13 @@ export function applyPresentationConversions(products: Producto[]): Producto[] {
     }
 
     if (baseProd && factor > 1) {
-      const baseStock = Number(baseProd.stock_actual || 0);
-      const computedStock = Math.floor(baseStock / factor);
-
       return {
         ...p,
         producto_base_id: baseProd.id,
         factor_conversion: factor,
-        unidad_base: (baseProd as any).unidad || 'unidad',
-        stock_actual: computedStock,
-      } as Producto;
+        unidad_base: baseProd.unidad || 'unidad',
+        stock_actual: calcularStockPresentacion(Number(baseProd.stock_actual || 0), factor),
+      };
     }
 
     return p;
@@ -785,7 +801,27 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
       (!p.codigo_barras || !dbBarcodes.has(p.codigo_barras.toLowerCase()))
   );
 
-  const combined = applyPresentationConversions([...dbProducts, ...missingFromDb]);
+  const catalogForConversion = [...dbProducts, ...missingFromDb];
+  let extraBases: Producto[] = [];
+  if (sb && !supabaseFailed) {
+    const knownIds = new Set(catalogForConversion.map((p) => p.id));
+    const missingBaseIds = [
+      ...new Set(
+        catalogForConversion
+          .map((p) => p.producto_base_id)
+          .filter((id): id is string => Boolean(id) && !knownIds.has(id!) && esUuid(id!))
+      ),
+    ];
+    if (missingBaseIds.length > 0) {
+      try {
+        const { data: bases } = await sb.from('productos').select('*').in('id', missingBaseIds);
+        extraBases = (bases as Producto[]) || [];
+      } catch {
+        extraBases = [];
+      }
+    }
+  }
+  const combined = applyPresentationConversions(catalogForConversion, extraBases);
   const total = dbCount + missingFromDb.length;
 
   const result: ProductosResultado = {
@@ -845,6 +881,9 @@ export async function crearProducto(datos: Partial<Producto>): Promise<Producto>
       garantia: datos.garantia ?? null,
       imagen_url: datos.imagen_url ?? null,
       estado: (datos.estado as EstadoProducto) ?? 'activo',
+      producto_base_id: datos.producto_base_id ?? null,
+      factor_conversion: Number(datos.factor_conversion ?? 1),
+      unidad_base: datos.unidad_base,
     });
     saveStoredProducts([ui, ...products]);
     invalidarCacheProductos();
@@ -910,6 +949,13 @@ export async function actualizarProducto(id: string, datos: Partial<Producto>): 
               ? 'discontinued'
               : base.status,
       stockStatus: 'normal',
+      producto_base_id:
+        datos.producto_base_id !== undefined ? datos.producto_base_id : base.producto_base_id,
+      factor_conversion:
+        datos.factor_conversion !== undefined
+          ? Number(datos.factor_conversion)
+          : base.factor_conversion,
+      unidad_base: datos.unidad_base !== undefined ? datos.unidad_base : base.unidad_base,
     };
     if (uiNext.currentStock <= 0) uiNext.stockStatus = 'out';
     else if (uiNext.currentStock <= uiNext.minStock) uiNext.stockStatus = 'low';
@@ -1103,8 +1149,24 @@ export async function obtenerProductoPorCodigoBarras(
 }
 
 function productoCoincideConCodigo(p: Producto, codigo: string): boolean {
+  const isWeight =
+    Boolean(p.es_pesado) ||
+    Boolean((p as any).is_weight_product) ||
+    p.sale_type === 'weight' ||
+    p.sale_type === 'both' ||
+    ['lb', 'libra', 'kg', 'kilogramo'].includes((p.unidad || '').toLowerCase());
+
   return productMatchesScanCode(
-    { plu: p.plu, barcode: p.codigo_barras, sku: p.sku },
+    {
+      plu: p.plu,
+      barcode: p.codigo_barras,
+      sku: p.sku,
+      es_pesado: Boolean(p.es_pesado),
+      sale_type: p.sale_type,
+      saleType: p.sale_type,
+      isWeightProduct: isWeight,
+      unit: p.unidad,
+    },
     codigo
   );
 }
@@ -1121,16 +1183,33 @@ export async function buscarProductoPorCodigoEscaneado(
   const plu = decoded.isVariableWeight ? decoded.plu : extractPluFromCode(clean);
   const variants = plu ? pluSearchVariants(plu) : [];
 
-  const matchesLocal = (list: Producto[]) =>
-    list.find((p) => productoCoincideConCodigo(p, clean)) ?? null;
+  const isProdWeighted = (p: Producto) =>
+    Boolean(p.es_pesado) ||
+    Boolean((p as any).is_weight_product) ||
+    p.sale_type === 'weight' ||
+    p.sale_type === 'both' ||
+    ['lb', 'libra', 'kg', 'kilogramo'].includes((p.unidad || '').toLowerCase());
+
+  const matchesLocal = (list: Producto[]) => {
+    if (decoded.isVariableWeight) {
+      const weightedMatch = list.find((p) => isProdWeighted(p) && productoCoincideConCodigo(p, clean));
+      if (weightedMatch) return weightedMatch;
+    }
+    return list.find((p) => productoCoincideConCodigo(p, clean)) ?? null;
+  };
+
+  const sb = tryGetSupabase();
 
   // 1. Revisar primero si coincide en el catálogo maestro en memoria (0 ms de respuesta, 0 egress)
   for (const entry of masterCatalogCache.values()) {
+    if (decoded.isVariableWeight) {
+      const weightedMatch = entry.data.find((p) => isProdWeighted(p) && productoCoincideConCodigo(p, clean));
+      if (weightedMatch) return await resolveSingleProductPresentation(weightedMatch, sb);
+    }
     const found = entry.data.find((p) => productoCoincideConCodigo(p, clean));
-    if (found) return found;
+    if (found) return await resolveSingleProductPresentation(found, sb);
   }
 
-  const sb = tryGetSupabase();
   if (!sb) {
     return matchesLocal(localAsProductos());
   }
@@ -1188,8 +1267,8 @@ export async function buscarProductoPorCodigoEscaneado(
   const found = matchesLocal(rows);
   if (found) return await resolveSingleProductPresentation(found, sb);
 
-  // Fallback con búsqueda ilike por si hay espacios o variaciones guardadas en BD
-  if (clean.length >= 2) {
+  // Fallback con búsqueda ilike por si hay espacios o variaciones guardadas en BD (no aplicable a etiquetas de balanza)
+  if (clean.length >= 2 && !decoded.isVariableWeight) {
     const sanitized = sanitizarBusquedaPostgrest(clean);
     if (sanitized) {
       const fallbackQuery = await sb
@@ -1239,7 +1318,7 @@ export async function obtenerProductoPorId(id: string, signal?: AbortSignal): Pr
     if (signal) query = query.abortSignal(signal);
     const { data, error } = await query.maybeSingle();
     if (!error && data) {
-      return data as Producto;
+      return await resolveSingleProductPresentation(data as Producto, sb);
     }
   } catch (err) {
     if (isAbortError(err)) throw err;
@@ -1283,7 +1362,10 @@ export async function buscarProductosParaVinculacion(
         );
       });
     }
-    if (filtered.length > 0 || masterList.length >= 1000) {
+    if (filtered.length > 0) {
+      return filtered.slice(0, 60);
+    }
+    if (!qClean && masterList.length >= 1000) {
       return filtered.slice(0, 60);
     }
   }

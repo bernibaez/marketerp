@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Package, Download, Plus, FileText, Tag, Award, MoreHorizontal, ChevronDown } from 'lucide-react';
+import { Package, Download, Plus, FileText, Tag, Award, Scale, MoreHorizontal, ChevronDown } from 'lucide-react';
 
 interface ProductsHeaderProps {
   onAdd: () => void;
@@ -7,6 +7,7 @@ interface ProductsHeaderProps {
   onImport?: () => void;
   onManageCategories?: () => void;
   onManageBrands?: () => void;
+  onManageUnits?: () => void;
   totalProducts: number;
   activeProducts: number;
   lowStockCount: number;
@@ -18,6 +19,7 @@ export default function ProductsHeader({
   onImport,
   onManageCategories,
   onManageBrands,
+  onManageUnits,
 }: ProductsHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -89,6 +91,20 @@ export default function ProductsHeader({
                 >
                   <Award size={15} className="text-emerald-600 dark:text-emerald-400" />
                   <span>Gestionar Marcas</span>
+                </button>
+              )}
+
+              {onManageUnits && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onManageUnits();
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-foreground hover:bg-secondary/70 transition-colors text-left cursor-pointer"
+                >
+                  <Scale size={15} className="text-emerald-600 dark:text-emerald-400" />
+                  <span>Gestionar Unidades de Medida</span>
                 </button>
               )}
 

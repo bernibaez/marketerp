@@ -59,6 +59,16 @@ export function findScaleProductByCode(catalog: ScaleProduct[], code: string): S
   const clean = String(code ?? '').trim();
   if (!clean) return undefined;
 
+  const isWeightedProd = (p: ScaleProduct) =>
+    Boolean(p.isWeightProduct) ||
+    Boolean((p as any).isWeighted) ||
+    Boolean((p as any).es_pesado) ||
+    (p as any).saleType === 'weight' ||
+    (p as any).saleType === 'both' ||
+    (p as any).sale_type === 'weight' ||
+    (p as any).sale_type === 'both' ||
+    ['lb', 'libra', 'kg', 'kilogramo'].includes(String(p.unit ?? '').toLowerCase());
+
   // 1. PRIORIDAD ABSOLUTA: Si existe un producto en catálogo cuyo código de barras o SKU coincide exactamente con el código escaneado,
   // ese producto TIENE PRIORIDAD y NO debe confundirse con una etiqueta de balanza generada por azar.
   const upper = clean.toUpperCase();
@@ -74,14 +84,27 @@ export function findScaleProductByCode(catalog: ScaleProduct[], code: string): S
   // 2. Solo si NO hubo coincidencia exacta de código comercial, intentamos decodificar como etiqueta de peso de balanza
   const decoded = decodeVariableWeightBarcode(clean);
   if (decoded.isVariableWeight) {
+    // IMPORTANTE: Primero buscar en productos PESADOS para evitar que un producto por unidad
+    // (ej. una funda de papel) secuestre la etiqueta de balanza de un producto pesado (ej. Jamón Estelar PLU 70).
+    const byPluWeighted = catalog.find((p) => isWeightedProd(p) && productMatchesPlu(p, decoded.plu));
+    if (byPluWeighted) return byPluWeighted;
+
     const byPlu = catalog.find((p) => productMatchesPlu(p, decoded.plu));
     if (byPlu) return byPlu;
   }
 
   const extractedPlu = extractPluFromCode(clean);
   if (extractedPlu) {
+    const byPluWeighted = catalog.find((p) => isWeightedProd(p) && productMatchesPlu(p, extractedPlu));
+    if (byPluWeighted) return byPluWeighted;
+
     const byPlu = catalog.find((p) => productMatchesPlu(p, extractedPlu));
     if (byPlu) return byPlu;
+  }
+
+  if (decoded.isVariableWeight) {
+    const weightedMatch = catalog.find((p) => isWeightedProd(p) && productMatchesScanCode(p, clean));
+    if (weightedMatch) return weightedMatch;
   }
 
   return catalog.find((p) => productMatchesScanCode(p, clean));
