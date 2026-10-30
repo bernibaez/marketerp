@@ -369,7 +369,6 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
   const costPrice = watch('costPrice');
   const salePrice = watch('salePrice');
   const selectedUnit = watch('unit') || product?.unit || 'Unidad';
-  const isPresentationUnit = ['Fardo', 'Cartón', 'Caja', 'Paquete', 'Bolsa'].includes(selectedUnit);
 
   const selectedBaseProduct = React.useMemo(() => {
     if (!baseProductId) return null;
@@ -378,15 +377,11 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
 
   const handleUnitSelection = (val: string) => {
     setValue('unit', val, { shouldValidate: true, shouldDirty: true });
-    const isPreset = ['Fardo', 'Cartón', 'Caja', 'Paquete', 'Bolsa'].includes(val);
-    if (isPreset) {
-      setIsPresentation(true);
-      if (val === 'Fardo' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(20);
-      else if (val === 'Cartón' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(2);
-      else if (val === 'Caja' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(12);
-      else if (val === 'Paquete' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(6);
-      else if (val === 'Bolsa' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(10);
-    }
+    if (val === 'Fardo' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(20);
+    else if (val === 'Cartón' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(2);
+    else if (val === 'Caja' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(12);
+    else if (val === 'Paquete' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(6);
+    else if (val === 'Bolsa' && (!conversionFactor || conversionFactor <= 1)) setConversionFactor(10);
   };
 
   const margin = costPrice && salePrice && Number(costPrice) > 0
@@ -528,7 +523,10 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
               {errors.brand && <p className="text-sm text-danger">{errors.brand.message}</p>}
             </div>
 
-            <FormField label="Unidad de Medida" name="unit" error={errors.unit?.message} required>
+            <div className="space-y-1.5">
+              <label htmlFor="unit" className="block text-sm font-semibold text-foreground">
+                Unidad de Medida <span className="text-danger ml-0.5">*</span>
+              </label>
               <select
                 id="unit"
                 {...register('unit', { required: true })}
@@ -542,7 +540,24 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
                   <option key={`unit-opt-${u}`} value={u}>{u}</option>
                 ))}
               </select>
-            </FormField>
+              {errors.unit && <p className="text-sm text-danger">{errors.unit.message}</p>}
+
+              <label className="flex items-center gap-2 pt-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={isPresentation}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setIsPresentation(checked);
+                    if (!checked) {
+                      setBaseProductId('');
+                    }
+                  }}
+                  className="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5"
+                />
+                <span>¿Vincular inventario a otro producto base? (Opcional)</span>
+              </label>
+            </div>
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
@@ -581,87 +596,81 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
               </select>
             </FormField>
 
-            {/* Configuración contextual de Presentación al seleccionar Fardo, Cartón, etc. */}
-            {(isPresentationUnit || isPresentation) && (
-              <div className="sm:col-span-2 bg-primary/5 dark:bg-primary/10 border border-primary/25 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between flex-wrap gap-2">
+            {/* Subpanel que solo aparece si el usuario decide explícitamente vincular el producto */}
+            {isPresentation && (
+              <div className="sm:col-span-2 bg-secondary/30 border border-border/80 rounded-xl p-3.5 space-y-3 animate-fadeIn">
+                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <Layers size={14} className="text-primary" />
+                    <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center">
+                      <Layers size={13} className="text-primary" />
                     </div>
-                    <div>
-                      <span className="text-xs font-bold text-foreground">
-                        Presentación comercial: {selectedUnit}
-                      </span>
-                      <p className="text-[11px] text-muted-foreground">
-                        Vincula este {selectedUnit.toLowerCase()} al producto base para compartir inventario automáticamente.
-                      </p>
-                    </div>
+                    <span className="text-xs font-semibold text-foreground">
+                      Vinculación opcional de inventario para {selectedUnit}
+                    </span>
                   </div>
-                  <label className="flex items-center gap-2 text-xs font-medium cursor-pointer text-foreground select-none bg-background px-2.5 py-1 rounded-md border border-border">
-                    <input
-                      type="checkbox"
-                      checked={isPresentation}
-                      onChange={(e) => setIsPresentation(e.target.checked)}
-                      className="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5"
-                    />
-                    <span>Vincular a producto base</span>
-                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsPresentation(false);
+                      setBaseProductId('');
+                    }}
+                    className="text-[11px] text-muted-foreground hover:text-danger hover:underline"
+                  >
+                    Desactivar vinculación
+                  </button>
                 </div>
 
-                {isPresentation && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-primary/15">
-                    <div>
-                      <label className="block text-xs font-semibold text-foreground mb-1">
-                        Producto Base del que depende *
-                      </label>
-                      <select
-                        className="input-field text-xs w-full"
-                        value={baseProductId}
-                        onChange={(e) => setBaseProductId(e.target.value)}
-                      >
-                        <option value="">Selecciona el producto base (ej. Botella de Agua, Medio Cartón)...</option>
-                        {allProducts
-                          .filter((p) => p.id !== product?.id)
-                          .map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name} {p.sku ? `(${p.sku})` : ''} — Stock: {p.currentStock} {p.unit}
-                            </option>
-                          ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-semibold text-foreground mb-1">
-                        Unidades base por cada {selectedUnit} * (Factor de conversión)
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        step="any"
-                        className="input-field text-xs w-full font-mono"
-                        placeholder={`Ej: ${selectedUnit === 'Fardo' ? '20' : selectedUnit === 'Cartón' ? '2' : '12'}`}
-                        value={conversionFactor}
-                        onChange={(e) => setConversionFactor(Math.max(1, Number(e.target.value)))}
-                      />
-                    </div>
-
-                    {selectedBaseProduct ? (
-                      <div className="sm:col-span-2 text-xs bg-background p-2.5 rounded-lg border border-primary/20 text-foreground flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <span className="text-muted-foreground">
-                          💡 Al vender 1 <strong>{selectedUnit}</strong> se descontarán <strong>{conversionFactor} {selectedBaseProduct.unit}</strong> de <strong>{selectedBaseProduct.name}</strong>.
-                        </span>
-                        <span className="font-bold text-primary whitespace-nowrap bg-primary/10 px-2 py-0.5 rounded">
-                          Stock disponible: ~{Math.floor(selectedBaseProduct.currentStock / conversionFactor)} {selectedUnit}s
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="sm:col-span-2 text-xs text-muted-foreground italic">
-                        Selecciona el producto base para calcular existencias automáticamente.
-                      </div>
-                    )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-border/40">
+                  <div>
+                    <label className="block text-xs font-medium text-foreground mb-1">
+                      Producto Base del que descontará stock
+                    </label>
+                    <select
+                      className="input-field text-xs w-full"
+                      value={baseProductId}
+                      onChange={(e) => setBaseProductId(e.target.value)}
+                    >
+                      <option value="">Selecciona el producto base (ej: Botella de Agua, Medio Cartón)...</option>
+                      {allProducts
+                        .filter((p) => p.id !== product?.id)
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} {p.sku ? `(${p.sku})` : ''} — Stock: {p.currentStock} {p.unit}
+                          </option>
+                        ))}
+                    </select>
                   </div>
-                )}
+
+                  <div>
+                    <label className="block text-xs font-medium text-foreground mb-1">
+                      Unidades base por cada {selectedUnit} (Factor)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      step="any"
+                      className="input-field text-xs w-full font-mono"
+                      placeholder={`Ej: ${selectedUnit === 'Fardo' ? '20' : selectedUnit === 'Cartón' ? '2' : '12'}`}
+                      value={conversionFactor}
+                      onChange={(e) => setConversionFactor(Math.max(1, Number(e.target.value)))}
+                    />
+                  </div>
+
+                  {selectedBaseProduct ? (
+                    <div className="sm:col-span-2 text-xs bg-background p-2.5 rounded-lg border border-primary/20 text-foreground flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <span className="text-muted-foreground">
+                        💡 Al vender 1 <strong>{selectedUnit}</strong> se descontarán <strong>{conversionFactor} {selectedBaseProduct.unit}</strong> de <strong>{selectedBaseProduct.name}</strong>.
+                      </span>
+                      <span className="font-bold text-primary whitespace-nowrap bg-primary/10 px-2 py-0.5 rounded">
+                        Stock disponible: ~{Math.floor(selectedBaseProduct.currentStock / conversionFactor)} {selectedUnit}s
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="sm:col-span-2 text-xs text-muted-foreground italic">
+                      Selecciona un producto base si deseas compartir inventario. Si no, puedes desmarcar la casilla y el {selectedUnit.toLowerCase()} descontará su propio stock independiente al venderse.
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
