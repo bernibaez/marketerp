@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useForm } from 'react-hook-form';
 import type { Product } from './ProductManagementScreen';
 import { Package, Printer, Sparkles, Layers, Search, X, Loader2 } from 'lucide-react';
-import { generateUniqueBarcode } from '@/lib/barcodeUtils';
+import { generateUniqueBarcode, generateUniqueSku, generatePresentationSku } from '@/lib/barcodeUtils';
 import { normalizePlu } from '@/lib/scaleBarcode';
 import { logAuditEvent } from '@/lib/auditStore';
 import { toast } from '@/lib/toast';
@@ -312,6 +312,19 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
     toast.success(`Código de barras único generado: ${code}`);
   };
 
+  const handleGenerateSku = () => {
+    let sku = '';
+    if (isPresentation && selectedBaseProduct) {
+      sku = generatePresentationSku(selectedUnit, selectedBaseProduct.sku, selectedBaseProduct.name);
+    } else {
+      const name = getValues('name');
+      const prefix = name ? name.trim().slice(0, 3).toUpperCase() : 'SKU';
+      sku = generateUniqueSku(prefix);
+    }
+    setValue('sku', sku, { shouldValidate: true, shouldDirty: true });
+    toast.success(`SKU generado automáticamente: ${sku}`);
+  };
+
   const onSubmit = (data: FormValues) => {
     const cost = Number(data.costPrice);
     const sale = Number(data.salePrice);
@@ -377,20 +390,51 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
       }
     }
 
-    // Validation 5: Unique SKU validation
-    if (cleanSku && allProducts && allProducts.length > 0) {
-      const duplicate = allProducts.find(
-        (p) => p.id !== product?.id && p.sku && p.sku.trim().toLowerCase() === cleanSku.toLowerCase()
-      );
-      if (duplicate) {
-        toast.error(`El SKU "${cleanSku}" ya está asignado a otro producto ("${duplicate.name}").`);
-        return;
+    // Resolve final SKU (auto-generated if empty)
+    let finalSku = cleanSku;
+    if (!finalSku) {
+      if (isPresentation && selectedBaseProduct) {
+        finalSku = generatePresentationSku(selectedUnit, selectedBaseProduct.sku, selectedBaseProduct.name);
+      } else {
+        const prefix = (data.name || '').trim().slice(0, 3).toUpperCase() || 'SKU';
+        finalSku = generateUniqueSku(prefix);
       }
     }
+
+    // Validation 5: Unique SKU validation
+    if (allProducts && allProducts.length > 0) {
+      const duplicate = allProducts.find(
+        (p) => p.id !== product?.id && p.sku && p.sku.trim().toLowerCase() === finalSku.toLowerCase()
+      );
+      if (duplicate) {
+        if (!cleanSku) {
+          // If auto-generated, resolve collision by appending a unique counter
+          let uniqueSku = finalSku;
+          let counter = 1;
+          while (
+            allProducts.some(
+              (p) => p.id !== product?.id && p.sku && p.sku.trim().toLowerCase() === uniqueSku.toLowerCase()
+            )
+          ) {
+            uniqueSku = `${finalSku}-${counter++}`;
+          }
+          finalSku = uniqueSku;
+        } else {
+          toast.error(`El SKU "${cleanSku}" ya está asignado a otro producto ("${duplicate.name}").`);
+          return;
+        }
+      }
+    }
+
+    const finalCategory = (data.category || '').trim() || (selectedBaseProduct?.category || 'General');
+    const finalBrand = (data.brand || '').trim() || (selectedBaseProduct?.brand || '');
 
     const saved: Product = {
       id: product?.id ?? `prod-${Date.now()}`,
       ...data,
+      sku: finalSku,
+      category: finalCategory,
+      brand: finalBrand,
       plu: isWeight || isScaleProduct ? (cleanPlu || (product?.plu ?? '')) : '',
       unit: isWeight ? (weightState.weightUnit === 'kg' ? 'Kilogramo' : weightState.weightUnit === 'lb' ? 'Libra' : data.unit) : data.unit,
       costPrice: cost,
@@ -592,6 +636,24 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
     setIsSearchOpen(false);
     setBaseProductSearch('');
 
+    // Auto-generate presentation SKU if current SKU is empty or an auto-generated SKU
+    const currentSku = (getValues('sku') || '').trim();
+    if (!currentSku || /^(FDO|CTN|CAJ|PQT|BLS|CMB|PACK|SKU)-/i.test(currentSku)) {
+      const generatedSku = generatePresentationSku(selectedUnit, baseProd.sku, baseProd.name);
+      setValue('sku', generatedSku, { shouldValidate: true, shouldDirty: true });
+    }
+
+    // Auto-fill category, brand, and name if empty
+    if (!getValues('category') && baseProd.category) {
+      setValue('category', baseProd.category, { shouldDirty: true });
+    }
+    if (!getValues('brand') && baseProd.brand) {
+      setValue('brand', baseProd.brand, { shouldDirty: true });
+    }
+    if (!getValues('name')) {
+      setValue('name', `${selectedUnit} de ${baseProd.name}`, { shouldDirty: true, shouldValidate: true });
+    }
+
     // Si aún no se indicó cuántas unidades trae, sugerirlo por costos (el usuario puede cambiarlo)
     if (conversionFactor <= 1) {
       const currentCost = Number(getValues('costPrice') || 0);
@@ -611,6 +673,13 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
     if (isPackUnitItem(val)) {
       // Al elegir Fardo, Cartón, Caja, etc. se abre automáticamente la gestión del empaque
       setIsPresentation(true);
+      if (selectedBaseProduct) {
+        const currentSku = (getValues('sku') || '').trim();
+        if (!currentSku || /^(FDO|CTN|CAJ|PQT|BLS|CMB|PACK|SKU)-/i.test(currentSku)) {
+          const generatedSku = generatePresentationSku(val, selectedBaseProduct.sku, selectedBaseProduct.name);
+          setValue('sku', generatedSku, { shouldValidate: true, shouldDirty: true });
+        }
+      }
     } else {
       setIsPresentation(false);
       setBaseProductId('');
@@ -662,13 +731,36 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
               />
             </FormField>
 
-            <FormField label="SKU" name="sku" error={errors.sku?.message} required hint="Código único interno del producto">
-              <input
-                id="sku"
-                {...register('sku', { required: 'El SKU es obligatorio' })}
-                className="input-field font-mono"
-                placeholder="Ej: ARR-SEL-5LB"
-              />
+            <FormField
+              label="SKU (Opcional)"
+              name="sku"
+              error={errors.sku?.message}
+              hint={
+                isPresentation
+                  ? 'Se genera automáticamente para este fardo/empaque si se deja vacío'
+                  : 'Código único interno (se genera automáticamente si se deja vacío)'
+              }
+            >
+              <div className="flex gap-2">
+                <input
+                  id="sku"
+                  {...register('sku')}
+                  className="input-field font-mono flex-1"
+                  placeholder={
+                    isPresentation
+                      ? 'Ej: FDO-AGU-500 (Opcional)'
+                      : 'Ej: ARR-SEL-5LB (Opcional)'
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={handleGenerateSku}
+                  className="btn-secondary text-xs flex items-center gap-1 px-3 whitespace-nowrap cursor-pointer"
+                  title="Generar SKU automáticamente"
+                >
+                  <Sparkles size={14} className="text-primary" /> Generar SKU
+                </button>
+              </div>
             </FormField>
 
             <FormField label="PLU (Balanza)" name="plu" error={errors.plu?.message} hint="Código de balanza conservando ceros (ej. 00132)">
@@ -702,7 +794,7 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label htmlFor="category" className="block text-sm font-semibold text-foreground">
-                  Categoría <span className="text-danger ml-0.5">*</span>
+                  Categoría <span className="text-xs text-muted-foreground font-normal">(Opcional)</span>
                 </label>
                 <button
                   type="button"
@@ -711,19 +803,16 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
                     setQuickAddName('');
                     setQuickAddExtra('');
                   }}
-                  className="text-xs text-primary font-bold hover:underline inline-flex items-center gap-0.5"
+                  className="text-xs text-primary font-bold hover:underline inline-flex items-center gap-0.5 cursor-pointer"
                 >
                   + Nueva
                 </button>
               </div>
-              <select id="category" {...register('category', { required: true })} className="input-field">
-                {categoryOptions.length === 0 ? (
-                  <option value="">(Sin categorías)</option>
-                ) : (
-                  categoryOptions.map((c) => (
-                    <option key={`cat-opt-${c}`} value={c}>{c}</option>
-                  ))
-                )}
+              <select id="category" {...register('category')} className="input-field">
+                <option value="">(Sin categoría / General)</option>
+                {categoryOptions.map((c) => (
+                  <option key={`cat-opt-${c}`} value={c}>{c}</option>
+                ))}
               </select>
               {errors.category && <p className="text-sm text-danger">{errors.category.message}</p>}
             </div>
@@ -731,7 +820,7 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label htmlFor="brand" className="block text-sm font-semibold text-foreground">
-                  Marca <span className="text-danger ml-0.5">*</span>
+                  Marca <span className="text-xs text-muted-foreground font-normal">(Opcional)</span>
                 </label>
                 <button
                   type="button"
@@ -740,19 +829,16 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
                     setQuickAddName('');
                     setQuickAddExtra('');
                   }}
-                  className="text-xs text-primary font-bold hover:underline inline-flex items-center gap-0.5"
+                  className="text-xs text-primary font-bold hover:underline inline-flex items-center gap-0.5 cursor-pointer"
                 >
                   + Nueva
                 </button>
               </div>
-              <select id="brand" {...register('brand', { required: true })} className="input-field">
-                {brandOptions.length === 0 ? (
-                  <option value="">(Sin marcas)</option>
-                ) : (
-                  brandOptions.map((b) => (
-                    <option key={`brand-opt-${b}`} value={b}>{b}</option>
-                  ))
-                )}
+              <select id="brand" {...register('brand')} className="input-field">
+                <option value="">(Sin marca)</option>
+                {brandOptions.map((b) => (
+                  <option key={`brand-opt-${b}`} value={b}>{b}</option>
+                ))}
               </select>
               {errors.brand && <p className="text-sm text-danger">{errors.brand.message}</p>}
             </div>

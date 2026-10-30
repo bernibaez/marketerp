@@ -52,3 +52,45 @@ export function generateBarcodeBars(code: string): { width: number; key: string 
 
   return bars;
 }
+
+/** Generate a unique product SKU code */
+export function generateUniqueSku(prefix = 'SKU'): string {
+  const randomSuffix = Math.random().toString(36).substring(2, 7).toUpperCase();
+  const cleanPrefix = (prefix || 'SKU').replace(/[^A-Za-z0-9]/g, '').toUpperCase() || 'SKU';
+  return `${cleanPrefix}-${randomSuffix}`;
+}
+
+/** Generate a clean SKU specifically for pack / presentation products (e.g. Fardo, Cartón) */
+export function generatePresentationSku(unit: string, baseSku?: string, baseName?: string): string {
+  const normUnit = (unit || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+  let prefix = 'PACK';
+  if (normUnit.includes('FARDO')) prefix = 'FDO';
+  else if (normUnit.includes('CARTON')) prefix = 'CTN';
+  else if (normUnit.includes('CAJA')) prefix = 'CAJ';
+  else if (normUnit.includes('PAQUETE')) prefix = 'PQT';
+  else if (normUnit.includes('BOLSA')) prefix = 'BLS';
+  else if (normUnit.includes('COMBO')) prefix = 'CMB';
+  else prefix = normUnit.slice(0, 3) || 'PK';
+
+  if (baseSku) {
+    const cleanBase = baseSku.replace(/^(FDO|CTN|CAJ|PQT|BLS|CMB|SKU)-/i, '').trim();
+    return `${prefix}-${cleanBase}`;
+  }
+
+  if (baseName) {
+    const nameCode = baseName
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^A-Za-z0-9\s]/g, '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w.slice(0, 3).toUpperCase())
+      .join('-');
+    if (nameCode) {
+      return `${prefix}-${nameCode}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
+    }
+  }
+
+  return `${prefix}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+}
