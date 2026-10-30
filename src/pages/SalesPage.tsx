@@ -125,6 +125,7 @@ export default function SalesPage() {
     handleConfirmAnular,
     editingSale,
     setEditingSale,
+    handleOpenEditSale,
     handleSaveEditSale,
     printingSale,
     setPrintingSale,
@@ -260,6 +261,7 @@ export default function SalesPage() {
         <SaleEditView
           sale={editingSale}
           clients={dbClientes}
+          products={dbProductos}
           onSave={handleSaveEditSale}
           onClose={() => setEditingSale(null)}
         />
@@ -356,7 +358,7 @@ export default function SalesPage() {
               setPage(1);
             }}
             onViewDetail={(s) => void handleOpenSaleDetail(s)}
-            onEditSale={(s) => setEditingSale(s)}
+            onEditSale={(s) => void handleOpenEditSale(s)}
             onPrintSale={(s) => void handleOpenPrintSale(s)}
             onReturnSale={(s) => setReturnSale(s)}
             onAnularSale={(s) => setAnulandoSale(s)}

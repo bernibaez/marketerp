@@ -212,7 +212,7 @@ export function InvoiceLivePreview({
             </div>
             {settings.showCashier && (
               <div className="flex justify-between">
-                <span className="text-slate-500">Cajero:</span>
+                <span className="text-slate-500 font-semibold">Cajero responsable:</span>
                 <span>Caja #1 (Admin)</span>
               </div>
             )}

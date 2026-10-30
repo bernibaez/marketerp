@@ -1,10 +1,11 @@
 import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupabase';
-import { VENTA_COLUMNS, type MetodoPago, type Venta, type DetalleVenta } from '@/types/database';
-import { updateProductStockInStore } from '@/lib/productStore';
+import { VENTA_COLUMNS, type MetodoPago, type Venta, type DetalleVenta, type TipoItemVenta } from '@/types/database';
+import { updateProductStockInStore, getStoredProducts } from '@/lib/productStore';
 import { getCashClosures } from '@/lib/cashClosureStore';
 import { crearCxcDesdeVenta } from './cxc.service';
 import { AUTH_ACCOUNTS } from '@/lib/auth';
 import { isAbortError } from '@/lib/isAbortError';
+import { logAuditEvent } from '@/lib/auditStore';
 
 function isUUID(str: string | null | undefined): boolean {
   return Boolean(
@@ -498,10 +499,19 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     });
     saveLocalVentas([venta, ...getLocalVentas().filter((v) => v.id !== id)]);
 
-    // Descontar stock local (soporta cantidades fraccionarias exactas)
+    // Descontar stock local (soporta cantidades fraccionarias exactas y presentaciones)
     for (const item of payload.items) {
       if (item.tipo_item === 'producto' && item.producto_id) {
-        updateProductStockInStore(item.producto_id, -item.cantidad);
+        let deductId = item.producto_id;
+        let deductQty = item.cantidad;
+        const stored = getStoredProducts().find((p) => p.id === item.producto_id);
+        const baseId = (stored as any)?.producto_base_id;
+        const factor = Number((stored as any)?.factor_conversion || 1);
+        if (baseId && factor > 1) {
+          deductId = baseId;
+          deductQty = item.cantidad * factor;
+        }
+        updateProductStockInStore(deductId, -deductQty);
       }
     }
 
@@ -1339,14 +1349,35 @@ export async function anularVenta(ventaId: string, motivo: string = 'Anulación'
   if (error) throw error;
 }
 
+export interface EditarVentaItem {
+  id?: string;
+  producto_id: string | null;
+  combo_id?: string | null;
+  tipo_item: TipoItemVenta;
+  nombre_item: string;
+  sku?: string | null;
+  precio_unitario: number;
+  costo_unitario: number;
+  cantidad: number;
+  porcentaje_impuesto: number;
+  subtotal: number;
+}
+
 export type ActualizarVentaPayload = {
   cliente_id?: string | null;
+  cliente_nombre?: string;
   metodo_pago?: MetodoPago;
   tipo_ncf?: string | null;
   ncf?: string | null;
+  subtotal?: number;
+  monto_impuesto?: number;
   monto_descuento?: number;
   monto_total?: number;
+  costo_total?: number;
   estado?: Venta['estado'];
+  items?: EditarVentaItem[];
+  usuario_modificador_id?: string | null;
+  usuario_modificador_nombre?: string;
 };
 
 export async function actualizarVenta(
@@ -1354,62 +1385,227 @@ export async function actualizarVenta(
   payload: ActualizarVentaPayload
 ): Promise<void> {
   const sb = tryGetSupabase();
-  if (!sb) {
-    const list = getLocalVentas().map((v) => {
-      if (v.id !== ventaId) return v;
-      const nextDescuento =
-        payload.monto_descuento !== undefined ? Number(payload.monto_descuento) : v.monto_descuento;
-      const nextTotal =
-        payload.monto_total !== undefined
-          ? Number(payload.monto_total)
-          : payload.monto_descuento !== undefined
-            ? round2(Math.max(0, v.subtotal + v.monto_impuesto - nextDescuento))
-            : v.monto_total;
-      return {
-        ...v,
-        ...payload,
-        monto_descuento: nextDescuento,
-        monto_total: nextTotal,
-      };
-    });
-    saveLocalVentas(list);
-    return;
+
+  // 1. Obtener la venta actual antes de modificaciones para calcular deltas y auditoría
+  let currentSale: VentaConDetalle | null = null;
+  try {
+    currentSale = await obtenerVentaPorId(ventaId);
+  } catch {
+    // ignore
   }
 
-  const updateData: ActualizarVentaPayload = { ...payload };
-  if (payload.monto_descuento !== undefined && payload.monto_total === undefined) {
-    try {
-      const { data: current } = await sb
-        .from('ventas')
-        .select('subtotal, monto_impuesto')
-        .eq('id', ventaId)
-        .single();
-      if (current) {
-        updateData.monto_total = round2(
-          Math.max(
-            0,
-            Number(current.subtotal || 0) +
-              Number(current.monto_impuesto || 0) -
-              Number(payload.monto_descuento || 0)
-          )
-        );
+  const oldItems = currentSale?.detalle_ventas ?? [];
+
+  // 2. Calcular deltas de inventario si se proporcionaron items
+  const deltas: Array<{ producto_id: string; delta: number }> = [];
+  if (payload.items && payload.items.length > 0) {
+    const oldQtyByProd = new Map<string, number>();
+    for (const it of oldItems) {
+      if (it.tipo_item === 'producto' && it.producto_id) {
+        oldQtyByProd.set(it.producto_id, (oldQtyByProd.get(it.producto_id) || 0) + Number(it.cantidad || 0));
       }
-    } catch {
-      // ignore
+    }
+    const newQtyByProd = new Map<string, number>();
+    for (const it of payload.items) {
+      if (it.tipo_item === 'producto' && it.producto_id) {
+        newQtyByProd.set(it.producto_id, (newQtyByProd.get(it.producto_id) || 0) + Number(it.cantidad || 0));
+      }
+    }
+    const allProdIds = new Set([...oldQtyByProd.keys(), ...newQtyByProd.keys()]);
+    for (const prodId of allProdIds) {
+      const oldQty = oldQtyByProd.get(prodId) || 0;
+      const newQty = newQtyByProd.get(prodId) || 0;
+      const delta = round2(newQty - oldQty);
+      if (Math.abs(delta) > 0.0001) {
+        deltas.push({ producto_id: prodId, delta });
+      }
+    }
+
+    // Actualizar inventario local para cada producto modificado (-delta)
+    for (const d of deltas) {
+      updateProductStockInStore(d.producto_id, -d.delta);
     }
   }
 
-  const { error } = await sb
-    .from('ventas')
-    .update(updateData)
-    .eq('id', ventaId);
+  // 3. Si Supabase está disponible, intentar RPC transaccional o actualización directa
+  if (sb) {
+    let rpcSuccess = false;
+    if (payload.items && payload.items.length > 0) {
+      try {
+        const rpcPayload = {
+          cliente_id: isUUID(payload.cliente_id) ? payload.cliente_id : null,
+          metodo_pago: payload.metodo_pago,
+          tipo_ncf: payload.tipo_ncf,
+          ncf: payload.ncf,
+          subtotal: payload.subtotal,
+          monto_impuesto: payload.monto_impuesto,
+          monto_descuento: payload.monto_descuento,
+          monto_total: payload.monto_total,
+          costo_total: payload.costo_total,
+          estado: payload.estado,
+          usuario_modificador_id: isUUID(payload.usuario_modificador_id) ? payload.usuario_modificador_id : null,
+          usuario_modificador_nombre: payload.usuario_modificador_nombre || 'Administrador',
+          items: payload.items.map((it) => ({
+            producto_id: isUUID(it.producto_id) ? it.producto_id : null,
+            combo_id: isUUID(it.combo_id) ? it.combo_id : null,
+            tipo_item: it.tipo_item,
+            nombre_item: it.nombre_item,
+            sku: it.sku ?? null,
+            precio_unitario: round2(it.precio_unitario),
+            costo_unitario: round2(it.costo_unitario),
+            cantidad: Number(it.cantidad),
+            porcentaje_impuesto: Number(it.porcentaje_impuesto ?? 18),
+            subtotal: round2(it.subtotal),
+          })),
+        };
+        const { error: rpcErr } = await sb.rpc('editar_venta_pos', {
+          p_venta_id: ventaId,
+          p_payload: rpcPayload,
+        });
+        if (!rpcErr) {
+          rpcSuccess = true;
+        }
+      } catch {
+        rpcSuccess = false;
+      }
+    }
 
-  if (error) throw error;
+    if (!rpcSuccess) {
+      // Actualización directa si el RPC aún no está desplegado en base remota
+      const updateData: Record<string, unknown> = {
+        actualizado_en: new Date().toISOString(),
+      };
+      if (payload.cliente_id !== undefined) updateData.cliente_id = isUUID(payload.cliente_id) ? payload.cliente_id : null;
+      if (payload.metodo_pago !== undefined) updateData.metodo_pago = payload.metodo_pago;
+      if (payload.tipo_ncf !== undefined) updateData.tipo_ncf = payload.tipo_ncf;
+      if (payload.ncf !== undefined) updateData.ncf = payload.ncf;
+      if (payload.subtotal !== undefined) updateData.subtotal = payload.subtotal;
+      if (payload.monto_impuesto !== undefined) updateData.monto_impuesto = payload.monto_impuesto;
+      if (payload.monto_descuento !== undefined) updateData.monto_descuento = payload.monto_descuento;
+      if (payload.monto_total !== undefined) updateData.monto_total = payload.monto_total;
+      if (payload.costo_total !== undefined) updateData.costo_total = payload.costo_total;
+      if (payload.estado !== undefined) updateData.estado = payload.estado;
 
-  if (updateData.monto_descuento !== undefined || updateData.monto_total !== undefined) {
-    saveVentaMeta(ventaId, {
-      ...(updateData.monto_descuento !== undefined ? { monto_descuento: updateData.monto_descuento } : {}),
-      ...(updateData.monto_total !== undefined ? { monto_total: updateData.monto_total } : {}),
+      const { error: updateErr } = await sb.from('ventas').update(updateData).eq('id', ventaId);
+      if (updateErr) throw updateErr;
+
+      // Actualizar detalle_ventas en Supabase si se pasaron items
+      if (payload.items && payload.items.length > 0) {
+        try {
+          await sb.from('detalle_ventas').delete().eq('venta_id', ventaId);
+          await sb.from('detalle_ventas').insert(
+            payload.items.map((it, idx) => ({
+              id: `${ventaId}-item-${Date.now()}-${idx + 1}`,
+              venta_id: ventaId,
+              producto_id: isUUID(it.producto_id) ? it.producto_id : null,
+              combo_id: isUUID(it.combo_id) ? it.combo_id : null,
+              tipo_item: it.tipo_item,
+              nombre_item: it.nombre_item,
+              precio_unitario: round2(it.precio_unitario),
+              costo_unitario: round2(it.costo_unitario),
+              cantidad: Number(it.cantidad),
+              porcentaje_impuesto: Number(it.porcentaje_impuesto ?? 18),
+              subtotal: round2(it.subtotal),
+            }))
+          );
+        } catch {
+          // ignore if table constraints prevent direct delete/insert
+        }
+      }
+
+      // Actualizar stock en Supabase para cada delta
+      for (const d of deltas) {
+        try {
+          const { data: pData } = await sb.from('productos').select('stock_actual').eq('id', d.producto_id).single();
+          if (pData) {
+            await sb.from('productos').update({
+              stock_actual: Number(pData.stock_actual || 0) - d.delta,
+              actualizado_en: new Date().toISOString(),
+            }).eq('id', d.producto_id);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  // 4. Actualizar metadata y almacenamiento local
+  const effectiveItems = payload.items && payload.items.length > 0
+    ? payload.items.map((it, idx) => ({
+        id: it.id || `${ventaId}-item-${idx + 1}`,
+        venta_id: ventaId,
+        producto_id: it.producto_id,
+        combo_id: it.combo_id ?? null,
+        tipo_item: it.tipo_item,
+        nombre_item: it.nombre_item,
+        sku: it.sku ?? null,
+        precio_unitario: round2(it.precio_unitario),
+        costo_unitario: round2(it.costo_unitario),
+        cantidad: Number(it.cantidad),
+        porcentaje_impuesto: Number(it.porcentaje_impuesto ?? 18),
+        subtotal: round2(it.subtotal),
+      }))
+    : currentSale?.detalle_ventas;
+
+  saveVentaMeta(ventaId, {
+    ...(payload.cliente_id !== undefined ? { cliente_id: payload.cliente_id } : {}),
+    ...(payload.cliente_nombre !== undefined ? { cliente_nombre: payload.cliente_nombre } : {}),
+    ...(payload.metodo_pago !== undefined ? { metodo_pago: payload.metodo_pago } : {}),
+    ...(payload.tipo_ncf !== undefined ? { tipo_ncf: payload.tipo_ncf } : {}),
+    ...(payload.ncf !== undefined ? { ncf: payload.ncf } : {}),
+    ...(payload.subtotal !== undefined ? { subtotal: payload.subtotal } : {}),
+    ...(payload.monto_impuesto !== undefined ? { monto_impuesto: payload.monto_impuesto } : {}),
+    ...(payload.monto_descuento !== undefined ? { monto_descuento: payload.monto_descuento } : {}),
+    ...(payload.monto_total !== undefined ? { monto_total: payload.monto_total } : {}),
+    ...(effectiveItems ? { detalle_ventas: effectiveItems } : {}),
+  });
+
+  const updatedLocal = getLocalVentas().map((v) => {
+    if (v.id !== ventaId) return v;
+    return {
+      ...v,
+      ...(payload.cliente_id !== undefined ? { cliente_id: payload.cliente_id } : {}),
+      ...(payload.cliente_nombre !== undefined ? { cliente_nombre: payload.cliente_nombre } : {}),
+      ...(payload.metodo_pago !== undefined ? { metodo_pago: payload.metodo_pago } : {}),
+      ...(payload.tipo_ncf !== undefined ? { tipo_ncf: payload.tipo_ncf } : {}),
+      ...(payload.ncf !== undefined ? { ncf: payload.ncf } : {}),
+      ...(payload.subtotal !== undefined ? { subtotal: payload.subtotal } : {}),
+      ...(payload.monto_impuesto !== undefined ? { monto_impuesto: payload.monto_impuesto } : {}),
+      ...(payload.monto_descuento !== undefined ? { monto_descuento: payload.monto_descuento } : {}),
+      ...(payload.monto_total !== undefined ? { monto_total: payload.monto_total } : {}),
+      ...(payload.estado !== undefined ? { estado: payload.estado } : {}),
+      ...(effectiveItems ? { detalle_ventas: effectiveItems } : {}),
+    };
+  });
+  saveLocalVentas(updatedLocal);
+
+  // 5. Registrar evento en la auditoría con usuario, fecha/hora y detalle
+  try {
+    const userMod = payload.usuario_modificador_nombre || 'Administrador';
+    const numFact = currentSale?.numero_factura || ventaId;
+    logAuditEvent({
+      action: 'Edición de venta',
+      module: 'Ventas',
+      user: userMod,
+      role: 'Administrador',
+      details: `Factura ${numFact} editada por ${userMod}. ${payload.items ? `${payload.items.length} productos, ` : ''}Total RD$ ${(payload.monto_total ?? currentSale?.monto_total ?? 0).toLocaleString('es-DO')}. Inventario recalculado y actualizado.`,
+      before: currentSale
+        ? {
+            numero_factura: currentSale.numero_factura,
+            cliente: currentSale.cliente_nombre,
+            total: currentSale.monto_total,
+            items: currentSale.detalle_ventas?.length ?? 0,
+          }
+        : null,
+      after: {
+        numero_factura: numFact,
+        cliente: payload.cliente_nombre || payload.cliente_id,
+        total: payload.monto_total,
+        items: payload.items?.length ?? currentSale?.detalle_ventas?.length ?? 0,
+      },
     });
+  } catch {
+    // Non-blocking audit log
   }
 }

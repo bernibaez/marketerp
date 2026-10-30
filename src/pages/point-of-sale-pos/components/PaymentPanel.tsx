@@ -92,6 +92,7 @@ export default function PaymentPanel({
   const [processing, setProcessing] = useState(false);
   const [split, setSplit] = useState({ cash: '', card: '', transfer: '', credit: '' });
   const [lastChange, setLastChange] = useState(0);
+  const [completedPayments, setCompletedPayments] = useState<PaymentSplit | null>(null);
   const [completedSaleResult, setCompletedSaleResult] = useState<{
     numero_factura: string;
     ncf?: string | null;
@@ -269,6 +270,7 @@ export default function PaymentPanel({
           ? Math.max(0, splitNums.cash - (payments.cash || 0))
           : 0;
     setLastChange(computedChange);
+    setCompletedPayments(payments);
 
     try {
       const parts = [
@@ -428,6 +430,26 @@ export default function PaymentPanel({
       itbis: Math.round(computedTax * 100) / 100,
       total,
       paymentMethod: method,
+      paymentBreakdown: completedPayments
+        ? [
+            completedPayments.cash > 0
+              ? { method: 'efectivo', label: 'Efectivo', amount: completedPayments.cash }
+              : null,
+            completedPayments.card > 0
+              ? { method: 'tarjeta', label: 'Tarjeta', amount: completedPayments.card }
+              : null,
+            completedPayments.transfer > 0
+              ? { method: 'transferencia', label: 'Transferencia bancaria', amount: completedPayments.transfer }
+              : null,
+            completedPayments.credit > 0
+              ? { method: 'credito', label: 'Crédito', amount: completedPayments.credit }
+              : null,
+          ].filter(Boolean) as any
+        : undefined,
+      montoEfectivo: completedPayments?.cash,
+      montoTarjeta: completedPayments?.card,
+      montoTransferencia: completedPayments?.transfer,
+      montoCredito: completedPayments?.credit,
       cashReceived: cashAmount || total,
       change: lastChange || 0,
     };
@@ -506,7 +528,7 @@ export default function PaymentPanel({
                   <span>{completedInvoiceData.issueDate} {completedInvoiceData.issueTime}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Cajero</span>
+                  <span>Cajero responsable</span>
                   <span>{completedInvoiceData.cashier}</span>
                 </div>
               </div>

@@ -159,17 +159,33 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
   const { error: detErr } = await sb.from('detalle_compras').insert(detalles);
   if (detErr) throw detErr;
 
-  // Actualiza stock y precios en productos (costo, venta y al por mayor)
+  // Actualiza stock y precios en productos (considerando factores de conversión a unidad base)
   for (const linea of input.lineas) {
     if (!linea.producto_id) continue;
     const { data: prod } = await sb
       .from('productos')
-      .select('stock_actual')
+      .select('stock_actual, producto_base_id, factor_conversion')
       .eq('id', linea.producto_id)
       .maybeSingle();
-    const stockActual = Number(prod?.stock_actual ?? 0);
+
+    const factor = Number((prod as any)?.factor_conversion || 1);
+    const baseId = (prod as any)?.producto_base_id;
+    const targetProdId = baseId || linea.producto_id;
+    const addQty = factor > 1 && baseId ? linea.cantidad * factor : linea.cantidad;
+
+    const { data: targetProd } = await sb
+      .from('productos')
+      .select('stock_actual')
+      .eq('id', targetProdId)
+      .maybeSingle();
+
+    const currentBaseStock = Number(targetProd?.stock_actual ?? 0);
+    await actualizarProducto(targetProdId, {
+      stock_actual: currentBaseStock + addQty,
+    });
+
+    // Actualizar precios de la presentación o producto comprado
     await actualizarProducto(linea.producto_id, {
-      stock_actual: stockActual + linea.cantidad,
       precio_costo: linea.precio_costo,
       precio_venta: linea.precio_venta,
       ...(linea.precio_mayorista !== undefined ? { precio_mayorista: linea.precio_mayorista } : {}),

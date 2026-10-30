@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useForm } from 'react-hook-form';
 import type { Product } from './ProductManagementScreen';
-import { Package, Printer, Sparkles } from 'lucide-react';
+import { Package, Printer, Sparkles, Layers } from 'lucide-react';
 import { generateUniqueBarcode } from '@/lib/barcodeUtils';
 import { normalizePlu } from '@/lib/scaleBarcode';
 import { logAuditEvent } from '@/lib/auditStore';
@@ -26,7 +26,7 @@ interface ProductFormModalProps {
 
 type FormValues = Omit<Product, 'id' | 'stockStatus'>;
 
-const units = ['Unidad', 'Libra', 'Kilogramo', 'Litro', 'Cartón', 'Paquete', 'Caja', 'Bolsa'];
+const units = ['Unidad', 'Botella', 'Fardo', 'Cartón', 'Medio cartón', 'Libra', 'Kilogramo', 'Litro', 'Paquete', 'Caja', 'Bolsa'];
 const taxOptions = [0, 18];
 
 
@@ -104,6 +104,10 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
     generateScaleBarcode: defaultIsScaleProduct,
   });
 
+  const [isPresentation, setIsPresentation] = useState(false);
+  const [baseProductId, setBaseProductId] = useState('');
+  const [conversionFactor, setConversionFactor] = useState(1);
+
   const {
     register,
     handleSubmit,
@@ -165,6 +169,9 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
         allowDecimal: product.allowDecimal ?? true,
         generateScaleBarcode: product.generateScaleBarcode ?? false,
       });
+      setIsPresentation(Boolean(product.producto_base_id));
+      setBaseProductId(product.producto_base_id || '');
+      setConversionFactor(product.factor_conversion || 1);
     } else {
       reset({
         barcode: '',
@@ -195,6 +202,9 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
         allowDecimal: true,
         generateScaleBarcode: defaultIsScaleProduct,
       });
+      setIsPresentation(false);
+      setBaseProductId('');
+      setConversionFactor(1);
     }
   }, [product, reset, open, defaultIsScaleProduct]);
 
@@ -322,6 +332,8 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
       allowDecimal: weightState.allowDecimal,
       generateScaleBarcode: weightState.generateScaleBarcode,
       isWeightProduct: isWeight,
+      producto_base_id: isPresentation && baseProductId ? baseProductId : null,
+      factor_conversion: isPresentation && baseProductId ? Math.max(1, Number(conversionFactor) || 1) : 1,
     };
 
     // System Audit Event
@@ -548,6 +560,81 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
           onChange={(updates) => setWeightState((prev) => ({ ...prev, ...updates }))}
           baseSalePrice={Number(salePrice || 0)}
         />
+
+        <div className="border-t border-border" />
+
+        {/* Section: Presentación Comercial y Conversión de Unidades */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-info/10 flex items-center justify-center">
+              <Layers size={14} className="text-info" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Unidad de Medida y Conversión (Presentación)</h3>
+              <p className="text-xs text-muted-foreground">
+                Permite comprar y vender en presentaciones comerciales (ej: Fardo, Cartón) vinculadas al inventario base.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-secondary/20 p-4 rounded-xl border border-border/60 space-y-3">
+            <label className="flex items-center gap-2.5 cursor-pointer text-sm font-medium text-foreground select-none">
+              <input
+                type="checkbox"
+                checked={isPresentation}
+                onChange={(e) => setIsPresentation(e.target.checked)}
+                className="rounded border-border text-primary focus:ring-primary h-4 w-4"
+              />
+              <span>Este producto es una presentación comercial vinculada a una unidad base</span>
+            </label>
+
+            {isPresentation && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border/50">
+                <div>
+                  <label className="block text-xs font-semibold text-muted-foreground mb-1">
+                    Producto / Unidad Base de Inventario *
+                  </label>
+                  <select
+                    className="input-field text-xs w-full"
+                    value={baseProductId}
+                    onChange={(e) => setBaseProductId(e.target.value)}
+                  >
+                    <option value="">Seleccionar producto base (ej: Botella, Medio Cartón)...</option>
+                    {allProducts
+                      .filter((p) => p.id !== product?.id)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} {p.sku ? `(SKU: ${p.sku})` : ''} — Stock: {p.currentStock} {p.unit}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-muted-foreground mb-1">
+                    Factor de Conversión * (Unidades base contenidas)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    step="any"
+                    className="input-field text-xs w-full font-mono"
+                    placeholder="Ej: 20 para Fardo de agua, 2 para Cartón"
+                    value={conversionFactor}
+                    onChange={(e) => setConversionFactor(Math.max(1, Number(e.target.value)))}
+                  />
+                </div>
+
+                <div className="sm:col-span-2 text-xs bg-card/60 p-2.5 rounded-lg border border-border text-muted-foreground">
+                  💡 <span className="font-semibold text-foreground">Regla de Inventario: </span>
+                  Al vender 1 unidad de esta presentación comercial, el sistema descontará automáticamente{' '}
+                  <span className="font-bold text-primary font-mono">{conversionFactor}</span> unidades del producto base seleccionado. En compras, sumará{' '}
+                  <span className="font-bold text-primary font-mono">{conversionFactor}</span> unidades al inventario base.
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
 
         <div className="border-t border-border" />
 

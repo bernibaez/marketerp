@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   getInvoiceSettings,
   subscribeInvoiceSettings,
@@ -21,6 +21,12 @@ export interface InvoiceItem {
   subtotal: number;
   itbis?: number;
   taxRate?: string;
+}
+
+export interface PaymentMethodBreakdown {
+  method: string;
+  label: string;
+  amount: number;
 }
 
 export interface PrintableInvoiceProps {
@@ -52,6 +58,11 @@ export interface PrintableInvoiceProps {
     itbis: number;
     total: number;
     paymentMethod?: string;
+    paymentBreakdown?: PaymentMethodBreakdown[];
+    montoEfectivo?: number;
+    montoTarjeta?: number;
+    montoTransferencia?: number;
+    montoCredito?: number;
     cashReceived?: number;
     change?: number;
     notes?: string;
@@ -219,6 +230,45 @@ export default function PrintableInvoice({
     return 'FACTURA PARA CONSUMIDOR FINAL';
   };
 
+  const formatMethodName = (m?: string): string => {
+    if (!m) return 'Efectivo';
+    const norm = m.toLowerCase();
+    if (norm === 'card' || norm === 'tarjeta') return 'Tarjeta';
+    if (norm === 'transfer' || norm === 'transferencia') return 'Transferencia bancaria';
+    if (norm === 'credit' || norm === 'credito' || norm === 'crédito') return 'Venta a crédito';
+    if (norm === 'split' || norm === 'mixto') return 'Pago mixto / múltiple';
+    return 'Efectivo';
+  };
+
+  const computedPaymentBreakdown = useMemo<PaymentMethodBreakdown[]>(() => {
+    if (invoiceData.paymentBreakdown && invoiceData.paymentBreakdown.length > 0) {
+      return invoiceData.paymentBreakdown.filter((p) => p.amount > 0);
+    }
+    const list: PaymentMethodBreakdown[] = [];
+    if (Number(invoiceData.montoEfectivo || 0) > 0) {
+      list.push({ method: 'efectivo', label: 'Efectivo', amount: Number(invoiceData.montoEfectivo) });
+    }
+    if (Number(invoiceData.montoTarjeta || 0) > 0) {
+      list.push({ method: 'tarjeta', label: 'Tarjeta', amount: Number(invoiceData.montoTarjeta) });
+    }
+    if (Number(invoiceData.montoTransferencia || 0) > 0) {
+      list.push({ method: 'transferencia', label: 'Transferencia bancaria', amount: Number(invoiceData.montoTransferencia) });
+    }
+    if (Number(invoiceData.montoCredito || 0) > 0) {
+      list.push({ method: 'credito', label: 'Crédito', amount: Number(invoiceData.montoCredito) });
+    }
+    return list;
+  }, [invoiceData]);
+
+  const isMultiPayment = computedPaymentBreakdown.length > 1;
+  const totalPagadoEnDesglose = computedPaymentBreakdown.reduce((sum, p) => sum + p.amount, 0);
+  const totalPagadoEfectivo = isMultiPayment
+    ? totalPagadoEnDesglose
+    : (invoiceData.cashReceived ?? invoiceData.total);
+  const primaryPaymentLabel = formatMethodName(
+    computedPaymentBreakdown.length === 1 ? computedPaymentBreakdown[0].method : invoiceData.paymentMethod
+  );
+
   const paymentMethodLabel = (m?: string): string => {
     if (!m) return 'Efectivo recibido:';
     const norm = m.toLowerCase();
@@ -344,12 +394,10 @@ export default function PrintableInvoice({
               {settings.showIssueTime && invoiceData.issueTime ? invoiceData.issueTime : ''}
             </span>
           </div>
-          {settings.showCashier && (
-            <div className="flex justify-between gap-2">
-              <span className="text-slate-500">Cajero:</span>
-              <span className="text-right">{invoiceData.cashier || 'Caja #1 (Admin)'}</span>
-            </div>
-          )}
+          <div className="flex justify-between gap-2">
+            <span className="text-slate-500 font-semibold">Cajero responsable:</span>
+            <span className="text-right font-medium text-slate-900">{invoiceData.cashier || 'Cajero'}</span>
+          </div>
           {settings.showRegisterNumber && (
             <div className="flex justify-between gap-2">
               <span className="text-slate-500">Terminal:</span>
@@ -435,25 +483,48 @@ export default function PrintableInvoice({
             <span className="tabular-nums">{fmt(invoiceData.total)}</span>
           </div>
 
-          {settings.showPaymentDetails && (
-            <div
-              className="pt-1.5 text-slate-600 space-y-0.5"
-              style={{ fontSize: `${baseFontPt - 1.5}px` }}
-            >
-              <div className="flex justify-between">
-                <span>{paymentMethodLabel(invoiceData.paymentMethod)}</span>
-                <span className="tabular-nums">
-                  {fmt(invoiceData.cashReceived ?? invoiceData.total)}
-                </span>
-              </div>
-              {settings.showChange && (
-                <div className="flex justify-between font-semibold text-slate-900">
-                  <span>Cambio entregado:</span>
-                  <span className="tabular-nums">{fmt(invoiceData.change ?? 0)}</span>
+          {/* Sección de Métodos de Pago (Simple o Múltiple) */}
+          <div
+            className="pt-2 text-slate-700 space-y-1 border-t border-dashed border-slate-300"
+            style={{ fontSize: `${baseFontPt - 1.5}px` }}
+          >
+            {isMultiPayment ? (
+              <div className="space-y-1">
+                <div className="flex justify-between font-black text-slate-800 pb-0.5 border-b border-slate-200 uppercase tracking-tight">
+                  <span>MÉTODO DE PAGO</span>
+                  <span>IMPORTE</span>
                 </div>
-              )}
-            </div>
-          )}
+                {computedPaymentBreakdown.map((p, idx) => (
+                  <div key={idx} className="flex justify-between">
+                    <span className="font-medium text-slate-700">{p.label}</span>
+                    <span className="font-mono tabular-nums font-semibold text-slate-900">{fmt(p.amount)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between font-bold text-slate-900 pt-1 border-t border-slate-200">
+                  <span>Total Pagado:</span>
+                  <span className="font-mono tabular-nums">{fmt(totalPagadoEfectivo)}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                <div className="flex justify-between">
+                  <span className="font-semibold text-slate-600">Método de pago:</span>
+                  <span className="font-bold text-slate-900">{primaryPaymentLabel}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Importe pagado:</span>
+                  <span className="font-mono tabular-nums">{fmt(invoiceData.cashReceived ?? invoiceData.total)}</span>
+                </div>
+              </div>
+            )}
+
+            {invoiceData.change !== undefined && Number(invoiceData.change) > 0 && (
+              <div className="flex justify-between font-semibold text-slate-900 pt-0.5 border-t border-slate-100">
+                <span>Cambio entregado:</span>
+                <span className="font-mono tabular-nums">{fmt(invoiceData.change)}</span>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Código de barras / QR si está activo */}
@@ -630,14 +701,12 @@ export default function PrintableInvoice({
               {settings.showIssueTime && invoiceData.issueTime ? invoiceData.issueTime : ''}
             </span>
           </div>
-          {settings.showCashier && (
-            <div className="flex sm:justify-end gap-2">
-              <span className="text-slate-500">Cajero:</span>
-              <span className="font-semibold text-slate-900">
-                {invoiceData.cashier || 'Caja #1 (Admin)'}
-              </span>
-            </div>
-          )}
+          <div className="flex sm:justify-end gap-2">
+            <span className="text-slate-500 font-semibold">Cajero responsable:</span>
+            <span className="font-semibold text-slate-900">
+              {invoiceData.cashier || 'Cajero'}
+            </span>
+          </div>
           {settings.showRegisterNumber && (
             <div className="flex sm:justify-end gap-2">
               <span className="text-slate-500">Terminal:</span>
@@ -757,25 +826,48 @@ export default function PrintableInvoice({
             </span>
           </div>
 
-          {settings.showPaymentDetails && (
-            <div
-              className="pt-2 text-slate-600 space-y-0.5"
-              style={{ fontSize: `${baseFontPt - 1}px` }}
-            >
-              <div className="flex justify-between sm:justify-end sm:gap-8">
-                <span>{paymentMethodLabel(invoiceData.paymentMethod)}</span>
-                <span className="font-mono tabular-nums">
-                  {fmt(invoiceData.cashReceived ?? invoiceData.total)}
-                </span>
-              </div>
-              {settings.showChange && (
-                <div className="flex justify-between sm:justify-end sm:gap-8 font-semibold text-slate-900">
-                  <span>Cambio entregado:</span>
-                  <span className="font-mono tabular-nums">{fmt(invoiceData.change ?? 0)}</span>
+          {/* Sección de Métodos de Pago (Simple o Múltiple) */}
+          <div
+            className="pt-3 text-slate-700 space-y-2 border-t border-slate-200"
+            style={{ fontSize: `${baseFontPt - 1}px` }}
+          >
+            {isMultiPayment ? (
+              <div className="space-y-1 sm:max-w-sm sm:ml-auto">
+                <div className="flex justify-between font-black text-slate-800 pb-1 border-b border-slate-200 uppercase tracking-tight text-xs">
+                  <span>MÉTODO DE PAGO</span>
+                  <span>IMPORTE</span>
                 </div>
-              )}
-            </div>
-          )}
+                {computedPaymentBreakdown.map((p, idx) => (
+                  <div key={idx} className="flex justify-between">
+                    <span className="font-medium text-slate-700">{p.label}</span>
+                    <span className="font-mono tabular-nums font-semibold text-slate-900">{fmt(p.amount)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between font-bold text-slate-900 pt-1 border-t border-slate-200">
+                  <span>Total Pagado:</span>
+                  <span className="font-mono tabular-nums">{fmt(totalPagadoEfectivo)}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <div className="flex justify-between sm:justify-end sm:gap-8">
+                  <span className="font-semibold text-slate-600">Método de pago:</span>
+                  <span className="font-bold text-slate-900">{primaryPaymentLabel}</span>
+                </div>
+                <div className="flex justify-between sm:justify-end sm:gap-8">
+                  <span className="text-slate-600">Importe pagado:</span>
+                  <span className="font-mono tabular-nums">{fmt(invoiceData.cashReceived ?? invoiceData.total)}</span>
+                </div>
+              </div>
+            )}
+
+            {invoiceData.change !== undefined && Number(invoiceData.change) > 0 && (
+              <div className="flex justify-between sm:justify-end sm:gap-8 font-semibold text-slate-900 pt-1 border-t border-slate-100">
+                <span>Cambio entregado:</span>
+                <span className="font-mono tabular-nums">{fmt(invoiceData.change)}</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

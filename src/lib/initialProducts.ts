@@ -29,6 +29,9 @@ export interface Product {
   maxWeight?: number;
   generateScaleBarcode?: boolean;
   isWeightProduct?: boolean;
+  producto_base_id?: string | null;
+  factor_conversion?: number;
+  unidad_base?: string;
 }
 
 export const initialProducts: Product[] = [

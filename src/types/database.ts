@@ -7,7 +7,7 @@ export type MetodoPago = 'efectivo' | 'tarjeta' | 'transferencia' | 'credito' | 
 export type EstadoVenta = 'completada' | 'reembolsada' | 'anulada';
 export type TipoAjuste = 'entrada' | 'salida' | 'perdida';
 export type TipoDescuento = 'fijo' | 'porcentaje' | 'monto';
-export type TipoItemVenta = 'producto' | 'combo';
+export type TipoItemVenta = 'producto' | 'combo' | 'servicio';
 export type TipoCliente = 'final' | 'fiscal' | 'credito';
 export type EstadoCaja = 'abierta' | 'cerrada';
 
@@ -66,6 +66,9 @@ export interface Producto {
   garantia: string | null;
   imagen_url: string | null;
   estado: EstadoProducto;
+  producto_base_id?: string | null;
+  factor_conversion?: number;
+  unidad_base?: string;
   creado_en?: string;
   actualizado_en?: string;
 }

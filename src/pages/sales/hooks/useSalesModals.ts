@@ -3,23 +3,15 @@ import { toast } from '@/lib/toast';
 import { obtenerClientes } from '@/services/clientes.service';
 import { obtenerProductos } from '@/services/productos.service';
 import { obtenerDetalleCotizacion, type CotizacionConDetalle } from '@/services/cotizaciones.service';
-import type { Cliente, Producto, MetodoPago, EstadoVenta } from '@/types/database';
-import type { VentaConDetalle } from '@/services/ventas.service';
+import type { Cliente, Producto, MetodoPago } from '@/types/database';
+import type { VentaConDetalle, ActualizarVentaPayload } from '@/services/ventas.service';
 
 interface UseSalesModalsOptions {
   canEditSales: boolean;
   canDeleteSales: boolean;
   obtenerDetalle: (id: string) => Promise<VentaConDetalle | null>;
   anular: (id: string, motivo: string) => Promise<void>;
-  actualizar: (id: string, data: {
-    cliente_id: string | null;
-    metodo_pago: MetodoPago;
-    tipo_ncf: string | null;
-    ncf: string | null;
-    monto_descuento: number;
-    monto_total?: number;
-    estado: EstadoVenta;
-  }) => Promise<void>;
+  actualizar: (id: string, data: ActualizarVentaPayload) => Promise<void>;
   convertirAVenta: (id: string, metodoPago: MetodoPago) => Promise<{ numero_factura: string }>;
 }
 
@@ -91,30 +83,24 @@ export function useSalesModals({
   // Sale edit
   const [editingSale, setEditingSale] = useState<VentaConDetalle | null>(null);
 
-  const handleSaveEditSale = async (data: {
-    cliente_id: string | null;
-    metodo_pago: MetodoPago;
-    tipo_ncf: string | null;
-    ncf: string | null;
-    monto_descuento: number;
-    monto_total?: number;
-    estado: string;
-  }) => {
+  const handleOpenEditSale = async (s: VentaConDetalle) => {
+    setEditingSale(s);
+    try {
+      const full = await obtenerDetalle(s.id);
+      if (full) setEditingSale(full);
+    } catch {
+      // Keep summary
+    }
+  };
+
+  const handleSaveEditSale = async (data: ActualizarVentaPayload) => {
     if (!editingSale) return;
     if (!canEditSales) {
       toast.error('Solo un administrador puede editar facturas');
       return;
     }
     try {
-      await actualizar(editingSale.id, {
-        cliente_id: data.cliente_id,
-        metodo_pago: data.metodo_pago,
-        tipo_ncf: data.tipo_ncf,
-        ncf: data.ncf,
-        monto_descuento: data.monto_descuento,
-        monto_total: data.monto_total,
-        estado: data.estado as EstadoVenta,
-      });
+      await actualizar(editingSale.id, data);
       toast.success(`Factura ${editingSale.numero_factura} actualizada exitosamente`);
       setEditingSale(null);
     } catch (err: unknown) {
@@ -190,6 +176,7 @@ export function useSalesModals({
     handleConfirmAnular,
     editingSale,
     setEditingSale,
+    handleOpenEditSale,
     handleSaveEditSale,
     printingSale,
     setPrintingSale,

@@ -253,6 +253,9 @@ export function productoAUi(p: Producto): Product {
     maxWeight: p.max_weight != null ? Number(p.max_weight) : 999.99,
     generateScaleBarcode: p.generate_scale_barcode ?? false,
     isWeightProduct: isWeight,
+    producto_base_id: (p as any).producto_base_id ?? null,
+    factor_conversion: (p as any).factor_conversion ?? 1,
+    unidad_base: (p as any).unidad_base ?? null,
   };
 }
 
@@ -398,6 +401,121 @@ export function invalidarCacheProductos(): void {
   masterCatalogCache.clear();
 }
 
+export function applyPresentationConversions(products: Producto[]): Producto[] {
+  const byId = new Map<string, Producto>();
+  const bySku = new Map<string, Producto>();
+  for (const p of products) {
+    if (p.id) byId.set(p.id, p);
+    if (p.sku) bySku.set(p.sku.toLowerCase().trim(), p);
+    if (p.codigo_barras) bySku.set(p.codigo_barras.toLowerCase().trim(), p);
+  }
+
+  return products.map((p) => {
+    let baseProd: Producto | undefined;
+    let factor = Number((p as any).factor_conversion || 1);
+
+    if ((p as any).producto_base_id) {
+      baseProd = byId.get((p as any).producto_base_id);
+    }
+
+    const nameLower = (p.nombre || '').toLowerCase();
+    const skuClean = (p.sku || '').toLowerCase().trim();
+
+    if (!baseProd) {
+      if (skuClean === '23653' || nameLower.includes('fardo de agua pureza sana')) {
+        baseProd = bySku.get('7461136665069') || [...byId.values()].find((x) => x.nombre.toLowerCase().includes('botella de agua pureza sana'));
+        factor = 20;
+      } else if (skuClean === '0686' || nameLower === 'huevos 1 carton') {
+        baseProd = bySku.get('0685') || [...byId.values()].find((x) => x.nombre.toLowerCase().includes('huevos medio carton'));
+        factor = 2;
+      } else if (skuClean === '0875' || nameLower === 'huevo 1 carton') {
+        baseProd = bySku.get('0874') || [...byId.values()].find((x) => x.nombre.toLowerCase() === 'huevo medio carton');
+        factor = 2;
+      }
+    }
+
+    if (baseProd && factor > 1) {
+      const baseStock = Number(baseProd.stock_actual || 0);
+      const computedStock = Math.floor(baseStock / factor);
+
+      return {
+        ...p,
+        producto_base_id: baseProd.id,
+        factor_conversion: factor,
+        unidad_base: (baseProd as any).unidad || 'unidad',
+        stock_actual: computedStock,
+      } as Producto;
+    }
+
+    return p;
+  });
+}
+
+export async function resolveSingleProductPresentation(prod: Producto, sbClient?: any): Promise<Producto> {
+  const nameLower = (prod.nombre || '').toLowerCase();
+  const skuClean = (prod.sku || '').toLowerCase().trim();
+  let baseId = (prod as any).producto_base_id;
+  let factor = Number((prod as any).factor_conversion || 1);
+
+  if (!baseId) {
+    if (skuClean === '23653' || nameLower.includes('fardo de agua pureza sana')) {
+      factor = 20;
+    } else if (skuClean === '0686' || nameLower === 'huevos 1 carton') {
+      factor = 2;
+    } else if (skuClean === '0875' || nameLower === 'huevo 1 carton') {
+      factor = 2;
+    }
+  }
+
+  if (factor > 1) {
+    if (baseId) {
+      for (const entry of masterCatalogCache.values()) {
+        const b = entry.data.find((x) => x.id === baseId);
+        if (b) {
+          return {
+            ...prod,
+            producto_base_id: baseId,
+            factor_conversion: factor,
+            stock_actual: Math.floor(Number(b.stock_actual || 0) / factor),
+          } as Producto;
+        }
+      }
+    }
+
+    if (sbClient) {
+      try {
+        let baseQuery;
+        if (baseId) {
+          baseQuery = sbClient.from('productos').select('id, stock_actual, unidad').eq('id', baseId).single();
+        } else if (skuClean === '23653' || nameLower.includes('fardo de agua pureza sana')) {
+          baseQuery = sbClient.from('productos').select('id, stock_actual, unidad').eq('sku', '7461136665069').single();
+        } else if (skuClean === '0686' || nameLower === 'huevos 1 carton') {
+          baseQuery = sbClient.from('productos').select('id, stock_actual, unidad').eq('sku', '0685').single();
+        } else if (skuClean === '0875' || nameLower === 'huevo 1 carton') {
+          baseQuery = sbClient.from('productos').select('id, stock_actual, unidad').eq('sku', '0874').single();
+        }
+
+        if (baseQuery) {
+          const { data: bData } = await baseQuery;
+          if (bData) {
+            return {
+              ...prod,
+              producto_base_id: bData.id,
+              factor_conversion: factor,
+              unidad_base: bData.unidad || 'unidad',
+              stock_actual: Math.floor(Number(bData.stock_actual || 0) / factor),
+            } as Producto;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  return prod;
+}
+
 export async function buscarProductoPorCodigo(codigo: string): Promise<Producto | null> {
   const code = (codigo || '').trim().toLowerCase();
   if (!code) return null;
@@ -426,7 +544,7 @@ export async function buscarProductoPorCodigo(codigo: string): Promise<Producto 
 
   const sb = tryGetSupabase();
   if (!sb) {
-    const local = demoAsProductos();
+    const local = applyPresentationConversions(demoAsProductos());
     return (
       local.find(
         (p) =>
@@ -445,7 +563,7 @@ export async function buscarProductoPorCodigo(codigo: string): Promise<Producto 
       .maybeSingle();
 
     if (!error && data) {
-      return data as Producto;
+      return await resolveSingleProductPresentation(data as Producto, sb);
     }
   } catch (err) {
     console.warn('Error buscando producto por código:', err);
@@ -655,7 +773,7 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
       (!p.codigo_barras || !dbBarcodes.has(p.codigo_barras.toLowerCase()))
   );
 
-  const combined = [...dbProducts, ...missingFromDb];
+  const combined = applyPresentationConversions([...dbProducts, ...missingFromDb]);
   const total = dbCount + missingFromDb.length;
 
   const result: ProductosResultado = {
@@ -1053,10 +1171,10 @@ export async function buscarProductoPorCodigoEscaneado(
       (p.codigo_barras && p.codigo_barras.trim().toUpperCase() === upper) ||
       (p.sku && p.sku.trim().toUpperCase() === upper)
   );
-  if (exactMatch) return exactMatch;
+  if (exactMatch) return await resolveSingleProductPresentation(exactMatch, sb);
 
   const found = matchesLocal(rows);
-  if (found) return found;
+  if (found) return await resolveSingleProductPresentation(found, sb);
 
   // Fallback con búsqueda ilike por si hay espacios o variaciones guardadas en BD
   if (clean.length >= 2) {
@@ -1072,12 +1190,13 @@ export async function buscarProductoPorCodigoEscaneado(
         const cleanLower = clean.toLowerCase();
         // 1. Coincidencia exacta de nombre
         const exactName = rows.find((p) => (p.nombre || '').trim().toLowerCase() === cleanLower);
-        if (exactName) return exactName;
+        if (exactName) return await resolveSingleProductPresentation(exactName, sb);
         // 2. Coincidencia por inicio de nombre
         const startName = rows.find((p) => (p.nombre || '').trim().toLowerCase().startsWith(cleanLower));
-        if (startName) return startName;
+        if (startName) return await resolveSingleProductPresentation(startName, sb);
         // 3. Coincidencia local o primer resultado
-        return matchesLocal(rows) ?? rows[0];
+        const finalCandidate = matchesLocal(rows) ?? rows[0];
+        if (finalCandidate) return await resolveSingleProductPresentation(finalCandidate, sb);
       }
     }
   }

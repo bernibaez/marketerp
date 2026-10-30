@@ -61,10 +61,15 @@ export default function PosExpenseModal({
 
     setSaving(true);
     try {
+      const today = new Date().toISOString().slice(0, 10);
+      const respName = user?.name || cashierLabel || 'Cajero';
       await crearGasto({
         categoria_id: categoriaId,
         descripcion: description.trim(),
         monto: value,
+        metodo_pago: 'efectivo',
+        fecha: today,
+        responsable_nombre: respName,
         tiene_recibo: false,
         estado: 'aprobado',
       });

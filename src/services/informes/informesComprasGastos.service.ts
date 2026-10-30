@@ -74,25 +74,65 @@ export type InformeGastos = {
 };
 
 export async function informeGastos(p: PeriodoInforme): Promise<InformeGastos> {
-  const empty: InformeGastos = { aprobados: 0, pendientes: 0, total: 0, rows: [] };
   const sb = tryGetSupabase();
-  if (!sb) return empty;
+  let list: Record<string, unknown>[] = [];
 
-  const { data, error } = await sb
-    .from('gastos')
-    .select(
-      `
-      codigo, descripcion, monto, estado, creado_en,
-      categorias_gasto ( nombre )
-    `
-    )
-    .gte('creado_en', p.desde)
-    .lte('creado_en', rangoFin(p.hasta))
-    .order('creado_en', { ascending: false })
-    .limit(500);
+  if (sb) {
+    try {
+      const { data, error } = await sb
+        .from('gastos')
+        .select(
+          `
+          codigo, descripcion, monto, estado, creado_en,
+          categorias_gasto ( nombre )
+        `
+        )
+        .gte('creado_en', p.desde)
+        .lte('creado_en', rangoFin(p.hasta))
+        .order('creado_en', { ascending: false })
+        .limit(500);
 
-  if (error) throw error;
-  const list = data ?? [];
+      if (!error && data) {
+        list = data as Record<string, unknown>[];
+      }
+    } catch {
+      // Graceful fallback to local expenses
+    }
+  }
+
+  // Merge with local gastos if available
+  try {
+    const rawLocal = typeof localStorage !== 'undefined' ? localStorage.getItem('mercato_gastos_local') : null;
+    if (rawLocal) {
+      const localGastos = JSON.parse(rawLocal) as Array<{
+        code: string;
+        description: string;
+        category: string;
+        amount: number;
+        status: string;
+        date: string;
+      }>;
+      const existingCodes = new Set(list.map((g) => String(g.codigo)));
+      for (const lg of localGastos) {
+        if (!existingCodes.has(lg.code)) {
+          const gastoDate = lg.date || '';
+          if (gastoDate >= p.desde && gastoDate <= p.hasta) {
+            list.push({
+              codigo: lg.code,
+              descripcion: lg.description,
+              monto: lg.amount,
+              estado: lg.status === 'approved' ? 'aprobado' : lg.status === 'rejected' ? 'rechazado' : 'pendiente',
+              creado_en: `${gastoDate}T12:00:00.000Z`,
+              categorias_gasto: { nombre: lg.category },
+            });
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore localStorage parse errors
+  }
+
   let aprobados = 0;
   let pendientes = 0;
   let total = 0;

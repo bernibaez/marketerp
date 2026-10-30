@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
-import { DollarSign, Tag, Plus, Search, Download, Check, X, Trash2, Edit2, Eye } from 'lucide-react';
+import { DollarSign, Tag, Plus, Search, Download, Check, X, Trash2, Edit2, Eye, Calendar, CreditCard, User } from 'lucide-react';
 import { exportTableToPdf, formatMoneyPdf } from '@/lib/exportPdf';
 import { toast } from '@/lib/toast';
 import { useGastos } from '@/hooks/useGastos';
+import { useAuth } from '@/context/AuthContext';
 import type { GastoStatusUi, GastoUi } from '@/services/gastos.service';
 import {
   InlineLoader,
@@ -21,7 +22,28 @@ const statusMap: Record<GastoStatusUi, { label: string; cls: string }> = {
   rejected: { label: 'Rechazado', cls: 'badge-danger' },
 };
 
+const METODOS_PAGO = [
+  { id: 'efectivo', label: 'Efectivo' },
+  { id: 'transferencia', label: 'Transferencia bancaria' },
+  { id: 'tarjeta', label: 'Tarjeta de débito/crédito' },
+  { id: 'caja_chica', label: 'Caja chica' },
+  { id: 'cheque', label: 'Cheque' },
+  { id: 'otro', label: 'Otro' },
+];
+
+const formatMetodoPago = (val?: string) => {
+  if (!val) return 'Efectivo';
+  const m = val.toLowerCase();
+  if (m === 'efectivo') return 'Efectivo';
+  if (m === 'transferencia') return 'Transferencia';
+  if (m === 'tarjeta') return 'Tarjeta';
+  if (m === 'caja_chica') return 'Caja chica';
+  if (m === 'cheque') return 'Cheque';
+  return val.charAt(0).toUpperCase() + val.slice(1);
+};
+
 export default function ExpensesPage() {
+  const { user } = useAuth();
   const {
     gastos,
     categorias,
@@ -45,6 +67,9 @@ export default function ExpensesPage() {
   const [catId, setCatId] = useState('');
   const [descripcion, setDescripcion] = useState('');
   const [monto, setMonto] = useState('');
+  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [metodoPago, setMetodoPago] = useState('efectivo');
+  const [responsableNombre, setResponsableNombre] = useState('');
   const [tieneRecibo, setTieneRecibo] = useState(false);
 
   const [catNombre, setCatNombre] = useState('');
@@ -57,7 +82,9 @@ export default function ExpensesPage() {
       (e) =>
         e.description.toLowerCase().includes(q) ||
         e.category.toLowerCase().includes(q) ||
-        e.code.toLowerCase().includes(q)
+        e.code.toLowerCase().includes(q) ||
+        (e.paymentMethod && e.paymentMethod.toLowerCase().includes(q)) ||
+        (e.responsible && e.responsible.toLowerCase().includes(q))
     );
   }, [gastos, search]);
 
@@ -68,10 +95,17 @@ export default function ExpensesPage() {
       exportTableToPdf({
         title: 'Listado de Gastos',
         filename: 'gastos',
-        headers: ['Código', 'Fecha', 'Categoría', 'Descripción', 'Responsable', 'Monto', 'Recibo', 'Estado'],
+        headers: ['Código', 'Fecha', 'Categoría', 'Descripción', 'Método', 'Responsable', 'Monto', 'Recibo', 'Estado'],
         rows: filtered.map((e) => [
-          e.code, e.date, e.category, e.description, e.responsible,
-          formatMoneyPdf(e.amount), e.receipt ? 'Sí' : 'No', statusMap[e.status]?.label ?? e.status,
+          e.code,
+          e.date,
+          e.category,
+          e.description,
+          formatMetodoPago(e.paymentMethod),
+          e.responsible,
+          formatMoneyPdf(e.amount),
+          e.receipt ? 'Sí' : 'No',
+          statusMap[e.status]?.label ?? e.status,
         ]),
         landscape: true,
       });
@@ -91,6 +125,9 @@ export default function ExpensesPage() {
     setCatId('');
     setDescripcion('');
     setMonto('');
+    setFecha(new Date().toISOString().slice(0, 10));
+    setMetodoPago('efectivo');
+    setResponsableNombre(user?.name || '');
     setTieneRecibo(false);
     setCatNombre('');
     setCatDesc('');
@@ -100,6 +137,7 @@ export default function ExpensesPage() {
 
   const openCreateModal = () => {
     resetModal();
+    setResponsableNombre(user?.name || '');
     setShowModal(true);
   };
 
@@ -108,6 +146,9 @@ export default function ExpensesPage() {
     setCatId(gasto.categoryId ?? '');
     setDescripcion(gasto.description);
     setMonto(String(gasto.amount));
+    setFecha(gasto.date || new Date().toISOString().slice(0, 10));
+    setMetodoPago(gasto.paymentMethod || 'efectivo');
+    setResponsableNombre(gasto.responsible || user?.name || '');
     setTieneRecibo(gasto.receipt);
     setShowModal(true);
   };
@@ -141,23 +182,30 @@ export default function ExpensesPage() {
     try {
       if (tab === 'list') {
         const m = parseFloat(monto);
+        const respFinal = responsableNombre.trim() || user?.name || 'Administración';
         if (editingGasto) {
           await actualizar(editingGasto.id, {
             categoria_id: catId,
-            descripcion,
+            descripcion: descripcion.trim(),
             monto: m,
+            fecha,
+            metodo_pago: metodoPago,
+            responsable_nombre: respFinal,
             tiene_recibo: tieneRecibo,
           });
           toast.success('Gasto actualizado');
         } else {
           await crear({
             categoria_id: catId,
-            descripcion,
+            descripcion: descripcion.trim(),
             monto: m,
+            fecha,
+            metodo_pago: metodoPago,
+            responsable_nombre: respFinal,
             tiene_recibo: tieneRecibo,
-            estado: 'pendiente',
+            estado: 'aprobado',
           });
-          toast.success('Gasto registrado');
+          toast.success('Gasto registrado con éxito');
         }
       } else {
         await crearCategoria({
@@ -209,39 +257,85 @@ export default function ExpensesPage() {
           <div className="card p-5 sm:p-6 space-y-4 max-w-3xl">
             {tab === 'list' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <select
-                  className="input-field sm:col-span-2"
-                  value={catId}
-                  onChange={(e) => setCatId(e.target.value)}
-                >
-                  <option value="">Seleccionar categoría...</option>
-                  {categorias.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  className="input-field sm:col-span-2"
-                  placeholder="Descripción del gasto"
-                  value={descripcion}
-                  onChange={(e) => setDescripcion(e.target.value)}
-                />
-                <input
-                  className="input-field"
-                  placeholder="Monto (RD$)"
-                  type="number"
-                  value={monto}
-                  onChange={(e) => setMonto(e.target.value)}
-                />
-                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <div className="sm:col-span-2">
+                  <label className="text-xs font-semibold text-muted-foreground mb-1 block">Categoría *</label>
+                  <select
+                    className="input-field"
+                    value={catId}
+                    onChange={(e) => setCatId(e.target.value)}
+                  >
+                    <option value="">Seleccionar categoría...</option>
+                    {categorias.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="text-xs font-semibold text-muted-foreground mb-1 block">Descripción *</label>
                   <input
-                    type="checkbox"
-                    checked={tieneRecibo}
-                    onChange={(e) => setTieneRecibo(e.target.checked)}
+                    className="input-field"
+                    placeholder="Ej: Pago de electricidad, flete o compra de insumos"
+                    value={descripcion}
+                    onChange={(e) => setDescripcion(e.target.value)}
                   />
-                  Tiene comprobante
-                </label>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground mb-1 block">Monto (RD$) *</label>
+                  <input
+                    className="input-field"
+                    placeholder="Monto (RD$)"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={monto}
+                    onChange={(e) => setMonto(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground mb-1 block">Fecha del Gasto *</label>
+                  <input
+                    className="input-field"
+                    type="date"
+                    value={fecha}
+                    onChange={(e) => setFecha(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground mb-1 block">Método de Pago *</label>
+                  <select
+                    className="input-field"
+                    value={metodoPago}
+                    onChange={(e) => setMetodoPago(e.target.value)}
+                  >
+                    {METODOS_PAGO.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground mb-1 block">Usuario / Responsable</label>
+                  <input
+                    className="input-field"
+                    placeholder="Nombre del responsable"
+                    value={responsableNombre}
+                    onChange={(e) => setResponsableNombre(e.target.value)}
+                  />
+                </div>
+                <div className="sm:col-span-2 pt-1">
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={tieneRecibo}
+                      onChange={(e) => setTieneRecibo(e.target.checked)}
+                      className="rounded border-border text-primary focus:ring-primary"
+                    />
+                    <span>Tiene factura física o comprobante con soporte</span>
+                  </label>
+                </div>
               </div>
             ) : (
               <div className="space-y-3">
@@ -385,19 +479,20 @@ export default function ExpensesPage() {
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Código</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Descripción</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden md:table-cell">Categoría</th>
+                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">Método</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">Responsable</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden md:table-cell">Fecha</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Monto</th>
-                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">Comprobante</th>
+                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden xl:table-cell">Comprobante</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Estado</th>
                     <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {loading && <InlineLoader colSpan={9} message="Cargando gastos…" />}
+                  {loading && <InlineLoader colSpan={10} message="Cargando gastos…" />}
                   {!loading && filtered.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">No hay gastos registrados</td>
+                      <td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">No hay gastos registrados</td>
                     </tr>
                   )}
                   {filtered.map((e, i) => (
@@ -410,10 +505,13 @@ export default function ExpensesPage() {
                       <td className="px-4 py-3 hidden md:table-cell">
                         <span className="badge-neutral">{e.category}</span>
                       </td>
+                      <td className="px-4 py-3 hidden lg:table-cell">
+                        <span className="badge-info text-xs">{formatMetodoPago(e.paymentMethod)}</span>
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{e.responsible}</td>
                       <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{e.date}</td>
                       <td className="px-4 py-3 font-bold text-foreground">RD$ {e.amount.toLocaleString()}</td>
-                      <td className="px-4 py-3 hidden lg:table-cell">
+                      <td className="px-4 py-3 hidden xl:table-cell">
                         {e.receipt ? <span className="badge-success">Sí</span> : <span className="badge-danger">No</span>}
                       </td>
                       <td className="px-4 py-3">
@@ -612,6 +710,10 @@ export default function ExpensesPage() {
                 <span className="font-bold text-foreground">
                   RD$ {viewingGasto.amount.toLocaleString()}
                 </span>
+              </div>
+              <div>
+                <span className="text-xs text-muted-foreground block">Método de Pago</span>
+                <span className="text-foreground font-medium">{formatMetodoPago(viewingGasto.paymentMethod)}</span>
               </div>
               <div>
                 <span className="text-xs text-muted-foreground block">Responsable</span>

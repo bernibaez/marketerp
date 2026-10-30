@@ -2,6 +2,7 @@
 
 export type AuditActionType =
   | 'Venta'
+  | 'Edición de venta'
   | 'Devolución'
   | 'Edición de producto'
   | 'Cambio de precio'
@@ -83,7 +84,10 @@ export function logAuditEvent(params: {
     ip: params.ip || '127.0.0.1 (Local)',
   };
 
-  // Fire-and-forget a Supabase
+  // Guardar localmente de inmediato para disponibilidad sincrónica
+  appendAuditLogLocal(newLog);
+
+  // Fire-and-forget a Supabase si está disponible
   void import('@/services/auditoria.service')
     .then(({ registrarAuditoria }) =>
       registrarAuditoria({
@@ -98,7 +102,7 @@ export function logAuditEvent(params: {
       })
     )
     .catch(() => {
-      appendAuditLogLocal(newLog);
+      // ya guardado localmente
     });
 
   return newLog;
