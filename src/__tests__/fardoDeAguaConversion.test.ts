@@ -141,4 +141,140 @@ describe('Requerimientos 2 y 6: Unidades de Medida, Conversión y Fardo de Agua'
     // Con 3,719 botellas y factor 20:
     expect(calcularStockPresentacion(3719, 20)).toBe(185);
   });
+
+  it('permite productos independientes con unidad Fardo o Cartón sin requerir vinculación', () => {
+    // Caso de uso solicitado por el usuario:
+    // Si un producto se crea con unidad "Fardo" pero NO está vinculado a ningún producto base (producto_base_id = null):
+    const fardoIndependiente: Producto = {
+      id: 'fardo-refresco-independiente-id',
+      codigo_barras: '7469998881112',
+      sku: 'FAR-REF-IND',
+      nombre: 'Fardo de Refresco 2L (Autónomo)',
+      categoria: 'Bebidas',
+      marca: 'Refresco Marca',
+      unidad: 'Fardo',
+      proveedor_id: null,
+      precio_costo: 350,
+      precio_venta: 450,
+      precio_mayorista: 420,
+      porcentaje_impuesto: 18,
+      stock_minimo: 10,
+      stock_actual: 50, // 50 fardos en stock independiente
+      es_pesado: false,
+      fecha_vencimiento: null,
+      garantia: null,
+      imagen_url: null,
+      estado: 'activo',
+      producto_base_id: null, // NO VINCULADO
+      factor_conversion: 1,
+    };
+
+    const productos = applyPresentationConversions([fardoIndependiente]);
+    const res = productos.find((p) => p.sku === 'FAR-REF-IND');
+    expect(res).toBeDefined();
+
+    // El stock no es alterado por ninguna conversión: conserva sus 50 fardos propios
+    expect(res?.stock_actual).toBe(50);
+    expect(res?.unidad).toBe('Fardo');
+
+    // Simulación de venta de 3 fardos independientes:
+    const cantidadVendida = 3;
+    const stockRestante = (res?.stock_actual ?? 0) - cantidadVendida;
+    expect(stockRestante).toBe(47); // Descuenta directamente de sus 50 fardos
+
+    // Simulación de compra de 10 fardos independientes:
+    const cantidadComprada = 10;
+    const stockTrasCompra = stockRestante + cantidadComprada;
+    expect(stockTrasCompra).toBe(57); // Suma directo a su inventario
+  });
+
+  it('coexistencia perfecta entre productos independientes y presentaciones vinculadas', () => {
+    const catalogoMixto: Producto[] = [
+      // 1. Producto Base
+      {
+        id: 'botella-base-id',
+        codigo_barras: '7461136665069',
+        sku: '7461136665069',
+        nombre: 'Botella De Agua Pureza Sana',
+        categoria: 'Bebidas',
+        marca: 'Pureza Sana',
+        unidad: 'Botella',
+        proveedor_id: null,
+        precio_costo: 5.36,
+        precio_venta: 10,
+        precio_mayorista: 9,
+        porcentaje_impuesto: 0,
+        stock_minimo: 100,
+        stock_actual: 1000, // 1000 botellas
+        es_pesado: false,
+        fecha_vencimiento: null,
+        garantia: null,
+        imagen_url: null,
+        estado: 'activo',
+      },
+      // 2. Fardo Vinculado (Modo Presentación Vinculada, factor 20)
+      {
+        id: 'fardo-agua-vinculado-id',
+        codigo_barras: '23653',
+        sku: '23653',
+        nombre: 'Fardo De Agua Pureza Sana',
+        categoria: 'Bebidas',
+        marca: 'Pureza Sana',
+        unidad: 'Fardo',
+        proveedor_id: null,
+        precio_costo: 107.14,
+        precio_venta: 125,
+        precio_mayorista: 120,
+        porcentaje_impuesto: 0,
+        stock_minimo: 5,
+        stock_actual: 0,
+        es_pesado: false,
+        fecha_vencimiento: null,
+        garantia: null,
+        imagen_url: null,
+        estado: 'activo',
+        producto_base_id: 'botella-base-id',
+        factor_conversion: 20,
+      },
+      // 3. Fardo Autónomo (Modo Independiente, sin vinculación)
+      {
+        id: 'fardo-galletas-autonomo-id',
+        codigo_barras: '8889990001',
+        sku: 'FAR-GAL-01',
+        nombre: 'Fardo De Galletas Surtidas',
+        categoria: 'Snacks',
+        marca: 'Galletas Rico',
+        unidad: 'Fardo',
+        proveedor_id: null,
+        precio_costo: 500,
+        precio_venta: 650,
+        precio_mayorista: 600,
+        porcentaje_impuesto: 18,
+        stock_minimo: 5,
+        stock_actual: 30, // 30 fardos propios
+        es_pesado: false,
+        fecha_vencimiento: null,
+        garantia: null,
+        imagen_url: null,
+        estado: 'activo',
+        producto_base_id: null, // NO VINCULADO
+        factor_conversion: 1,
+      },
+    ];
+
+    const catalogoProcesado = applyPresentationConversions(catalogoMixto);
+
+    const botella = catalogoProcesado.find((p) => p.sku === '7461136665069');
+    const fardoAgua = catalogoProcesado.find((p) => p.sku === '23653');
+    const fardoGalletas = catalogoProcesado.find((p) => p.sku === 'FAR-GAL-01');
+
+    // El Fardo vinculado calcula dinámicamente: 1000 botellas / 20 = 50 fardos
+    expect(fardoAgua?.stock_actual).toBe(50);
+
+    // El Fardo independiente conserva sus 30 fardos exactos intactos
+    expect(fardoGalletas?.stock_actual).toBe(30);
+
+    // La botella base conserva sus 1000 botellas
+    expect(botella?.stock_actual).toBe(1000);
+  });
 });
