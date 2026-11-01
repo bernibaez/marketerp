@@ -1,4 +1,5 @@
 import { tryGetSupabase } from '../clienteSupabase';
+import { getStoredProducts } from '@/lib/productStore';
 import {
   type PeriodoInforme,
   rangoFin,
@@ -123,33 +124,63 @@ export type InformeGanancias = {
   prodsSold: number;
   customers: number;
   payments: { name: string; value: number; color: string }[];
+  inventarioInicial: number;
+  comprasPeriodo: number;
+  inventarioFinal: number;
+  costoVentas: number;
 };
 
 export async function informeGananciasPerdidas(p: PeriodoInforme): Promise<InformeGanancias> {
-  const empty: InformeGanancias = {
-    ventas: 0,
-    costo: 0,
-    gananciaBruta: 0,
-    itbis: 0,
-    gananciaNeta: 0,
-    qtySold: 0,
-    prodsSold: 0,
-    customers: 0,
-    payments: [],
-  };
   const sb = tryGetSupabase();
-  if (!sb) return empty;
 
-  const { data, error } = await sb
-    .from('ventas')
-    .select('monto_total, monto_impuesto, costo_total, metodo_pago, cliente_id, detalle_ventas(cantidad, producto_id)')
-    .gte('creado_en', p.desde)
-    .lte('creado_en', rangoFin(p.hasta))
-    .neq('estado', 'anulada')
-    .limit(2000);
+  // 1. Calcular Valor de Inventario Final del período utilizando el COSTO de los productos (precio_costo)
+  const prodsCatalog = getStoredProducts();
+  const inventarioFinal =
+    Math.round(
+      prodsCatalog.reduce((sum, item) => {
+        const stock = Math.max(0, Number(item.currentStock ?? (item as any).stock ?? 0));
+        const cost = Math.max(0, Number(item.costPrice ?? (item as any).cost ?? 0));
+        return sum + stock * cost;
+      }, 0) * 100
+    ) / 100;
 
-  if (error) throw error;
-  const ventas = data ?? [];
+  // 2. Calcular Compras del período al costo
+  let comprasPeriodo = 0;
+  if (sb) {
+    try {
+      const { data: comprasData } = await sb
+        .from('compras')
+        .select('monto_total, costo_total')
+        .gte('creado_en', p.desde)
+        .lte('creado_en', rangoFin(p.hasta))
+        .neq('estado', 'anulada')
+        .limit(2000);
+
+      for (const c of comprasData ?? []) {
+        comprasPeriodo += Number(c.costo_total ?? c.monto_total ?? 0);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Compras locales
+  try {
+    const rawLocalCompras = typeof localStorage !== 'undefined' ? localStorage.getItem('mercato_compras_local') : null;
+    if (rawLocalCompras) {
+      const parsed = JSON.parse(rawLocalCompras);
+      for (const c of parsed) {
+        if (c.fecha >= p.desde && c.fecha <= p.hasta && c.estado !== 'anulada') {
+          comprasPeriodo += Number(c.total || c.subtotal || 0);
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  comprasPeriodo = Math.round(comprasPeriodo * 100) / 100;
+
+  // 3. Ventas y costos del período
   let ventasSum = 0;
   let costo = 0;
   let itbis = 0;
@@ -158,32 +189,85 @@ export async function informeGananciasPerdidas(p: PeriodoInforme): Promise<Infor
   const clients = new Set<string>();
   const byPay = new Map<string, number>();
 
-  for (const v of ventas as Record<string, unknown>[]) {
-    ventasSum += Number(v.monto_total ?? 0);
-    costo += Number(v.costo_total ?? 0);
-    itbis += Number(v.monto_impuesto ?? 0);
-    if (v.cliente_id) clients.add(String(v.cliente_id));
-    const pago = labelPago(v.metodo_pago as string);
-    byPay.set(pago, (byPay.get(pago) ?? 0) + Number(v.monto_total ?? 0));
-    for (const d of (v.detalle_ventas as { cantidad?: number; producto_id?: string }[]) ?? []) {
-      qtySold += Number(d.cantidad ?? 0);
-      if (d.producto_id) prods.add(d.producto_id);
+  if (sb) {
+    try {
+      const { data, error } = await sb
+        .from('ventas')
+        .select('monto_total, monto_impuesto, costo_total, metodo_pago, cliente_id, detalle_ventas(cantidad, producto_id)')
+        .gte('creado_en', p.desde)
+        .lte('creado_en', rangoFin(p.hasta))
+        .neq('estado', 'anulada')
+        .limit(2000);
+
+      if (!error && data) {
+        for (const v of data as Record<string, unknown>[]) {
+          ventasSum += Number(v.monto_total ?? 0);
+          costo += Number(v.costo_total ?? 0);
+          itbis += Number(v.monto_impuesto ?? 0);
+          if (v.cliente_id) clients.add(String(v.cliente_id));
+          const pago = labelPago(v.metodo_pago as string);
+          byPay.set(pago, (byPay.get(pago) ?? 0) + Number(v.monto_total ?? 0));
+          for (const d of (v.detalle_ventas as { cantidad?: number; producto_id?: string }[]) ?? []) {
+            qtySold += Number(d.cantidad ?? 0);
+            if (d.producto_id) prods.add(d.producto_id);
+          }
+        }
+      }
+    } catch {
+      // Fallback a ventas locales
     }
   }
 
-  const gananciaBruta = ventasSum - costo;
+  // Si no hubo ventas en Supabase o estamos en local, leer de mercato_ventas_local
+  if (ventasSum === 0) {
+    try {
+      const rawLocalVentas = typeof localStorage !== 'undefined' ? localStorage.getItem('mercato_ventas_local') : null;
+      if (rawLocalVentas) {
+        const parsed = JSON.parse(rawLocalVentas);
+        for (const v of parsed) {
+          if (v.creado_en >= p.desde && v.creado_en <= rangoFin(p.hasta) && v.estado !== 'anulada') {
+            ventasSum += Number(v.monto_total ?? 0);
+            costo += Number(v.costo_total ?? 0);
+            itbis += Number(v.monto_impuesto ?? 0);
+            if (v.cliente_id) clients.add(String(v.cliente_id));
+            const pago = labelPago(v.metodo_pago as string);
+            byPay.set(pago, (byPay.get(pago) ?? 0) + Number(v.monto_total ?? 0));
+            for (const d of v.detalle_ventas ?? []) {
+              qtySold += Number(d.cantidad ?? 0);
+              if (d.producto_id) prods.add(d.producto_id);
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 4. Integración contable:
+  // Inventario inicial + Compras - Inventario final = Costo de ventas
+  // => Inventario inicial = Costo de ventas + Inventario final - Compras
+  ventasSum = Math.round(ventasSum * 100) / 100;
+  const costoVentas = Math.round(costo * 100) / 100;
+  const inventarioInicial = Math.max(0, Math.round((inventarioFinal + costoVentas - comprasPeriodo) * 100) / 100);
+
+  const gananciaBruta = Math.round((ventasSum - costoVentas) * 100) / 100;
   const payments = [...byPay.entries()].map(([name, value]) => ({
     name,
-    value,
+    value: Math.round(value * 100) / 100,
     color: PAY_COLORS[name] ?? '#64748b',
   }));
 
   return {
     ventas: ventasSum,
-    costo,
+    costo: costoVentas,
+    costoVentas,
+    inventarioInicial,
+    comprasPeriodo,
+    inventarioFinal,
     gananciaBruta,
-    itbis,
-    gananciaNeta: gananciaBruta - itbis * 0, // neto operativo ≈ bruta (ITBIS es passthrough)
+    itbis: Math.round(itbis * 100) / 100,
+    gananciaNeta: gananciaBruta, // Resultado operativo
     qtySold,
     prodsSold: prods.size,
     customers: clients.size,

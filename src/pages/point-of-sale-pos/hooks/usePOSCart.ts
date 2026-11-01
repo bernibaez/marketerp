@@ -148,11 +148,35 @@ export function usePOSCart() {
       const safeQty = Math.round((Number(qty) || 0) * 1000) / 1000;
 
       setCart((prev) => {
-        const existing = prev.find(
-          (item) =>
-            (product.productId && item.productId === product.productId) ||
-            (product.sku && item.sku && item.sku.toLowerCase() === product.sku.toLowerCase())
-        );
+        const isSamePresentation = (a: any, b: any) => {
+          const aPres = a.presentationId || a.presentacion_id;
+          const bPres = b.presentationId || b.presentacion_id;
+          if (aPres || bPres) return aPres === bPres;
+          const aUnit = (a.unit || '').toLowerCase().trim();
+          const bUnit = (b.unit || '').toLowerCase().trim();
+          return aUnit === bUnit;
+        };
+
+        const existing = prev.find((item) => {
+          // Si alguno es combo, solo coinciden si ambos son combos con el mismo id
+          if (product.isCombo || item.isCombo) {
+            return (
+              Boolean(product.isCombo && item.isCombo) &&
+              ((product.comboId && item.comboId === product.comboId) ||
+                (product.productId && item.productId === product.productId))
+            );
+          }
+          // Para presentaciones comerciales (Six Pack, Cartón, etc.): no colapsar si tienen diferente presentación o unidad
+          const sameSku = Boolean(product.sku && item.sku && item.sku.toLowerCase() === product.sku.toLowerCase());
+          const sameProd = Boolean(product.productId && item.productId === product.productId);
+          if (sameSku) {
+            return isSamePresentation(product, item);
+          }
+          if (sameProd) {
+            return isSamePresentation(product, item);
+          }
+          return false;
+        });
 
         const regularPrice = product.regularPrice ?? product.price;
         const wholesalePrice =

@@ -180,8 +180,11 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
     const prod = products.find((p) => p.id === selectedProductId);
     if (!prod) return;
 
-    // Check if product is already in items
-    const existingIndex = items.findIndex((it) => it.producto_id === prod.id);
+    // Check if product is already in items with same SKU/presentation
+    const targetSku = prod.sku || prod.codigo_barras;
+    const existingIndex = items.findIndex(
+      (it) => it.producto_id === prod.id && (!targetSku || it.sku === targetSku)
+    );
     if (existingIndex >= 0) {
       handleQuantityChange(existingIndex, items[existingIndex].cantidad + 1);
       toast.success(`Incrementada cantidad de ${prod.nombre}`);

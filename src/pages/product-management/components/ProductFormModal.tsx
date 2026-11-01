@@ -29,11 +29,11 @@ interface ProductFormModalProps {
 
 type FormValues = Omit<Product, 'id' | 'stockStatus'>;
 
-const units = ['Unidad', 'Botella', 'Fardo', 'Cartón', 'Medio cartón', 'Libra', 'Kilogramo', 'Litro', 'Paquete', 'Caja', 'Bolsa'];
+const units = ['Unidad', 'Botella', 'Fardo', 'Cartón', 'Medio cartón', 'Libra', 'Kilogramo', 'Litro', 'Paquete', 'Caja', 'Bolsa', 'Six Pack', 'Docena'];
 const taxOptions = [0, 18];
 
 /** Unidades que representan un empaque que contiene varias unidades de otro producto. */
-const PACK_UNITS = ['Fardo', 'Cartón', 'Medio cartón', 'Caja', 'Paquete', 'Bolsa', 'Combo'];
+const PACK_UNITS = ['Fardo', 'Cartón', 'Medio cartón', 'Caja', 'Paquete', 'Bolsa', 'Combo', 'Six Pack', 'Sixpack', 'Docena', 'Pack'];
 
 /** Normaliza una unidad guardada (ej: "Fardo (20 unidades)") a su nombre base ("Fardo"). */
 function baseUnitName(unit: string | null | undefined): string {
@@ -671,11 +671,17 @@ const handleSelectBaseProduct = (baseProd: Product) => {
 const handleUnitSelection = (val: string) => {
   setValue('unit', val, { shouldValidate: true, shouldDirty: true });
   if (isPackUnitItem(val)) {
-    // Al elegir Fardo, Cartón, Caja, etc. se abre automáticamente la gestión del empaque
+    // Al elegir Fardo, Cartón, Caja, Six Pack, etc. se abre automáticamente la gestión del empaque
     setIsPresentation(true);
+    const valNorm = val.toLowerCase();
+    if (valNorm.includes('six')) {
+      setConversionFactorText('6');
+    } else if (valNorm.includes('docena')) {
+      setConversionFactorText('12');
+    }
     if (selectedBaseProduct) {
       const currentSku = (getValues('sku') || '').trim();
-      if (!currentSku || /^(FDO|CTN|CAJ|PQT|BLS|CMB|PACK|SKU)-/i.test(currentSku)) {
+      if (!currentSku || /^(FDO|SIX|DOC|CTN|CAJ|PQT|BLS|CMB|PACK|SKU)-/i.test(currentSku)) {
         const generatedSku = generatePresentationSku(val, selectedBaseProduct.sku, selectedBaseProduct.name);
         setValue('sku', generatedSku, { shouldValidate: true, shouldDirty: true });
       }

@@ -65,6 +65,8 @@ export function generatePresentationSku(unit: string, baseSku?: string, baseName
   const normUnit = (unit || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
   let prefix = 'PACK';
   if (normUnit.includes('FARDO')) prefix = 'FDO';
+  else if (normUnit.includes('SIX')) prefix = 'SIX';
+  else if (normUnit.includes('DOCENA')) prefix = 'DOC';
   else if (normUnit.includes('CARTON')) prefix = 'CTN';
   else if (normUnit.includes('CAJA')) prefix = 'CAJ';
   else if (normUnit.includes('PAQUETE')) prefix = 'PQT';
@@ -73,7 +75,7 @@ export function generatePresentationSku(unit: string, baseSku?: string, baseName
   else prefix = normUnit.slice(0, 3) || 'PK';
 
   if (baseSku) {
-    const cleanBase = baseSku.replace(/^(FDO|CTN|CAJ|PQT|BLS|CMB|SKU)-/i, '').trim();
+    const cleanBase = baseSku.replace(/^(FDO|SIX|DOC|CTN|CAJ|PQT|BLS|CMB|SKU)-/i, '').trim();
     return `${prefix}-${cleanBase}`;
   }
 

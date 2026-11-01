@@ -35,6 +35,8 @@ export const DEFAULT_UNIDADES: UnidadMedida[] = [
   { id: 'uni-fdo', codigo: 'UNI-FDO', nombre: 'Fardo', abreviatura: 'fdo', tipo: 'empaque', descripcion: 'Fardo de productos (ej. agua, refrescos)', activo: true },
   { id: 'uni-paq', codigo: 'UNI-PAQ', nombre: 'Paquete', abreviatura: 'paq', tipo: 'empaque', descripcion: 'Paquete o bulto de unidades', activo: true },
   { id: 'uni-cja', codigo: 'UNI-CJA', nombre: 'Caja', abreviatura: 'cja', tipo: 'empaque', descripcion: 'Caja corrugada o empaque cerrado', activo: true },
+  { id: 'uni-six', codigo: 'UNI-SIX', nombre: 'Six Pack', abreviatura: '6pk', tipo: 'empaque', descripcion: 'Empaque de 6 unidades (cervezas, refrescos, latas)', activo: true },
+  { id: 'uni-doc', codigo: 'UNI-DOC', nombre: 'Docena', abreviatura: 'doc', tipo: 'empaque', descripcion: 'Empaque o conjunto de 12 unidades', activo: true },
   { id: 'uni-bls', codigo: 'UNI-BLS', nombre: 'Bolsa', abreviatura: 'bls', tipo: 'empaque', descripcion: 'Bolsa sellada o empaque flexible', activo: true },
   { id: 'uni-bot', codigo: 'UNI-BOT', nombre: 'Botella', abreviatura: 'bot', tipo: 'unidad', descripcion: 'Envase o botella individual', activo: true },
   { id: 'uni-ltr', codigo: 'UNI-LTR', nombre: 'Litro', abreviatura: 'lt', tipo: 'volumen', descripcion: 'Litro métrico de líquido', activo: true },

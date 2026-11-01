@@ -2,6 +2,7 @@ import { tryGetSupabase } from '../clienteSupabase';
 import { getStoredProducts } from '@/lib/productStore';
 import { applyPresentationConversions } from '../productos.service';
 import type { Producto } from '@/types/database';
+import { obtenerMovimientosProductoCentral } from '../movimientosInventarioCentral.service';
 
 export interface StockGeneralItem {
   id: string;
@@ -36,9 +37,22 @@ export interface ResumenStockGeneral {
 
 export interface MovimientoStockItem {
   id: string;
-  tipo: 'Ventas' | 'Compras' | 'Ajuste de Stock' | 'Devolución de Venta' | 'Devolución de Compra' | 'Transferencia';
+  tipo:
+    | 'Ventas'
+    | 'Compras'
+    | 'Ajuste de Stock'
+    | 'Devolución de Venta'
+    | 'Devolución de Compra'
+    | 'Transferencia'
+    | 'Anulación'
+    | 'Edición de factura';
   cambio_cantidad: number; // Negativo para salidas, positivo para entradas
-  nueva_cantidad: number;  // Saldo / existencia tras este movimiento
+  nueva_cantidad: number;  // Saldo / existencia tras este movimiento (stock resultante)
+  cantidad_entrada: number;
+  cantidad_salida: number;
+  stock_anterior: number;
+  stock_resultante: number;
+  producto_nombre?: string;
   fecha: string;          // ISO
   fecha_formateada: string; // DD-MM-YYYY hh:mm A
   numero_referencia: string; // NCF, FAC-..., VEN-..., COM-..., AJU-...
@@ -389,6 +403,35 @@ export async function obtenerHistorialMovimientosProducto(
     }
   }
 
+  // 5. MOVIMIENTOS CENTRALIZADOS REGISTRADOS (Ventas, Compras, Ajustes, Anulaciones, Edición de Facturas)
+  try {
+    const centralMovements = obtenerMovimientosProductoCentral(productoId);
+    for (const cm of centralMovements) {
+      let tipoM: MovimientoStockItem['tipo'] = 'Ventas';
+      if (cm.tipo === 'Venta') tipoM = 'Ventas';
+      else if (cm.tipo === 'Compra') tipoM = 'Compras';
+      else if (cm.tipo === 'Ajuste de inventario') tipoM = 'Ajuste de Stock';
+      else if (cm.tipo === 'Devolución') tipoM = 'Devolución de Venta';
+      else if (cm.tipo === 'Anulación') tipoM = 'Anulación';
+      else if (cm.tipo === 'Edición de factura') tipoM = 'Edición de factura';
+      else if (cm.tipo === 'Transferencia') tipoM = 'Transferencia';
+
+      const netAmount = cm.cantidad_entrada > 0 ? cm.cantidad_entrada : -cm.cantidad_salida;
+      if (!rawMovements.some((m) => m.referencia === cm.documento_referencia && m.tipo === tipoM)) {
+        rawMovements.push({
+          tipo: tipoM,
+          cantidad: netAmount,
+          fecha: cm.fecha,
+          referencia: cm.documento_referencia,
+          entidad: cm.motivo || cm.usuario || 'Sistema',
+          notas: cm.motivo,
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('Error al leer movimientos centralizados:', e);
+  }
+
   // Si no había ningún movimiento histórico en BD pero el producto tiene stock actual,
   // registrar movimiento inicial de apertura para que el Kardex refleje el origen
   if (rawMovements.length === 0 && producto.stock_actual > 0) {
@@ -412,11 +455,20 @@ export async function obtenerHistorialMovimientosProducto(
 
   for (let i = rawMovements.length - 1; i >= 0; i--) {
     const m = rawMovements[i];
+    const isEntrada = m.cantidad > 0;
+    const stockResultante = Math.round(running * 100) / 100;
+    const stockAnterior = Math.round((running - m.cantidad) * 100) / 100;
+
     withBalances.unshift({
       id: `mov-${i}-${Date.now()}`,
       tipo: m.tipo,
       cambio_cantidad: m.cantidad,
-      nueva_cantidad: Math.round(running * 100) / 100,
+      nueva_cantidad: stockResultante,
+      cantidad_entrada: isEntrada ? Math.abs(m.cantidad) : 0,
+      cantidad_salida: isEntrada ? 0 : Math.abs(m.cantidad),
+      stock_anterior: stockAnterior,
+      stock_resultante: stockResultante,
+      producto_nombre: producto.nombre,
       fecha: m.fecha,
       fecha_formateada: formatFechaKardex(m.fecha),
       numero_referencia: m.referencia,
@@ -424,7 +476,7 @@ export async function obtenerHistorialMovimientosProducto(
       notas: m.notas,
     });
     // Saldo anterior antes de este movimiento
-    running = Math.round((running - m.cantidad) * 100) / 100;
+    running = stockAnterior;
   }
 
   const stock_apertura = Math.max(0, running);
@@ -437,11 +489,15 @@ export async function obtenerHistorialMovimientosProducto(
   let total_devolucion_compra = 0;
 
   for (const m of withBalances) {
-    if (m.tipo === 'Compras') compra_total += Math.abs(m.cambio_cantidad);
-    else if (m.tipo === 'Devolución de Venta') total_devolucion_venta += Math.abs(m.cambio_cantidad);
-    else if (m.tipo === 'Ventas') total_vendido += Math.abs(m.cambio_cantidad);
-    else if (m.tipo === 'Ajuste de Stock' && m.cambio_cantidad < 0) ajuste_total += Math.abs(m.cambio_cantidad);
-    else if (m.tipo === 'Devolución de Compra') total_devolucion_compra += Math.abs(m.cambio_cantidad);
+    if (m.tipo === 'Compras' || m.tipo === 'Anulación') compra_total += Math.abs(m.cantidad_entrada);
+    else if (m.tipo === 'Devolución de Venta') total_devolucion_venta += Math.abs(m.cantidad_entrada);
+    else if (m.tipo === 'Ventas') total_vendido += Math.abs(m.cantidad_salida);
+    else if (m.tipo === 'Ajuste de Stock' && m.cambio_cantidad < 0) ajuste_total += Math.abs(m.cantidad_salida);
+    else if (m.tipo === 'Devolución de Compra') total_devolucion_compra += Math.abs(m.cantidad_salida);
+    else if (m.tipo === 'Edición de factura') {
+      if (m.cantidad_entrada > 0) total_devolucion_venta += m.cantidad_entrada;
+      if (m.cantidad_salida > 0) total_vendido += m.cantidad_salida;
+    }
   }
 
   const resumen: ResumenKardexProducto = {

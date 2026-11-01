@@ -204,7 +204,9 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
     try {
       await crearCxpDesdeCompra({
         compra_id: compra.id,
+        compra_codigo: compra.codigo,
         proveedor_id: compra.proveedor_id,
+        proveedor_nombre: input.proveedor_nombre,
         monto_total: Number(compra.monto_total),
       });
     } catch {

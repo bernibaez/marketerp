@@ -415,8 +415,8 @@ export default function CartPanel({
         return;
       }
 
-      // 4. Si el usuario navegó activamente con flechas y seleccionó un ítem específico:
-      if (dropdownOpen && searchResults.length > 0 && selectedIndex > 0 && selectedIndex < searchResults.length) {
+      // 4. Si el usuario navegó activamente o tiene un ítem seleccionado en el dropdown (incluyendo el primero):
+      if (dropdownOpen && searchResults.length > 0 && selectedIndex >= 0 && selectedIndex < searchResults.length) {
         handleSelectProduct(searchResults[selectedIndex]);
         return;
       }
@@ -633,6 +633,7 @@ export default function CartPanel({
                       <button
                         key={item.id || index}
                         type="button"
+                        onMouseDown={(e) => e.preventDefault()}
                         onClick={() => handleSelectProduct(item)}
                         onMouseEnter={() => setSelectedIndex(index)}
                         className={`w-full text-left px-3.5 py-2.5 transition-all flex items-center justify-between gap-3 cursor-pointer group ${
@@ -877,15 +878,17 @@ export default function CartPanel({
                       </button>
                     )}
 
-                    <button
-                      type="button"
-                      onClick={() => onOpenPriceModal && onOpenPriceModal(item)}
-                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors cursor-pointer"
-                      title="Cambiar precio unitario (Solo Administradores)"
-                    >
-                      <DollarSign size={10} />
-                      <span>Cambiar precio</span>
-                    </button>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenPriceModal && onOpenPriceModal(item)}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors cursor-pointer"
+                        title="Cambiar precio unitario (Solo Administradores)"
+                      >
+                        <DollarSign size={10} />
+                        <span>Cambiar precio</span>
+                      </button>
+                    )}
 
                     {hasWholesale && (
                       <button
@@ -913,19 +916,25 @@ export default function CartPanel({
                       <p className="text-xs sm:text-[13px] font-bold text-emerald-600 dark:text-emerald-400 truncate">
                         {item.qty} {unitLabel} ×
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => onOpenPriceModal && onOpenPriceModal(item)}
-                        className="inline-flex items-center gap-1 text-xs sm:text-[13px] font-black text-emerald-700 dark:text-emerald-300 hover:text-blue-600 dark:hover:text-blue-400 hover:underline cursor-pointer group"
-                        title="Clic para cambiar precio por libra"
-                      >
-                        <span>RD$ {item.price.toFixed(2)}</span>
-                        <Pencil size={11} className="text-slate-400 group-hover:text-blue-500 transition-colors" />
-                      </button>
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenPriceModal && onOpenPriceModal(item)}
+                          className="inline-flex items-center gap-1 text-xs sm:text-[13px] font-black text-emerald-700 dark:text-emerald-300 hover:text-blue-600 dark:hover:text-blue-400 hover:underline cursor-pointer group"
+                          title="Clic para cambiar precio por libra (Solo Administrador)"
+                        >
+                          <span>RD$ {item.price.toFixed(2)}</span>
+                          <Pencil size={11} className="text-slate-400 group-hover:text-blue-500 transition-colors" />
+                        </button>
+                      ) : (
+                        <span className="text-xs sm:text-[13px] font-black text-emerald-700 dark:text-emerald-300">
+                          RD$ {item.price.toFixed(2)}
+                        </span>
+                      )}
                       {item.isCustomPrice && (
                         <span
                           className="text-[10px] font-extrabold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/50 px-1.5 py-0.2 rounded border border-blue-300 dark:border-blue-700 cursor-pointer"
-                          onClick={() => onOpenPriceModal && onOpenPriceModal(item)}
+                          onClick={() => isAdmin && onOpenPriceModal && onOpenPriceModal(item)}
                           title={`Precio original: RD$ ${(item.originalPrice ?? item.regularPrice ?? item.price).toFixed(2)}`}
                         >
                           Modificado (Orig: RD$ {(item.originalPrice ?? item.regularPrice ?? item.price).toFixed(2)})
@@ -935,19 +944,25 @@ export default function CartPanel({
                   ) : (
                     <div className="text-xs sm:text-[13px] font-medium text-slate-500 dark:text-slate-400 truncate mt-0.5 tracking-wide flex items-center gap-1.5 flex-wrap">
                       {codeToDisplay && <span className="font-mono">{codeToDisplay} ·</span>}
-                      <button
-                        type="button"
-                        onClick={() => onOpenPriceModal && onOpenPriceModal(item)}
-                        className="inline-flex items-center gap-1 font-black text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:underline cursor-pointer group"
-                        title="Clic para cambiar precio unitario"
-                      >
-                        <span>RD$ {item.price.toFixed(2)} c/u</span>
-                        <Pencil size={11} className="text-slate-400 group-hover:text-blue-500 transition-colors" />
-                      </button>
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenPriceModal && onOpenPriceModal(item)}
+                          className="inline-flex items-center gap-1 font-black text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:underline cursor-pointer group"
+                          title="Clic para cambiar precio unitario (Solo Administrador)"
+                        >
+                          <span>RD$ {item.price.toFixed(2)} c/u</span>
+                          <Pencil size={11} className="text-slate-400 group-hover:text-blue-500 transition-colors" />
+                        </button>
+                      ) : (
+                        <span className="font-black text-slate-700 dark:text-slate-300">
+                          RD$ {item.price.toFixed(2)} c/u
+                        </span>
+                      )}
                       {item.isCustomPrice && (
                         <span
                           className="text-[10px] font-extrabold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/50 px-1.5 py-0.2 rounded border border-blue-300 dark:border-blue-700 cursor-pointer"
-                          onClick={() => onOpenPriceModal && onOpenPriceModal(item)}
+                          onClick={() => isAdmin && onOpenPriceModal && onOpenPriceModal(item)}
                           title={`Precio original: RD$ ${(item.originalPrice ?? item.regularPrice ?? item.price).toFixed(2)}`}
                         >
                           Modificado (Orig: RD$ {(item.originalPrice ?? item.regularPrice ?? item.price).toFixed(2)})

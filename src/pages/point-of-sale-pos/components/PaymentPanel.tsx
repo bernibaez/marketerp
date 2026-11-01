@@ -86,7 +86,7 @@ export default function PaymentPanel({
 }: PaymentPanelProps) {
   const { user } = useAuth();
   const [method, setMethod] = useState<PaymentMethod>(initialMethod ?? 'cash');
-  const [methodConfirmed, setMethodConfirmed] = useState<boolean>(Boolean(initialMethod));
+  const [methodConfirmed, setMethodConfirmed] = useState<boolean>(true);
   const [showMethodPrompt, setShowMethodPrompt] = useState<boolean>(false);
   const [cashReceived, setCashReceived] = useState('');
   const [processing, setProcessing] = useState(false);
@@ -121,7 +121,7 @@ export default function PaymentPanel({
       setShowMethodPrompt(false);
     } else {
       setMethod('cash');
-      setMethodConfirmed(false);
+      setMethodConfirmed(true);
       setShowMethodPrompt(false);
     }
   }, [initialMethod, checkoutSessionId]);
@@ -132,7 +132,7 @@ export default function PaymentPanel({
       setLastChange(0);
       setCompletedSaleResult(null);
       setSplit({ cash: '', card: '', transfer: '', credit: '' });
-      setMethodConfirmed(Boolean(initialMethod));
+      setMethodConfirmed(true);
       setShowMethodPrompt(false);
     }
   }, [orderCompleted, initialMethod, checkoutSessionId]);
@@ -230,13 +230,6 @@ export default function PaymentPanel({
   const handleProcess = async () => {
     if (cart.length === 0) {
       toast.error('El carrito está vacío');
-      return;
-    }
-
-    if (!methodConfirmed) {
-      setShowMethodPrompt(true);
-      toast.info('Selecciona el método de pago en "1. FORMA DE PAGO" antes de finalizar');
-      firstMethodBtnRef.current?.focus();
       return;
     }
 
@@ -739,12 +732,6 @@ export default function PaymentPanel({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !processing && cashAmount >= total && cart.length > 0) {
                       e.preventDefault();
-                      if (!methodConfirmed) {
-                        setShowMethodPrompt(true);
-                        toast.info('Selecciona el método de pago en "1. FORMA DE PAGO" antes de finalizar');
-                        firstMethodBtnRef.current?.focus();
-                        return;
-                      }
                       void handleProcess();
                     }
                   }}

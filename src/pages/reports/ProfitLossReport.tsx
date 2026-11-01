@@ -47,10 +47,40 @@ export default function ProfitLossReport({ dateFrom, dateTo }: ReportPeriodProps
     <div className="space-y-4">
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <KpiCard label="Ventas Totales" value={formatRD(data.ventas)} trend={`${dateFrom} → ${dateTo}`} icon={<TrendingUp size={16} className="text-info" />} />
-        <KpiCard label="Costo Total" value={formatRD(data.costo)} trend="Costo de ventas" trendPositive={false} icon={<TrendingDown size={16} className="text-danger" />} />
+        <KpiCard label="Costo de Ventas" value={formatRD(data.costoVentas || data.costo)} trend="Inv. Ini + Comp − Inv. Fin" trendPositive={false} icon={<TrendingDown size={16} className="text-danger" />} />
         <KpiCard label="Ganancia Bruta" value={formatRD(data.gananciaBruta)} trend="Ventas − Costo" icon={<BarChart2 size={16} className="text-primary" />} />
         <KpiCard label="ITBIS" value={formatRD(data.itbis)} trend="Impuestos" icon={<DollarSign size={16} className="text-warning" />} />
         <KpiCard label="Ganancia Neta" value={formatRD(data.gananciaNeta)} trend="Resultado" icon={<TrendingUp size={16} className="text-success" />} />
+      </div>
+
+      {/* Estructura Contable del Costo de Ventas e Inventarios */}
+      <div className="card p-5 border border-border shadow-sm">
+        <h3 className="font-bold text-foreground mb-3 text-sm flex items-center justify-between">
+          <span>Determinación del Costo de Ventas e Inventarios (Valuados al Costo)</span>
+          <span className="text-xs text-muted-foreground font-normal">Período: {dateFrom} → {dateTo}</span>
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="bg-secondary/20 p-3.5 rounded-xl border border-border">
+            <p className="text-xs text-muted-foreground font-semibold">1. Inventario Inicial</p>
+            <p className="text-lg font-extrabold text-foreground font-mono mt-1">{formatRD(data.inventarioInicial)}</p>
+            <p className="text-[11px] text-muted-foreground">Valor al costo al inicio del período</p>
+          </div>
+          <div className="bg-success/10 p-3.5 rounded-xl border border-success/20">
+            <p className="text-xs text-success font-semibold">(+) Compras / Entradas</p>
+            <p className="text-lg font-extrabold text-success font-mono mt-1">+{formatRD(data.comprasPeriodo)}</p>
+            <p className="text-[11px] text-muted-foreground">Mercancía adquirida en el período</p>
+          </div>
+          <div className="bg-danger/10 p-3.5 rounded-xl border border-danger/20">
+            <p className="text-xs text-danger font-semibold">(-) Inventario Final</p>
+            <p className="text-lg font-extrabold text-danger font-mono mt-1">-{formatRD(data.inventarioFinal)}</p>
+            <p className="text-[11px] text-muted-foreground">Existencias al costo al cierre</p>
+          </div>
+          <div className="bg-primary/10 p-3.5 rounded-xl border border-primary/20">
+            <p className="text-xs text-primary font-bold">(=) Costo de Ventas</p>
+            <p className="text-lg font-black text-primary font-mono mt-1">{formatRD(data.costoVentas || data.costo)}</p>
+            <p className="text-[11px] text-muted-foreground">Inv. Inicial + Compras − Inv. Final</p>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

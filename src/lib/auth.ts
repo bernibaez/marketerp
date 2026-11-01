@@ -231,6 +231,16 @@ export function isAdminOrSuperAdmin(
   );
 }
 
+/**
+ * Permiso específico para modificar precios de productos en el POS y ventas.
+ * Solo permitido para 'Administrador' y 'Super Administrador'.
+ */
+export function canChangePrice(
+  userOrRole?: { role?: string; rolDb?: string } | string | null
+): boolean {
+  return isAdminOrSuperAdmin(userOrRole);
+}
+
 export function verifySupervisorAdmin(credentials: {
   code?: string;
   username?: string;

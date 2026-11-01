@@ -8,6 +8,8 @@ import { isAbortError } from '@/lib/isAbortError';
 import { logAuditEvent } from '@/lib/auditStore';
 import { movimientoInventarioPresentacion } from './presentaciones.service';
 import { invalidarCacheProductos } from './productos.service';
+import { getCombos } from '@/lib/comboStore';
+import { registrarMovimientoInventario } from './movimientosInventarioCentral.service';
 
 function isUUID(str: string | null | undefined): boolean {
   return Boolean(
@@ -501,14 +503,66 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     });
     saveLocalVentas([venta, ...getLocalVentas().filter((v) => v.id !== id)]);
 
-    // Descontar stock local (soporta cantidades fraccionarias exactas y presentaciones)
+    // Descontar stock local (soporta cantidades fraccionarias exactas, carnes por peso y productos compuestos)
     for (const item of payload.items) {
       if (item.tipo_item === 'producto' && item.producto_id) {
         const stored = getStoredProducts().find((p) => p.id === item.producto_id);
+        const stockPrev = stored?.currentStock ?? 0;
         const movimiento = stored
           ? movimientoInventarioPresentacion(stored, item.cantidad)
           : { productoId: item.producto_id, cantidad: item.cantidad };
         updateProductStockInStore(movimiento.productoId, -movimiento.cantidad);
+
+        registrarMovimientoInventario({
+          producto_id: movimiento.productoId,
+          producto_nombre: stored?.name || item.nombre_item,
+          tipo: 'Venta',
+          cantidad_salida: movimiento.cantidad,
+          stock_anterior: stockPrev,
+          stock_resultante: stockPrev - movimiento.cantidad,
+          documento_referencia: numero,
+          usuario: effectiveCajeroNombre,
+          motivo: `Venta POS Factura ${numero}`,
+        });
+      } else if (item.tipo_item === 'combo' && item.combo_id) {
+        // Descontar componentes del producto compuesto/combo
+        const combos = getCombos();
+        const combo = combos.find((c) => c.id === item.combo_id);
+        if (combo && Array.isArray(combo.items)) {
+          for (const ci of combo.items) {
+            const baseProd = getStoredProducts().find((p) => p.id === ci.productId);
+            const stockPrev = baseProd?.currentStock ?? 0;
+            const cantDeduct = Math.round(Number((ci as any).quantity ?? (ci as any).qty ?? 1) * Number(item.cantidad || 1) * 1000) / 1000;
+            updateProductStockInStore(ci.productId, -cantDeduct);
+
+            registrarMovimientoInventario({
+              producto_id: ci.productId,
+              producto_nombre: baseProd?.name || ci.name || 'Componente combo',
+              tipo: 'Venta',
+              cantidad_salida: cantDeduct,
+              stock_anterior: stockPrev,
+              stock_resultante: stockPrev - cantDeduct,
+              documento_referencia: numero,
+              usuario: effectiveCajeroNombre,
+              motivo: `Componente de ${combo.name} en Factura ${numero}`,
+            });
+          }
+        }
+      }
+    }
+
+    const creditoLocal = Number(payload.monto_credito ?? 0);
+    if (creditoLocal > 0 || payload.metodo_pago === 'credito') {
+      try {
+        await crearCxcDesdeVenta({
+          venta_id: id,
+          numero_factura: numero,
+          cliente_id: payload.cliente_id,
+          cliente_nombre: effectiveClienteNombre,
+          monto_credito: creditoLocal > 0 ? creditoLocal : exactTotal,
+        });
+      } catch {
+        // No bloquear si CxC falla
       }
     }
 
@@ -635,6 +689,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
         venta_id: resultado.venta_id,
         numero_factura: resultado.numero_factura,
         cliente_id: payload.cliente_id,
+        cliente_nombre: effectiveClienteNombre,
         monto_credito: credito > 0 ? credito : exactTotal,
       });
     } catch {
@@ -1336,30 +1391,81 @@ export async function obtenerVentaPorId(ventaId: string): Promise<VentaConDetall
 
 export async function anularVenta(ventaId: string, motivo: string = 'Anulación'): Promise<void> {
   const sb = tryGetSupabase();
-  if (!sb) {
-    const list = getLocalVentas().map((v) =>
-      v.id === ventaId ? { ...v, estado: 'anulada' as const } : v
-    );
-    saveLocalVentas(list);
-    return;
-  }
-
+  let currentSale: VentaConDetalle | null = null;
   try {
-    const { error } = await sb.rpc('anular_venta_pos', {
-      p_venta_id: ventaId,
-      p_motivo: motivo,
-    });
-    if (!error) return;
+    currentSale = await obtenerVentaPorId(ventaId);
   } catch {
-    // Fallback a actualización directa
+    // ignore
   }
 
-  const { error } = await sb
-    .from('ventas')
-    .update({ estado: 'anulada' })
-    .eq('id', ventaId);
+  // 1. Revertir y restaurar stock en inventario para cada ítem de la factura anulada
+  const items = currentSale?.detalle_ventas ?? [];
+  for (const it of items) {
+    const cant = Number(it.cantidad || 0);
+    if (cant <= 0) continue;
+    if (it.tipo_item === 'combo' && it.combo_id) {
+      const combo = getCombos().find((c) => c.id === it.combo_id);
+      if (combo && Array.isArray(combo.items)) {
+        for (const ci of combo.items) {
+          const baseProd = getStoredProducts().find((p) => p.id === ci.productId);
+          const stockPrev = baseProd?.currentStock ?? 0;
+          const returnQty = Math.round(Number((ci as any).quantity ?? (ci as any).qty ?? 1) * cant * 1000) / 1000;
+          updateProductStockInStore(ci.productId, returnQty);
+          registrarMovimientoInventario({
+            producto_id: ci.productId,
+            producto_nombre: baseProd?.name || ci.name || 'Componente combo',
+            tipo: 'Anulación',
+            cantidad_entrada: returnQty,
+            stock_anterior: stockPrev,
+            stock_resultante: stockPrev + returnQty,
+            documento_referencia: currentSale?.numero_factura || ventaId,
+            motivo: `Restauración por anulación de factura: ${motivo}`,
+          });
+        }
+      }
+    } else if (it.producto_id) {
+      const stored = getStoredProducts().find((p) => p.id === it.producto_id);
+      const stockPrev = stored?.currentStock ?? 0;
+      const mov = stored
+        ? movimientoInventarioPresentacion(stored, cant)
+        : { productoId: it.producto_id, cantidad: cant };
+      updateProductStockInStore(mov.productoId, mov.cantidad);
+      registrarMovimientoInventario({
+        producto_id: mov.productoId,
+        producto_nombre: stored?.name || it.nombre_item,
+        tipo: 'Anulación',
+        cantidad_entrada: mov.cantidad,
+        stock_anterior: stockPrev,
+        stock_resultante: stockPrev + mov.cantidad,
+        documento_referencia: currentSale?.numero_factura || ventaId,
+        motivo: `Restauración por anulación de factura: ${motivo}`,
+      });
+    }
+  }
 
-  if (error) throw error;
+  const list = getLocalVentas().map((v) =>
+    v.id === ventaId ? { ...v, estado: 'anulada' as const } : v
+  );
+  saveLocalVentas(list);
+
+  if (sb) {
+    try {
+      const { error } = await sb.rpc('anular_venta_pos', {
+        p_venta_id: ventaId,
+        p_motivo: motivo,
+      });
+      if (!error) return;
+    } catch {
+      // Fallback a actualización directa
+    }
+
+    const { error } = await sb
+      .from('ventas')
+      .update({ estado: 'anulada' })
+      .eq('id', ventaId);
+
+    if (error) throw error;
+  }
 }
 
 export interface EditarVentaItem {
@@ -1409,34 +1515,73 @@ export async function actualizarVenta(
 
   const oldItems = currentSale?.detalle_ventas ?? [];
 
-  // 2. Calcular deltas de inventario si se proporcionaron items
+  // 2. Calcular deltas de inventario con consistencia estricta (revertir previo, aplicar nuevo, registrar trazabilidad)
   const deltas: Array<{ producto_id: string; delta: number }> = [];
   if (payload.items && payload.items.length > 0) {
-    const oldQtyByProd = new Map<string, number>();
-    for (const it of oldItems) {
-      if (it.tipo_item === 'producto' && it.producto_id) {
-        oldQtyByProd.set(it.producto_id, (oldQtyByProd.get(it.producto_id) || 0) + Number(it.cantidad || 0));
+    const resolveProductImpacts = (
+      itemsList: Array<{
+        producto_id?: string | null;
+        combo_id?: string | null;
+        tipo_item?: string;
+        cantidad?: number;
+      }>
+    ) => {
+      const impacts = new Map<string, number>();
+      for (const it of itemsList) {
+        const cant = Number(it.cantidad || 0);
+        if (cant <= 0) continue;
+        if (it.tipo_item === 'combo' && it.combo_id) {
+          const combo = getCombos().find((c) => c.id === it.combo_id);
+          if (combo && Array.isArray(combo.items)) {
+            for (const ci of combo.items) {
+              const prev = impacts.get(ci.productId) || 0;
+              impacts.set(ci.productId, prev + Number((ci as any).quantity ?? (ci as any).qty ?? 1) * cant);
+            }
+          }
+        } else if (it.producto_id) {
+          const stored = getStoredProducts().find((p) => p.id === it.producto_id);
+          const mov = stored
+            ? movimientoInventarioPresentacion(stored, cant)
+            : { productoId: it.producto_id, cantidad: cant };
+          const prev = impacts.get(mov.productoId) || 0;
+          impacts.set(mov.productoId, prev + mov.cantidad);
+        }
       }
-    }
-    const newQtyByProd = new Map<string, number>();
-    for (const it of payload.items) {
-      if (it.tipo_item === 'producto' && it.producto_id) {
-        newQtyByProd.set(it.producto_id, (newQtyByProd.get(it.producto_id) || 0) + Number(it.cantidad || 0));
-      }
-    }
-    const allProdIds = new Set([...oldQtyByProd.keys(), ...newQtyByProd.keys()]);
+      return impacts;
+    };
+
+    const oldImpacts = resolveProductImpacts(oldItems);
+    const newImpacts = resolveProductImpacts(payload.items);
+
+    const allProdIds = new Set([...oldImpacts.keys(), ...newImpacts.keys()]);
     for (const prodId of allProdIds) {
-      const oldQty = oldQtyByProd.get(prodId) || 0;
-      const newQty = newQtyByProd.get(prodId) || 0;
+      const oldQty = oldImpacts.get(prodId) || 0;
+      const newQty = newImpacts.get(prodId) || 0;
       const delta = round2(newQty - oldQty);
       if (Math.abs(delta) > 0.0001) {
         deltas.push({ producto_id: prodId, delta });
       }
     }
 
-    // Actualizar inventario local para cada producto modificado (-delta)
+    // Actualizar inventario local para cada producto modificado (-delta) y registrar auditoría/Kardex
     for (const d of deltas) {
+      const prodBefore = getStoredProducts().find((p) => p.id === d.producto_id);
+      const stockPrev = prodBefore?.currentStock ?? 0;
       updateProductStockInStore(d.producto_id, -d.delta);
+
+      const isReturned = d.delta < 0; // Se redujo la cantidad vendida => reingreso a stock
+      registrarMovimientoInventario({
+        producto_id: d.producto_id,
+        producto_nombre: prodBefore?.name || 'Producto',
+        tipo: 'Edición de factura',
+        cantidad_entrada: isReturned ? Math.abs(d.delta) : 0,
+        cantidad_salida: isReturned ? 0 : d.delta,
+        stock_anterior: stockPrev,
+        stock_resultante: stockPrev - d.delta,
+        documento_referencia: currentSale?.numero_factura || ventaId,
+        usuario: payload.usuario_modificador_nombre || 'Administrador',
+        motivo: `Ajuste por edición de factura ${currentSale?.numero_factura || ventaId} (${d.delta > 0 ? `+${d.delta} vendidos` : `${Math.abs(d.delta)} devueltos a stock`})`,
+      });
     }
   }
 

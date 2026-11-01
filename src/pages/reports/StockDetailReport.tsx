@@ -16,6 +16,8 @@ import {
   History,
   X,
   Filter,
+  Edit,
+  AlertCircle,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
@@ -578,8 +580,10 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
                 <option value="all">Todos los tipos</option>
                 <option value="Ventas">Solo Ventas</option>
                 <option value="Compras">Solo Compras</option>
-                <option value="Ajuste de Stock">Ajustes de Stock</option>
-                <option value="Devolución de Venta">Devoluciones Venta</option>
+                <option value="Ajuste de Stock">Ajustes de inventario</option>
+                <option value="Devolución de Venta">Devoluciones</option>
+                <option value="Anulación">Anulaciones</option>
+                <option value="Edición de factura">Edición de facturas</option>
               </select>
 
               <div className="relative w-64">
@@ -614,86 +618,107 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-secondary/50 text-left text-muted-foreground font-semibold">
-                  <th className="px-4 py-3">Tipo</th>
-                  <th className="px-4 py-3 text-right">Cambio de cantidad</th>
-                  <th className="px-4 py-3 text-right">Nueva cantidad (Saldo)</th>
-                  <th className="px-4 py-3">Fecha y Hora</th>
-                  <th className="px-4 py-3">Número de referencia o NCF</th>
-                  <th className="px-4 py-3">Customer / Supplier information</th>
+                  <th className="px-3.5 py-3">Fecha y Hora</th>
+                  <th className="px-3.5 py-3">Tipo</th>
+                  <th className="px-3.5 py-3">Doc / Motivo</th>
+                  <th className="px-3.5 py-3 text-right">Entrada</th>
+                  <th className="px-3.5 py-3 text-right">Salida</th>
+                  <th className="px-3.5 py-3 text-right">Stock Anterior</th>
+                  <th className="px-3.5 py-3 text-right font-black text-foreground">Stock Resultante</th>
+                  <th className="px-3.5 py-3">Detalle / Cliente</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {paginatedKardexMovements.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">
+                    <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
                       <History size={32} className="mx-auto mb-2 opacity-30" />
                       <p className="font-semibold text-foreground">No hay movimientos registrados</p>
                       <p className="text-[11px] mt-0.5">
-                        Las ventas, compras y ajustes de este producto se reflejarán automáticamente en este Kardex.
+                        Las ventas, compras, ajustes, anulaciones y ediciones de este producto se reflejarán automáticamente en este Kardex.
                       </p>
                     </td>
                   </tr>
                 ) : (
                   paginatedKardexMovements.map((m) => {
-                    const isNegative = m.cambio_cantidad < 0;
                     return (
                       <tr key={m.id} className="hover:bg-secondary/25 transition-colors">
-                        {/* Tipo de Movimiento */}
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          {m.tipo === 'Ventas' && (
-                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-info/10 text-info">
-                              <ShoppingCart size={12} /> Ventas
-                            </span>
-                          )}
-                          {m.tipo === 'Compras' && (
-                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-success/10 text-success">
-                              <ShoppingBag size={12} /> Compras
-                            </span>
-                          )}
-                          {m.tipo === 'Ajuste de Stock' && (
-                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-warning/10 text-warning">
-                              <Sliders size={12} /> Ajuste de Stock
-                            </span>
-                          )}
-                          {m.tipo === 'Devolución de Venta' && (
-                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400">
-                              <RotateCcw size={12} /> Devolución Venta
-                            </span>
-                          )}
-                          {m.tipo === 'Devolución de Compra' && (
-                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-danger/10 text-danger">
-                              <RotateCcw size={12} /> Devolución Compra
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Cambio de Cantidad */}
-                        <td
-                          className={`px-4 py-3 text-right font-mono font-bold whitespace-nowrap ${
-                            isNegative ? 'text-danger' : 'text-success'
-                          }`}
-                        >
-                          {isNegative ? '' : '+'}
-                          {m.cambio_cantidad.toFixed(2)}
-                        </td>
-
-                        {/* Nueva Cantidad (Saldo acumulado) */}
-                        <td className="px-4 py-3 text-right font-mono font-bold text-foreground whitespace-nowrap">
-                          {m.nueva_cantidad.toFixed(2)}
-                        </td>
-
-                        {/* Fecha */}
-                        <td className="px-4 py-3 whitespace-nowrap text-muted-foreground font-mono">
+                        {/* Fecha y Hora */}
+                        <td className="px-3.5 py-3 whitespace-nowrap text-muted-foreground font-mono">
                           {m.fecha_formateada}
                         </td>
 
+                        {/* Tipo de Movimiento */}
+                        <td className="px-3.5 py-3 whitespace-nowrap">
+                          {m.tipo === 'Ventas' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-info/10 text-info">
+                              <ShoppingCart size={11} /> Venta
+                            </span>
+                          )}
+                          {m.tipo === 'Compras' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-success/10 text-success">
+                              <ShoppingBag size={11} /> Compra
+                            </span>
+                          )}
+                          {m.tipo === 'Ajuste de Stock' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-warning/10 text-warning">
+                              <Sliders size={11} /> Ajuste
+                            </span>
+                          )}
+                          {m.tipo === 'Devolución de Venta' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                              <RotateCcw size={11} /> Devolución
+                            </span>
+                          )}
+                          {m.tipo === 'Devolución de Compra' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-danger/10 text-danger">
+                              <RotateCcw size={11} /> Dev. Compra
+                            </span>
+                          )}
+                          {m.tipo === 'Anulación' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                              <AlertCircle size={11} /> Anulación
+                            </span>
+                          )}
+                          {m.tipo === 'Edición de factura' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400">
+                              <Edit size={11} /> Edición Factura
+                            </span>
+                          )}
+                          {m.tipo === 'Transferencia' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-500/10 text-slate-600">
+                              <Layers size={11} /> Transferencia
+                            </span>
+                          )}
+                        </td>
+
                         {/* Número de Referencia o NCF */}
-                        <td className="px-4 py-3 whitespace-nowrap font-mono font-bold text-primary">
+                        <td className="px-3.5 py-3 whitespace-nowrap font-mono font-bold text-primary">
                           {m.numero_referencia}
                         </td>
 
+                        {/* Cantidad Entrada */}
+                        <td className="px-3.5 py-3 text-right font-mono font-bold text-success whitespace-nowrap">
+                          {m.cantidad_entrada > 0 ? `+${m.cantidad_entrada.toFixed(2)}` : '—'}
+                        </td>
+
+                        {/* Cantidad Salida */}
+                        <td className="px-3.5 py-3 text-right font-mono font-bold text-danger whitespace-nowrap">
+                          {m.cantidad_salida > 0 ? `-${m.cantidad_salida.toFixed(2)}` : '—'}
+                        </td>
+
+                        {/* Stock Anterior */}
+                        <td className="px-3.5 py-3 text-right font-mono text-muted-foreground whitespace-nowrap">
+                          {(m.stock_anterior ?? 0).toFixed(2)}
+                        </td>
+
+                        {/* Stock Resultante (Saldo acumulado) */}
+                        <td className="px-3.5 py-3 text-right font-mono font-extrabold text-foreground whitespace-nowrap">
+                          {(m.stock_resultante ?? m.nueva_cantidad ?? 0).toFixed(2)}
+                        </td>
+
                         {/* Cliente / Proveedor / Info */}
-                        <td className="px-4 py-3 text-foreground font-medium max-w-xs truncate">
+                        <td className="px-3.5 py-3 text-foreground font-medium max-w-xs truncate">
                           {m.cliente_proveedor_info}
                           {m.notas && (
                             <span className="block text-[11px] text-muted-foreground italic truncate">

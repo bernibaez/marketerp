@@ -11,7 +11,7 @@ import PosCashOpenModal from './PosCashOpenModal';
 import PosProductDiscountModal, { type PosProductDiscountData } from './PosProductDiscountModal';
 import PosEditPriceModal from './PosEditPriceModal';
 import SupervisorAuthModal from './SupervisorAuthModal';
-import { isAdminOrSuperAdmin, type AuthUser } from '@/lib/auth';
+import { isAdminOrSuperAdmin, canChangePrice, type AuthUser } from '@/lib/auth';
 import { logAuditEvent } from '@/lib/auditStore';
 
 import { usePOSCart } from '../hooks/usePOSCart';
@@ -247,23 +247,35 @@ export default function POSTerminal() {
   const [closeCashModalOpen, setCloseCashModalOpen] = useState(false);
   const [weightScanOpen, setWeightScanOpen] = useState(false);
 
-  const handleOpenScale = (productId?: string, weight?: number, product?: any, replaceExisting?: boolean) => {
-    const existingInCart = productId
+  const handleOpenScale = (productId?: string | any, weight?: number, product?: any, replaceExisting?: boolean) => {
+    let actualProductId = typeof productId === 'string' ? productId : undefined;
+    let actualProduct = product;
+    let actualWeight = weight;
+    let actualReplace = replaceExisting;
+
+    if (productId && typeof productId === 'object') {
+      actualProduct = productId;
+      actualProductId = productId.productId || productId.id;
+      actualWeight = weight !== undefined ? weight : (productId.qty ?? 1.0);
+      actualReplace = replaceExisting !== undefined ? replaceExisting : true;
+    }
+
+    const existingInCart = actualProductId
       ? cart.find(
           (i) =>
-            i.productId === productId ||
-            (product?.sku && i.sku && i.sku.toLowerCase() === String(product.sku).toLowerCase())
+            i.productId === actualProductId ||
+            (actualProduct?.sku && i.sku && i.sku.toLowerCase() === String(actualProduct.sku).toLowerCase())
         )
       : undefined;
-    const effectiveWeight = weight !== undefined ? weight : existingInCart?.qty ?? 1.0;
-    const effectiveProduct = product || existingInCart;
+    const effectiveWeight = actualWeight !== undefined ? actualWeight : existingInCart?.qty ?? 1.0;
+    const effectiveProduct = actualProduct || existingInCart;
     setScaleParams(
-      productId || effectiveWeight || effectiveProduct
+      actualProductId || effectiveWeight || effectiveProduct
         ? {
-            productId,
+            productId: actualProductId,
             weight: effectiveWeight,
             product: effectiveProduct,
-            replaceExisting: replaceExisting ?? Boolean(existingInCart),
+            replaceExisting: actualReplace !== undefined ? actualReplace : Boolean(existingInCart),
           }
         : null
     );
@@ -304,14 +316,13 @@ export default function POSTerminal() {
   const [authorizedSupervisor, setAuthorizedSupervisor] = useState<AuthUser | null>(null);
 
   const handleRequestPriceChange = (item: CartItem) => {
-    if (isAdminUser) {
-      setAuthorizedSupervisor(user);
-      setPriceEditTargetItem(item);
-      setPriceEditModalOpen(true);
-    } else {
-      setPendingSupervisorAction({ type: 'price', item });
-      setSupervisorAuthModalOpen(true);
+    if (!isAdminUser && !canChangePrice(user)) {
+      toast.error('Acceso denegado: Solo el Administrador o Super Administrador pueden cambiar precios de productos.');
+      return;
     }
+    setAuthorizedSupervisor(user);
+    setPriceEditTargetItem(item);
+    setPriceEditModalOpen(true);
   };
 
   const handleOpenCartItemDiscount = (item: CartItem) => {
@@ -339,6 +350,10 @@ export default function POSTerminal() {
   };
 
   const handleConfirmPriceChange = (cartItemId: string, newPrice: number, reason?: string) => {
+    if (!isAdminUser && !canChangePrice(user) && !canChangePrice(authorizedSupervisor)) {
+      toast.error('No tienes permiso para modificar precios.');
+      return;
+    }
     const item = cart.find((i) => i.id === cartItemId);
     const oldPrice = item ? item.price : 0;
 

@@ -114,23 +114,42 @@ export function convertirAUnidadBase(cantidadPresentacion: number, factorConvers
 
 export function esPresentacionVinculada(producto: {
   producto_base_id?: string | null;
+  product_id_base?: string | null;
   factor_conversion?: number | null;
 }): boolean {
-  return Boolean(producto.producto_base_id) && Number(producto.factor_conversion || 1) > 1;
+  const baseId = producto.producto_base_id || producto.product_id_base;
+  return Boolean(baseId) && Number(producto.factor_conversion || 1) > 1;
 }
 
-/** Al vender/comprar un fardo o cartón vinculado, el movimiento va al producto contenido. */
+/** Al vender/comprar un empaque vinculado (fardo, cartón, six pack), el movimiento va al producto contenido.
+ * Para productos vendidos por peso (carnes, embutidos por libra), se descuenta exactamente la cantidad pesada. */
 export function movimientoInventarioPresentacion(
   producto: {
     id: string;
     producto_base_id?: string | null;
+    product_id_base?: string | null;
     factor_conversion?: number | null;
+    is_weight_product?: boolean | null;
+    es_pesado?: boolean | null;
+    sale_type?: string | null;
+    unit?: string | null;
   },
   cantidad: number
 ): { productoId: string; cantidad: number } {
-  if (esPresentacionVinculada(producto) && producto.producto_base_id) {
+  const isWeight =
+    Boolean(producto.is_weight_product) ||
+    Boolean(producto.es_pesado) ||
+    producto.sale_type === 'weight' ||
+    producto.sale_type === 'both' ||
+    ['lb', 'libra', 'kg', 'kilogramo', 'oz', 'onza'].includes(
+      String(producto.unit || '').trim().toLowerCase()
+    );
+
+  const baseId = producto.producto_base_id || producto.product_id_base;
+
+  if (!isWeight && esPresentacionVinculada(producto) && baseId) {
     return {
-      productoId: producto.producto_base_id,
+      productoId: baseId,
       cantidad: convertirAUnidadBase(cantidad, Number(producto.factor_conversion)),
     };
   }
