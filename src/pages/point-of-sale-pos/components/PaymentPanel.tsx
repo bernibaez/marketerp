@@ -21,6 +21,7 @@ import { generarSiguienteNcf } from '@/services/ncf.service';
 import { isSupabaseConfigured } from '@/services/clienteSupabase';
 import PrintableInvoice from '@/components/PrintableInvoice';
 import { useAuth } from '@/context/AuthContext';
+import { createPortal } from 'react-dom';
 
 type PaymentMethod = 'cash' | 'card' | 'transfer' | 'credit' | 'split';
 
@@ -594,9 +595,16 @@ export default function PaymentPanel({
 
         {/* Mode Multiple / Split */}
         {method === 'split' && (
-          <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 space-y-3 text-xs">
-            <p className="font-black uppercase text-slate-500 tracking-wider">Desglose de Pago Múltiple</p>
-            <div className="grid grid-cols-2 gap-3">
+          <div className="p-4 sm:p-5 rounded-2xl border-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 space-y-4 shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700/80 pb-2">
+              <p className="font-black uppercase text-slate-800 dark:text-slate-100 tracking-wider text-xs sm:text-sm">
+                DESGLOSE DE PAGO MÚLTIPLE
+              </p>
+              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                Total a cubrir: {fmt(total)}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3.5">
               {(
                 [
                   ['cash', 'Efectivo'],
@@ -605,27 +613,46 @@ export default function PaymentPanel({
                   ['credit', 'Crédito'],
                 ] as const
               ).map(([key, label]) => (
-                <div key={key}>
-                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                <div key={key} className="space-y-1.5">
+                  <label className="block text-xs font-black text-slate-900 dark:text-slate-100 tracking-wide">
                     {label}
                   </label>
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    placeholder="0.00"
-                    value={split[key]}
-                    onChange={(e) => setSplit((s) => ({ ...s, [key]: e.target.value }))}
-                    className="w-full text-xs font-bold h-9 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 tabular-nums"
-                  />
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400 dark:text-slate-500 select-none pointer-events-none">
+                      RD$
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      placeholder="0.00"
+                      value={split[key]}
+                      onChange={(e) => setSplit((s) => ({ ...s, [key]: e.target.value }))}
+                      className="w-full text-sm sm:text-base font-black h-11 rounded-xl border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 pl-10 pr-3 tabular-nums text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-emerald-500 dark:focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20 shadow-xs transition-colors"
+                    />
+                  </div>
                 </div>
               ))}
             </div>
-            <div className="pt-2 flex justify-between font-bold text-xs">
-              <span>Suma total: {fmt(splitTotal)}</span>
-              <span className={Math.abs(splitDiff) < 0.01 ? 'text-emerald-600' : 'text-rose-500'}>
-                Diferencia: {fmt(splitDiff)}
-              </span>
+
+            {/* Suma total y Diferencia destacada en negrita y grande */}
+            <div className="pt-3 border-t-2 border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="text-xs sm:text-sm font-black text-slate-700 dark:text-slate-300">
+                <span>Suma total: </span>
+                <span className="text-sm sm:text-base font-black text-slate-950 dark:text-white tabular-nums">
+                  {fmt(splitTotal)}
+                </span>
+              </div>
+              <div
+                className={`px-3.5 py-2 rounded-xl text-sm sm:text-base font-black tracking-tight tabular-nums flex items-center justify-between sm:justify-start gap-2 border-2 shadow-xs ${
+                  Math.abs(splitDiff) < 0.01
+                    ? 'bg-emerald-100 text-emerald-900 border-emerald-400 dark:bg-emerald-950/80 dark:text-emerald-200 dark:border-emerald-600'
+                    : 'bg-rose-100 text-rose-900 border-rose-400 dark:bg-rose-950/80 dark:text-rose-200 dark:border-rose-600'
+                }`}
+              >
+                <span className="uppercase text-xs font-black">Diferencia:</span>
+                <span className="text-base sm:text-lg font-black">{fmt(splitDiff)}</span>
+              </div>
             </div>
           </div>
         )}
@@ -826,10 +853,11 @@ export default function PaymentPanel({
       </div>
 
       {/* DOCUMENTO OFICIAL PARA IMPRESIÓN DIRECTA CON WINDOW.PRINT() */}
-      {printInvoiceData && (
+      {printInvoiceData && typeof document !== 'undefined' && createPortal(
         <div className="hidden print:block printable-document">
           <PrintableInvoice invoiceData={printInvoiceData} />
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

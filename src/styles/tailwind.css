@@ -382,12 +382,21 @@
   }
 
   html,
-  body {
+  body,
+  #root,
+  .dialog-inline-host,
+  .dialog-inline-host > div,
+  .modal-panel,
+  [role="dialog"] {
     background: #ffffff !important;
     color: #000000 !important;
     height: auto !important;
-    min-height: 100% !important;
+    min-height: 0 !important;
+    max-height: none !important;
     overflow: visible !important;
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
   }
 
   /* Ocultar elementos de navegación y UI que nunca deben aparecer en una impresión */
@@ -436,6 +445,9 @@
     display: block !important;
     width: 100% !important;
     max-width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
     margin: 0 auto !important;
     padding: 0 !important;
     background: #ffffff !important;
@@ -445,6 +457,15 @@
     border-radius: 0 !important;
     overflow: visible !important;
     z-index: auto !important;
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+    break-after: auto !important;
+    page-break-after: auto !important;
+  }
+
+  .printable-invoice-item {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
   }
 
   /* Hoja de etiquetas: fuera de pantalla en UI, visible al imprimir */

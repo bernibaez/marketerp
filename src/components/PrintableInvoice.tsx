@@ -227,7 +227,7 @@ export default function PrintableInvoice({
     if (isFiscal) {
       return 'FACTURA FISCAL';
     }
-    return 'FACTURA PARA CONSUMIDOR FINAL';
+    return 'COMPROBANTE DE VENTA';
   };
 
   const formatMethodName = (m?: string): string => {
@@ -269,19 +269,27 @@ export default function PrintableInvoice({
     computedPaymentBreakdown.length === 1 ? computedPaymentBreakdown[0].method : invoiceData.paymentMethod
   );
 
-  const paymentMethodLabel = (m?: string): string => {
-    if (!m) return 'Efectivo recibido:';
-    const norm = m.toLowerCase();
-    if (norm === 'card' || norm === 'tarjeta') return 'Pagado con tarjeta:';
-    if (norm === 'transfer' || norm === 'transferencia') return 'Transferencia recibida:';
-    if (norm === 'credit' || norm === 'credito' || norm === 'crédito') return 'Venta a crédito:';
-    if (norm === 'split' || norm === 'mixto') return 'Total recibido (Mixto):';
-    return 'Efectivo recibido:';
-  };
+  const formattedDateTime = useMemo(() => {
+    if (invoiceData.issueDate && invoiceData.issueTime) {
+      return `${invoiceData.issueDate} ${invoiceData.issueTime}`;
+    }
+    if (invoiceData.issueDate) {
+      return invoiceData.issueDate;
+    }
+    const now = new Date();
+    return now.toLocaleString('es-DO', {
+      day: 'numeric',
+      month: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+  }, [invoiceData.issueDate, invoiceData.issueTime]);
 
   // -------------------------------------------------------------
-  // RENDER 1 & 2: TICKET TÉRMICO (58MM / 80MM / ANCHO PERSONALIZADO)
-  // Idéntico al diseño de InvoiceLivePreview en Configuración
+  // RENDER 1 & 2: TICKET TÉRMICO PROFESIONAL (58MM / 80MM / ANCHO PERSONALIZADO)
+  // Formato claro, estético y diseñado para impresión continua sin truncado
   // -------------------------------------------------------------
   if (isTicket) {
     const printFormatClass = activeFormat === 'ticket_58mm' ? 'print-format-58mm' : 'print-format-80mm';
@@ -289,15 +297,17 @@ export default function PrintableInvoice({
 
     return (
       <div
-        className={`printable-invoice-container ${printFormatClass} bg-white text-slate-900 border border-slate-200/90 shadow-xs p-5 select-none transition-all mx-auto print:shadow-none print:border-none ${getLineSpacingClass(
+        className={`printable-invoice-container ${printFormatClass} bg-white text-slate-900 border border-slate-200/90 shadow-xs p-4 sm:p-5 select-none transition-all mx-auto print:shadow-none print:border-none print:p-0 ${getLineSpacingClass(
           settings.printDensity || 'normal'
         )} ${className}`}
         style={{
           width: `${previewWidthPx}px`,
           maxWidth: '100%',
+          height: 'auto',
+          overflow: 'visible',
           paddingLeft: `${Math.max(8, (settings.marginMm ?? 3) * 3.78)}px`,
           paddingRight: `${Math.max(8, (settings.marginMm ?? 3) * 3.78)}px`,
-          fontFamily: getFontFamily(settings.fontFamily || 'courier'),
+          fontFamily: getFontFamily(settings.fontFamily || 'sans'),
           fontSize: `${baseFontPt}px`,
           fontWeight: settings.fontWeight === 'bold' ? 700 : settings.fontWeight === 'medium' ? 600 : 400,
           textTransform: settings.uppercaseOnly ? 'uppercase' : 'none',
@@ -316,8 +326,8 @@ export default function PrintableInvoice({
             </div>
           )}
           <p
-            className="font-black uppercase tracking-tight text-slate-900"
-            style={{ fontSize: `${baseFontPt + 2}px` }}
+            className="font-black uppercase tracking-tight text-slate-950"
+            style={{ fontSize: `${baseFontPt + 3}px` }}
           >
             {settings.companyName || 'Supermercado Mercato S.R.L.'}
           </p>
@@ -327,16 +337,17 @@ export default function PrintableInvoice({
             </p>
           )}
           {settings.showCompanyRnc && (
-            <p className="font-semibold text-slate-700" style={{ fontSize: `${baseFontPt - 0.5}px` }}>
-              RNC: {settings.companyRnc || '131-45678-9'}
+            <p className="font-semibold text-slate-800" style={{ fontSize: `${baseFontPt - 0.5}px` }}>
+              RNC: {settings.companyRnc || '101000001'}
+              {settings.showCompanyPhone && settings.companyPhone ? ` · Tel: ${settings.companyPhone}` : ''}
             </p>
           )}
           {settings.showCompanyAddress && settings.companyAddress && (
-            <p className="text-slate-600" style={{ fontSize: `${baseFontPt - 1.5}px` }}>
+            <p className="text-slate-600 leading-tight" style={{ fontSize: `${baseFontPt - 1.5}px` }}>
               {settings.companyAddress}
             </p>
           )}
-          {settings.showCompanyPhone && settings.companyPhone && (
+          {!settings.showCompanyRnc && settings.showCompanyPhone && settings.companyPhone && (
             <p className="text-slate-600" style={{ fontSize: `${baseFontPt - 1.5}px` }}>
               Tel: {settings.companyPhone}
             </p>
@@ -346,185 +357,216 @@ export default function PrintableInvoice({
               {settings.companyEmail}
             </p>
           )}
+
+          {/* Título de comprobante */}
+          <div className="pt-2 pb-0.5">
+            <p className="font-black uppercase tracking-wide text-slate-950" style={{ fontSize: `${baseFontPt + 0.5}px` }}>
+              {getReceiptTitle()}
+            </p>
+          </div>
         </div>
 
-        {/* Línea fina con el color de acento seleccionado */}
-        <div
-          className="h-[2px] w-full my-2.5"
-          style={{ backgroundColor: accent }}
-        />
+        {/* Separador superior */}
+        <div className={`my-2 ${separatorClass}`} />
 
-        {/* Título de comprobante y NCF / No. Factura */}
-        <div className="text-center space-y-0.5 pb-2">
-          <p className="font-bold uppercase" style={{ fontSize: `${baseFontPt - 0.5}px` }}>
-            {getReceiptTitle()}
-          </p>
-          {invoiceData.ncf ? (
-            <>
-              <p className="font-mono font-bold text-slate-800">
-                NCF: {invoiceData.ncf}
-              </p>
-              {invoiceData.invoiceNumber && invoiceData.invoiceNumber !== invoiceData.ncf && (
-                <p className="font-mono text-slate-500" style={{ fontSize: `${baseFontPt - 2}px` }}>
-                  Factura: {invoiceData.invoiceNumber}
-                </p>
-              )}
-            </>
-          ) : (
-            <p className="font-mono font-bold text-slate-800">
-              No.: {invoiceData.invoiceNumber}
-            </p>
-          )}
-          {isFiscal && invoiceData.expirationDate && (
-            <p className="text-slate-500 font-mono" style={{ fontSize: `${baseFontPt - 2}px` }}>
-              Vencimiento NCF: {invoiceData.expirationDate}
-            </p>
-          )}
-        </div>
-
-        {/* Metadatos (Fecha, Cajero, Terminal, Cliente) */}
+        {/* Metadatos (No. Fac, Caja, Cajero, Fecha, NCF) */}
         <div
-          className={`py-2 ${separatorClass} space-y-1 text-slate-700`}
-          style={{ fontSize: `${baseFontPt - 1}px` }}
+          className="space-y-1 text-slate-800"
+          style={{ fontSize: `${baseFontPt - 0.5}px` }}
         >
           <div className="flex justify-between gap-2">
-            <span className="text-slate-500">Fecha / Hora:</span>
-            <span className="text-right">
-              {invoiceData.issueDate}{' '}
-              {settings.showIssueTime && invoiceData.issueTime ? invoiceData.issueTime : ''}
+            <span className="text-slate-600 font-medium shrink-0">No. Fac:</span>
+            <span className="font-mono font-bold text-slate-950 text-right truncate">
+              {invoiceData.invoiceNumber}
             </span>
           </div>
-          <div className="flex justify-between gap-2">
-            <span className="text-slate-500 font-semibold">Cajero responsable:</span>
-            <span className="text-right font-medium text-slate-900">{invoiceData.cashier || 'Cajero'}</span>
-          </div>
-          {settings.showRegisterNumber && (
+
+          {invoiceData.ncf && (
             <div className="flex justify-between gap-2">
-              <span className="text-slate-500">Terminal:</span>
-              <span className="text-right">{invoiceData.registerNumber || 'POS-01'}</span>
-            </div>
-          )}
-          {settings.showCustomerInfo && (
-            <div className="flex justify-between gap-2">
-              <span className="text-slate-500">Cliente:</span>
-              <span className="font-medium truncate max-w-[180px] text-right">
-                {invoiceData.customerName || 'Consumidor Final'}
+              <span className="text-slate-600 font-medium shrink-0">NCF:</span>
+              <span className="font-mono font-bold text-slate-950 text-right">
+                {invoiceData.ncf}
               </span>
             </div>
           )}
+
+          {isFiscal && invoiceData.expirationDate && (
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-600 shrink-0">Vencimiento:</span>
+              <span className="font-mono text-slate-800 text-right">
+                {invoiceData.expirationDate}
+              </span>
+            </div>
+          )}
+
+          <div className="flex justify-between gap-2">
+            <span className="text-slate-600 font-medium shrink-0">Caja:</span>
+            <span className="font-semibold text-slate-950 text-right">
+              {invoiceData.registerNumber || 'Caja #1 - Administrador'}
+            </span>
+          </div>
+
+          <div className="flex justify-between gap-2">
+            <span className="text-slate-600 font-medium shrink-0">Cajero:</span>
+            <span className="font-semibold text-slate-950 text-right">
+              {invoiceData.cashier || 'Admin General'}
+            </span>
+          </div>
+
+          <div className="flex justify-between gap-2">
+            <span className="text-slate-600 font-medium shrink-0">Fecha:</span>
+            <span className="font-semibold text-slate-950 text-right">
+              {formattedDateTime}
+            </span>
+          </div>
+
+          {settings.showCustomerInfo && invoiceData.customerName && (
+            <div className="flex justify-between gap-2 pt-0.5 border-t border-dotted border-slate-200">
+              <span className="text-slate-600 font-medium shrink-0">Cliente:</span>
+              <span className="font-semibold text-slate-950 text-right truncate max-w-[200px]">
+                {invoiceData.customerName}
+              </span>
+            </div>
+          )}
+
           {invoiceData.customerRnc && (isFiscal || settings.showCustomerRncInNormal) && (
             <div className="flex justify-between gap-2">
-              <span className="text-slate-500">RNC Cliente:</span>
-              <span className="font-mono text-right">{invoiceData.customerRnc}</span>
+              <span className="text-slate-600 font-medium shrink-0">RNC Cliente:</span>
+              <span className="font-mono font-bold text-slate-950 text-right">
+                {invoiceData.customerRnc}
+              </span>
             </div>
           )}
+
           {settings.showCustomerPhone && invoiceData.customerPhone && (
             <div className="flex justify-between gap-2">
-              <span className="text-slate-500">Tel. Cliente:</span>
-              <span className="text-right">{invoiceData.customerPhone}</span>
+              <span className="text-slate-600 shrink-0">Tel. Cliente:</span>
+              <span className="text-right text-slate-800">{invoiceData.customerPhone}</span>
             </div>
           )}
+
           {settings.showCustomerAddress && invoiceData.customerAddress && (
             <div className="flex justify-between gap-2">
-              <span className="text-slate-500">Dirección:</span>
-              <span className="text-right truncate max-w-[180px]">{invoiceData.customerAddress}</span>
+              <span className="text-slate-600 shrink-0">Dirección:</span>
+              <span className="text-right truncate max-w-[190px] text-slate-800">
+                {invoiceData.customerAddress}
+              </span>
             </div>
           )}
         </div>
 
-        {/* Tabla de Ítems */}
-        <div className={`py-2 ${separatorClass} space-y-2`}>
+        {/* Cabecera de la tabla de Ítems */}
+        <div className={`mt-2 pt-2 pb-1 ${separatorClass}`}>
+          <div className="flex justify-between font-black text-slate-900 uppercase tracking-wider text-[11px]">
+            <span>Cant. Descripción</span>
+            <span>Importe</span>
+          </div>
+        </div>
+
+        {/* Lista de Ítems sin truncado ni solapamiento */}
+        <div className={`pt-1 pb-2 ${separatorClass} space-y-2`}>
           {invoiceData.items.map((item, idx) => (
-            <div key={idx} className="space-y-0.5">
-              <p className="text-slate-900 font-medium leading-snug">
-                {settings.showItemSku && item.sku ? `[${item.sku}] ` : ''}
-                {item.name}
-              </p>
-              <div
-                className="flex justify-between text-slate-600"
-                style={{ fontSize: `${baseFontPt - 1}px` }}
-              >
-                <span>
-                  {settings.showItemPriceUnitPrice
-                    ? `${item.qty}${item.unit && !['und', 'ud', 'unidad', 'unidades'].includes(item.unit.toLowerCase()) ? ` ${item.unit}` : ''} x ${fmt(item.price)}`
-                    : `Cant: ${item.qty}${item.unit && !['und', 'ud', 'unidad', 'unidades'].includes(item.unit.toLowerCase()) ? ` ${item.unit}` : ''}`}
+            <div
+              key={idx}
+              className="printable-invoice-item space-y-0.5"
+              style={{ breakInside: 'avoid', pageBreakInside: 'avoid' }}
+            >
+              <div className="flex justify-between items-start gap-2">
+                <span className="font-bold text-slate-950 leading-snug break-words">
+                  {settings.showItemSku && item.sku ? `[${item.sku}] ` : ''}
+                  {item.name}
                 </span>
-                <span className="text-slate-900 font-semibold tabular-nums">
+                <span className="font-black text-slate-950 tabular-nums shrink-0 text-right">
                   {fmt(item.subtotal)}
                 </span>
+              </div>
+              <div
+                className="text-slate-600 font-medium"
+                style={{ fontSize: `${baseFontPt - 1.5}px` }}
+              >
+                <span>
+                  {item.qty}{item.unit && !['und', 'ud', 'unidad', 'unidades'].includes(item.unit.toLowerCase()) ? ` ${item.unit}` : ''} x ${fmt(item.price)}
+                </span>
+                {item.itbis !== undefined && item.itbis > 0 && settings.showTaxBreakdown && (
+                  <span className="ml-2 text-slate-500 font-normal">
+                    (ITBIS: {fmt(item.itbis)})
+                  </span>
+                )}
               </div>
             </div>
           ))}
         </div>
 
         {/* Subtotal, Descuento, ITBIS y Total */}
-        <div className={`py-2 ${separatorClass} space-y-1`}>
-          <div className="flex justify-between text-slate-600">
-            <span>Subtotal</span>
-            <span className="tabular-nums">{fmt(invoiceData.subtotal)}</span>
+        <div className={`py-2 ${separatorClass} space-y-1.5`}>
+          <div className="flex justify-between text-slate-700 font-medium" style={{ fontSize: `${baseFontPt - 0.5}px` }}>
+            <span>Subtotal:</span>
+            <span className="tabular-nums font-semibold text-slate-900">{fmt(invoiceData.subtotal)}</span>
           </div>
           {typeof invoiceData.discount === 'number' && invoiceData.discount > 0 && (
-            <div className="flex justify-between text-slate-600">
-              <span>Descuento</span>
-              <span className="tabular-nums">-{fmt(invoiceData.discount)}</span>
+            <div className="flex justify-between text-slate-700 font-medium" style={{ fontSize: `${baseFontPt - 0.5}px` }}>
+              <span>Descuento:</span>
+              <span className="tabular-nums font-bold text-emerald-700">-{fmt(invoiceData.discount)}</span>
             </div>
           )}
           {settings.showTaxBreakdown && (
-            <div className="flex justify-between text-slate-600">
-              <span>ITBIS (18%)</span>
-              <span className="tabular-nums">{fmt(invoiceData.itbis)}</span>
+            <div className="flex justify-between text-slate-700 font-medium" style={{ fontSize: `${baseFontPt - 0.5}px` }}>
+              <span>ITBIS (18%):</span>
+              <span className="tabular-nums font-semibold text-slate-900">{fmt(invoiceData.itbis)}</span>
             </div>
           )}
           <div
-            className="flex justify-between font-black text-slate-900 pt-1.5 border-t border-slate-900"
-            style={{ fontSize: `${baseFontPt + 1.5}px` }}
+            className="flex justify-between font-black text-slate-950 pt-1.5 border-t border-slate-900"
+            style={{ fontSize: `${baseFontPt + 2}px` }}
           >
-            <span>TOTAL A PAGAR</span>
+            <span>TOTAL:</span>
             <span className="tabular-nums">{fmt(invoiceData.total)}</span>
           </div>
+        </div>
 
-          {/* Sección de Métodos de Pago (Simple o Múltiple) */}
-          <div
-            className="pt-2 text-slate-700 space-y-1 border-t border-dashed border-slate-300"
-            style={{ fontSize: `${baseFontPt - 1.5}px` }}
-          >
-            {isMultiPayment ? (
-              <div className="space-y-1">
-                <div className="flex justify-between font-black text-slate-800 pb-0.5 border-b border-slate-200 uppercase tracking-tight">
-                  <span>MÉTODO DE PAGO</span>
-                  <span>IMPORTE</span>
-                </div>
-                {computedPaymentBreakdown.map((p, idx) => (
-                  <div key={idx} className="flex justify-between">
-                    <span className="font-medium text-slate-700">{p.label}</span>
-                    <span className="font-mono tabular-nums font-semibold text-slate-900">{fmt(p.amount)}</span>
-                  </div>
-                ))}
-                <div className="flex justify-between font-bold text-slate-900 pt-1 border-t border-slate-200">
-                  <span>Total Pagado:</span>
-                  <span className="font-mono tabular-nums">{fmt(totalPagadoEfectivo)}</span>
-                </div>
+        {/* Sección de Pago */}
+        <div
+          className={`py-2 ${separatorClass} space-y-1 text-slate-800`}
+          style={{ fontSize: `${baseFontPt - 0.5}px` }}
+        >
+          {isMultiPayment ? (
+            <div className="space-y-1">
+              <div className="flex justify-between font-bold text-slate-950 pb-0.5">
+                <span className="text-slate-600">Pago:</span>
+                <span className="uppercase font-black text-slate-950">MÚLTIPLE</span>
               </div>
-            ) : (
-              <div className="space-y-0.5">
-                <div className="flex justify-between">
-                  <span className="font-semibold text-slate-600">Método de pago:</span>
-                  <span className="font-bold text-slate-900">{primaryPaymentLabel}</span>
+              {computedPaymentBreakdown.map((p, idx) => (
+                <div key={idx} className="flex justify-between pl-2 text-slate-700">
+                  <span>{p.label}:</span>
+                  <span className="tabular-nums font-semibold text-slate-950">{fmt(p.amount)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Importe pagado:</span>
-                  <span className="font-mono tabular-nums">{fmt(invoiceData.cashReceived ?? invoiceData.total)}</span>
-                </div>
+              ))}
+              <div className="flex justify-between font-bold text-slate-950 pt-0.5 border-t border-slate-200">
+                <span className="text-slate-600">Recibido:</span>
+                <span className="tabular-nums font-black text-slate-950">{fmt(totalPagadoEfectivo)}</span>
               </div>
-            )}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <span className="text-slate-600 font-medium">Pago:</span>
+                <span className="font-bold text-slate-950 uppercase">{primaryPaymentLabel}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-600 font-medium">Recibido:</span>
+                <span className="font-bold text-slate-950 tabular-nums">
+                  {fmt(invoiceData.cashReceived ?? invoiceData.total)}
+                </span>
+              </div>
+            </div>
+          )}
 
-            {invoiceData.change !== undefined && Number(invoiceData.change) > 0 && (
-              <div className="flex justify-between font-semibold text-slate-900 pt-0.5 border-t border-slate-100">
-                <span>Cambio entregado:</span>
-                <span className="font-mono tabular-nums">{fmt(invoiceData.change)}</span>
-              </div>
-            )}
-          </div>
+          {invoiceData.change !== undefined && Number(invoiceData.change) > 0 && (
+            <div className="flex justify-between font-bold text-slate-950 pt-0.5">
+              <span className="text-slate-600 font-medium">Cambio:</span>
+              <span className="tabular-nums font-black">{fmt(invoiceData.change)}</span>
+            </div>
+          )}
         </div>
 
         {/* Código de barras / QR si está activo */}
@@ -538,32 +580,48 @@ export default function PrintableInvoice({
           />
         )}
 
-        {/* Línea de firma si está activa */}
-        {settings.showSignatureLine && (
-          <div className="pt-3 pb-1 text-center space-y-1">
-            <div className="w-3/4 mx-auto border-t border-slate-400" />
-            <p className="text-[8px] text-slate-500 uppercase">
-              Firma del cliente / Recibido conforme
-            </p>
-          </div>
-        )}
-
-        {/* Pie de ticket y DGII */}
-        <div
-          className="pt-2 text-center space-y-1 text-slate-500"
-          style={{ fontSize: `${baseFontPt - 2}px` }}
-        >
-          {settings.showFooterMessage && settings.footerMessage && (
-            <p className="font-medium text-slate-700">{settings.footerMessage}</p>
-          )}
+        {/* Mensaje de cortesía */}
+        <div className={`py-2 ${separatorClass} text-center space-y-1`}>
+          <p className="font-medium italic text-slate-700 leading-snug" style={{ fontSize: `${baseFontPt - 1}px` }}>
+            {settings.footerMessage || '¡Gracias por preferirnos! Conserve este comprobante para cualquier reclamación.'}
+          </p>
           {settings.showTerms && settings.termsAndConditions && (
-            <p className="text-[8px] leading-tight text-slate-400">{settings.termsAndConditions}</p>
+            <p className="text-[8.5px] leading-tight text-slate-500 pt-0.5">
+              {settings.termsAndConditions}
+            </p>
           )}
           {settings.showDgiiLegend && isFiscal && (
             <p className="text-[8px] font-bold text-slate-700 pt-0.5">
               {settings.dgiiNotice || 'Documento autorizado por la DGII conforme a la Ley 11-92.'}
             </p>
           )}
+        </div>
+
+        {/* Firmas Cajero y Cliente */}
+        {settings.showSignatureLine && (
+          <div className={`pt-4 pb-2 ${separatorClass}`}>
+            <div className="grid grid-cols-2 gap-6 text-center">
+              <div>
+                <div className="border-t border-slate-700 mb-1" />
+                <span className="text-[10px] text-slate-700 font-bold uppercase tracking-wider">
+                  Cajero
+                </span>
+              </div>
+              <div>
+                <div className="border-t border-slate-700 mb-1" />
+                <span className="text-[10px] text-slate-700 font-bold uppercase tracking-wider">
+                  Cliente
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Pie del sistema */}
+        <div className="pt-2 pb-1 text-center select-none">
+          <p className="text-[9px] font-medium text-slate-400 tracking-wider">
+            Sistema Mercato Desktop
+          </p>
         </div>
 
         {/* Avance de papel configurado */}
