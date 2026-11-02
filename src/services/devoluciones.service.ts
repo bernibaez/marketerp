@@ -166,87 +166,83 @@ export async function obtenerDevoluciones(params: {
 export async function crearDevolucion(payload: PayloadDevolucion): Promise<DevolucionConDetalle> {
   const sb = tryGetSupabase();
   const codigo = `DEV-${Date.now().toString(36).toUpperCase()}`;
+  const id = crypto.randomUUID();
 
-  if (!sb) {
-    const id = crypto.randomUUID();
-    const dev: DevolucionConDetalle = {
-      id,
-      codigo,
-      venta_id: payload.venta_id ?? null,
-      numero_factura: payload.numero_factura ?? null,
-      cliente_id: payload.cliente_id ?? null,
-      cajero_id: payload.cajero_id ?? null,
-      monto_total: payload.monto_total,
-      motivo: payload.motivo,
-      metodo_reembolso: payload.metodo_reembolso,
-      tipo: payload.tipo,
-      estado: 'pendiente',
-      creado_en: new Date().toISOString(),
-      cliente_nombre: 'Cliente',
-      cajero_nombre: 'Cajero',
-      items: payload.items.map((it) => ({
-        id: crypto.randomUUID(),
-        producto_id: it.producto_id,
-        sku: it.sku,
-        nombre_item: it.nombre_item,
-        cantidad: it.cantidad,
-        precio_unitario: it.precio_unitario,
-        subtotal: it.subtotal,
-      })),
-    };
-    saveLocalDevoluciones([dev, ...getLocalDevoluciones()]);
-    return dev;
-  }
-
-  const { data: devData, error: devErr } = await sb
-    .from('devoluciones')
-    .insert({
-      codigo,
-      venta_id: payload.venta_id ?? null,
-      numero_factura: payload.numero_factura ?? null,
-      cliente_id: payload.cliente_id ?? null,
-      cajero_id: payload.cajero_id ?? null,
-      monto_total: payload.monto_total,
-      motivo: payload.motivo,
-      metodo_reembolso: payload.metodo_reembolso,
-      tipo: payload.tipo,
-      estado: 'pendiente',
-    })
-    .select('*, clientes(nombre)')
-    .single();
-
-  if (devErr) throw devErr;
-
-  const itemsInsert = payload.items.map((it) => ({
-    devolucion_id: devData.id,
-    producto_id: it.producto_id ?? null,
-    sku: it.sku ?? null,
-    nombre_item: it.nombre_item,
-    cantidad: it.cantidad,
-    precio_unitario: it.precio_unitario,
-    subtotal: it.subtotal,
-  }));
-
-  if (itemsInsert.length > 0) {
-    const { error: itemErr } = await sb.from('detalle_devoluciones').insert(itemsInsert);
-    if (itemErr) console.warn('Error al guardar detalle de devolución:', itemErr);
-  }
-
-  return {
-    id: devData.id,
-    codigo: devData.codigo,
-    venta_id: devData.venta_id,
-    numero_factura: devData.numero_factura,
-    cliente_id: devData.cliente_id,
-    cajero_id: devData.cajero_id,
-    monto_total: Number(devData.monto_total),
-    motivo: devData.motivo,
-    metodo_reembolso: devData.metodo_reembolso,
-    tipo: devData.tipo,
-    estado: devData.estado,
-    creado_en: devData.creado_en,
-    cliente_nombre: devData.clientes?.nombre ?? 'Cliente',
+  const devLocal: DevolucionConDetalle = {
+    id,
+    codigo,
+    venta_id: payload.venta_id ?? null,
+    numero_factura: payload.numero_factura ?? null,
+    cliente_id: payload.cliente_id ?? null,
+    cajero_id: payload.cajero_id ?? null,
+    monto_total: payload.monto_total,
+    motivo: payload.motivo,
+    metodo_reembolso: payload.metodo_reembolso,
+    tipo: payload.tipo,
+    estado: 'pendiente',
+    creado_en: new Date().toISOString(),
+    cliente_nombre: 'Cliente',
+    cajero_nombre: 'Cajero',
+    items: payload.items.map((it) => ({
+      id: crypto.randomUUID(),
+      producto_id: it.producto_id,
+      sku: it.sku,
+      nombre_item: it.nombre_item,
+      cantidad: it.cantidad,
+      precio_unitario: it.precio_unitario,
+      subtotal: it.subtotal,
+    })),
   };
+
+  // 1. Guardar de inmediato en almacenamiento local para asegurar persistencia
+  saveLocalDevoluciones([devLocal, ...getLocalDevoluciones()]);
+
+  // 2. Intentar guardar en Supabase si está disponible
+  if (sb) {
+    try {
+      const { data: devData, error: devErr } = await sb
+        .from('devoluciones')
+        .insert({
+          id,
+          codigo,
+          venta_id: payload.venta_id ?? null,
+          numero_factura: payload.numero_factura ?? null,
+          cliente_id: payload.cliente_id ?? null,
+          cajero_id: payload.cajero_id ?? null,
+          monto_total: payload.monto_total,
+          motivo: payload.motivo,
+          metodo_reembolso: payload.metodo_reembolso,
+          tipo: payload.tipo,
+          estado: 'pendiente',
+        })
+        .select('*, clientes(nombre)')
+        .single();
+
+      if (!devErr && devData) {
+        devLocal.id = devData.id;
+        devLocal.cliente_nombre = devData.clientes?.nombre ?? devLocal.cliente_nombre;
+
+        const itemsInsert = payload.items.map((it) => ({
+          devolucion_id: devData.id,
+          producto_id: it.producto_id ?? null,
+          sku: it.sku ?? null,
+          nombre_item: it.nombre_item,
+          cantidad: it.cantidad,
+          precio_unitario: it.precio_unitario,
+          subtotal: it.subtotal,
+        }));
+
+        if (itemsInsert.length > 0) {
+          const { error: itemErr } = await sb.from('detalle_devoluciones').insert(itemsInsert);
+          if (itemErr) console.warn('Error al guardar detalle de devolución en Supabase:', itemErr);
+        }
+      }
+    } catch {
+      // Ignorar fallo de red o RLS remoto; el registro ya está seguro localmente
+    }
+  }
+
+  return devLocal;
 }
 
 export async function cambiarEstadoDevolucion(

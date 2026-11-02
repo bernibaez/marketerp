@@ -439,6 +439,9 @@ export async function calcularResumenCajaAbierta(cajaId: string, cajeroId?: stri
 
   let totalEntradas = 0;
   let totalRetiros = 0;
+  let totalDevoluciones = 0;
+  const countedMovementKeys = new Set<string>();
+
   try {
     const movimientos = await obtenerMovimientosCaja(abierta?.id, abierta?.caja_id || cajaId);
     const desdeTime = desde ? new Date(desde).getTime() : 0;
@@ -448,18 +451,134 @@ export async function calcularResumenCajaAbierta(cajaId: string, cajeroId?: stri
         if (!isNaN(mt) && mt < desdeTime - 5000) continue;
       }
       const monto = Number(m.monto || 0);
+      if (m.concepto) {
+        countedMovementKeys.add(`${m.tipo}-${monto}-${m.concepto.trim().toLowerCase()}`);
+      }
       if (m.tipo === 'entrada' || m.tipo === 'aporte') {
         totalEntradas += monto;
       } else if (m.tipo === 'salida' || m.tipo === 'retiro' || m.tipo === 'gasto') {
-        totalRetiros += monto;
+        if (m.categoria === 'Devolución' || m.concepto?.toLowerCase().includes('devolución')) {
+          totalDevoluciones += monto;
+        } else {
+          totalRetiros += monto;
+        }
       }
     }
   } catch {
     // Ignorar si falla la carga de movimientos
   }
 
-  const totalDevoluciones = 0;
-  const montoEsperado = apertura + totalEfectivo + totalEntradas - totalRetiros - totalDevoluciones;
+  // Complementar con gastos locales y de POS para que nunca falte un gasto registrado
+  try {
+    const rawPosExp = typeof localStorage !== 'undefined' ? localStorage.getItem('mercato_pos_expenses') : null;
+    if (rawPosExp) {
+      const posExps = JSON.parse(rawPosExp) as any[];
+      const desdeDate = desde ? desde.slice(0, 10) : new Date().toISOString().slice(0, 10);
+      for (const exp of posExps) {
+        if (exp.date && exp.date >= desdeDate) {
+          const key = `gasto-${exp.amount}-${(exp.description || '').trim().toLowerCase()}`;
+          if (!countedMovementKeys.has(key)) {
+            totalRetiros += Number(exp.amount || 0);
+            countedMovementKeys.add(key);
+          }
+        }
+      }
+    }
+
+    const rawGastos = typeof localStorage !== 'undefined' ? localStorage.getItem('mercato_gastos_local') : null;
+    if (rawGastos) {
+      const localGastos = JSON.parse(rawGastos) as any[];
+      const desdeDate = desde ? desde.slice(0, 10) : new Date().toISOString().slice(0, 10);
+      for (const g of localGastos) {
+        if (
+          g.date >= desdeDate &&
+          g.status !== 'rejected' &&
+          (g.paymentMethod?.toLowerCase() === 'efectivo' || g.paymentMethod?.toLowerCase() === 'caja_chica')
+        ) {
+          const key = `gasto-${g.amount}-${(g.description || '').trim().toLowerCase()}`;
+          if (!countedMovementKeys.has(key)) {
+            totalRetiros += Number(g.amount || 0);
+            countedMovementKeys.add(key);
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // Complementar con devoluciones de venta en efectivo del período
+  try {
+    const rawDevs = typeof localStorage !== 'undefined' ? localStorage.getItem('mercato_devoluciones_local') : null;
+    if (rawDevs) {
+      const localDevs = JSON.parse(rawDevs) as any[];
+      const desdeTime = desde ? new Date(desde).getTime() : 0;
+      for (const dev of localDevs) {
+        if (dev.estado !== 'rechazada' && (dev.metodo_reembolso === 'efectivo' || dev.metodo_reembolso === 'cash')) {
+          const devTime = dev.creado_en ? new Date(dev.creado_en).getTime() : 0;
+          if (desdeTime === 0 || devTime >= desdeTime - 5000) {
+            const key = `salida-${dev.monto_total}-devolución`;
+            if (!countedMovementKeys.has(key)) {
+              totalDevoluciones += Number(dev.monto_total || 0);
+              countedMovementKeys.add(key);
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // Si Supabase está configurado, consultar también gastos y devoluciones en servidor para sincronización multi-caja
+  const sbCierre = tryGetSupabase();
+  if (sbCierre && isSupabaseConfigured()) {
+    try {
+      const desdeDate = desde ? desde.slice(0, 10) : new Date().toISOString().slice(0, 10);
+      const { data: remoteGastos } = await sbCierre
+        .from('gastos')
+        .select('id, descripcion, monto, metodo_pago, creado_en')
+        .eq('estado', 'aprobado')
+        .gte('creado_en', `${desdeDate}T00:00:00`);
+
+      for (const g of remoteGastos ?? []) {
+        const method = String(g.metodo_pago ?? 'efectivo').toLowerCase();
+        if (method === 'efectivo' || method === 'caja_chica') {
+          const key = `gasto-${g.monto}-${(g.descripcion || '').trim().toLowerCase()}`;
+          if (!countedMovementKeys.has(key)) {
+            totalRetiros += Number(g.monto || 0);
+            countedMovementKeys.add(key);
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      const desdeDate = desde ? desde.slice(0, 10) : new Date().toISOString().slice(0, 10);
+      const { data: remoteDevs } = await sbCierre
+        .from('devoluciones')
+        .select('id, monto_total, metodo_reembolso, estado, creado_en')
+        .neq('estado', 'rechazada')
+        .gte('creado_en', `${desdeDate}T00:00:00`);
+
+      for (const d of remoteDevs ?? []) {
+        const m = String(d.metodo_reembolso ?? '').toLowerCase();
+        if (m === 'efectivo' || m === 'cash') {
+          const key = `salida-${d.monto_total}-devolución`;
+          if (!countedMovementKeys.has(key)) {
+            totalDevoluciones += Number(d.monto_total || 0);
+            countedMovementKeys.add(key);
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const montoEsperado = Math.round((apertura + totalEfectivo + totalEntradas - totalRetiros - totalDevoluciones) * 100) / 100;
 
   return {
     cierre_id: abierta?.id,

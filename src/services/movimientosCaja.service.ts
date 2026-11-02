@@ -74,23 +74,37 @@ export async function obtenerMovimientosCaja(cierreId?: string, cajaId?: string)
   const localList = getLocalMovimientosCaja();
   const sb = tryGetSupabase();
 
+  const filterItem = (m: MovimientoCaja) => {
+    if (cierreId && m.cierre_id) {
+      if (m.cierre_id === cierreId) return true;
+    }
+    if (cajaId && m.caja_id) {
+      if (m.caja_id === cajaId) return true;
+    }
+    if (!cierreId && !cajaId) return true;
+    // Si no tiene cierre_id pero la caja coincide, pertenece al turno de esa caja
+    if (cierreId && !m.cierre_id && cajaId && m.caja_id === cajaId) return true;
+    return false;
+  };
+
   if (!sb || !isSupabaseConfigured()) {
-    return localList.filter((m) => {
-      if (cierreId && m.cierre_id !== cierreId) return false;
-      if (cajaId && m.caja_id !== cajaId) return false;
-      return true;
-    });
+    return localList.filter(filterItem);
   }
 
   try {
     let query = sb.from('movimientos_caja').select('*').order('creado_en', { ascending: false });
-    if (cierreId) query = query.eq('cierre_id', cierreId);
-    if (cajaId) query = query.eq('caja_id', cajaId);
+    if (cierreId && cajaId) {
+      query = query.or(`cierre_id.eq.${cierreId},and(cierre_id.is.null,caja_id.eq.${cajaId})`);
+    } else if (cierreId) {
+      query = query.or(`cierre_id.eq.${cierreId},cierre_id.is.null`);
+    } else if (cajaId) {
+      query = query.eq('caja_id', cajaId);
+    }
 
     const { data, error } = await query;
-    if (error || !data) return localList;
+    if (error || !data) return localList.filter(filterItem);
 
-    return data.map((row: any) => ({
+    const fromDb: (MovimientoCaja & { cajero_nombre?: string })[] = data.map((row: any) => ({
       id: String(row.id),
       codigo: row.codigo,
       caja_id: String(row.caja_id),
@@ -102,7 +116,11 @@ export async function obtenerMovimientosCaja(cierreId?: string, cajaId?: string)
       categoria: row.categoria,
       creado_en: row.creado_en,
     }));
+
+    const dbIds = new Set(fromDb.map((m) => m.id));
+    const pendingLocal = localList.filter((m) => !dbIds.has(m.id) && filterItem(m));
+    return [...pendingLocal, ...fromDb];
   } catch {
-    return localList;
+    return localList.filter(filterItem);
   }
 }

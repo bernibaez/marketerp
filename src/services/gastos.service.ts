@@ -1,5 +1,6 @@
 import { tryGetSupabase } from './clienteSupabase';
 import { GASTO_COLUMNS, type EstadoGasto } from '@/types/database';
+import { registrarMovimientoCaja } from './movimientosCaja.service';
 
 export type GastoStatusUi = 'approved' | 'pending' | 'rejected';
 
@@ -35,6 +36,8 @@ export type NuevoGastoInput = {
   fecha?: string;
   responsable_nombre?: string;
   responsable_id?: string | null;
+  caja_id?: string;
+  cierre_id?: string;
   tiene_recibo?: boolean;
   estado?: EstadoGasto;
 };
@@ -267,6 +270,27 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
 
   // 1. Guardar de inmediato en almacenamiento local para no perder nunca el registro
   saveLocalGastos([newGastoUi, ...localGastos]);
+
+  // Si es un gasto pagado en efectivo o caja chica, reflejar en movimientos de caja para cuadre de caja
+  if (
+    effectiveMetodoPago.toLowerCase() === 'efectivo' ||
+    effectiveMetodoPago.toLowerCase() === 'caja_chica'
+  ) {
+    try {
+      void registrarMovimientoCaja({
+        caja_id: input.caja_id ? String(input.caja_id) : '1',
+        cierre_id: input.cierre_id ?? null,
+        cajero_id: authUser?.id && isUUID(authUser.id) ? authUser.id : null,
+        cajero_nombre: effectiveResponsable,
+        tipo: 'gasto',
+        monto: Number(input.monto),
+        concepto: input.descripcion.trim(),
+        categoria: catName,
+      }).catch(() => {});
+    } catch {
+      // ignore
+    }
+  }
 
   // 2. Intentar guardar en Supabase si está disponible
   const sb = tryGetSupabase();

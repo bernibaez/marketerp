@@ -4,17 +4,12 @@ import {
   Banknote,
   Smartphone,
   Split,
-  Printer,
   X,
-  Plus,
   FileText,
   Check,
   ChevronRight,
   Info,
-  Send,
-  Clock,
   Store,
-  Lightbulb,
   Layers,
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
@@ -97,6 +92,7 @@ export default function PaymentPanel({
     numero_factura: string;
     ncf?: string | null;
   } | null>(null);
+  const [printInvoiceData, setPrintInvoiceData] = useState<any>(null);
   const cashInputRef = React.useRef<HTMLInputElement>(null);
   const firstMethodBtnRef = React.useRef<HTMLButtonElement>(null);
 
@@ -333,6 +329,89 @@ export default function PaymentPanel({
       if (res && typeof res === 'object' && (res as any).numero_factura) {
         setCompletedSaleResult(res as any);
       }
+
+      const effectiveRes = res && typeof res === 'object' ? res : completedSaleResult;
+      const now = new Date();
+      const computedSubtotal =
+        typeof subtotal === 'number'
+          ? subtotal
+          : cart.reduce((s, item) => s + item.price * item.qty * (1 - (item.discount || 0) / 100), 0);
+      const computedTax =
+        typeof taxTotal === 'number'
+          ? taxTotal
+          : Math.max(0, total - computedSubtotal + (discountTotal || 0));
+
+      const actualInvoiceNumber =
+        (effectiveRes as any)?.numero_factura ||
+        `FAC-${Date.now().toString().slice(-6)}`;
+
+      const actualNcf =
+        (effectiveRes as any)?.ncf ||
+        fiscalInvoice?.ncf ||
+        (fiscalEnabled ? (ncfType === 'B01' ? 'B0100000001' : 'B0200000001') : null);
+
+      const invoiceData = {
+        invoiceNumber: actualInvoiceNumber,
+        isFiscal: fiscalEnabled || Boolean(actualNcf),
+        ncf: actualNcf,
+        ncfType: fiscalEnabled ? ncfType : null,
+        ncfTypeName: fiscalEnabled && ncfType ? NCF_TYPES[ncfType]?.name : null,
+        expirationDate: '31/12/2027',
+        issueDate: now.toLocaleDateString('es-DO'),
+        issueTime: now.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' }),
+        cashier: user?.name || user?.username || 'Caja POS',
+        registerNumber: registerNumber || 'POS-01',
+        customerName: customer?.name || (companyName.trim() || 'Consumidor Final'),
+        customerRnc: customer?.rnc_cedula || rncClient.trim() || undefined,
+        customerPhone: customer?.phone || undefined,
+        items: cart
+          .filter((item) => item.qty > 0)
+          .map((item) => {
+            const lineNet = item.price * item.qty * (1 - (item.discount || 0) / 100);
+            return {
+              sku: item.sku,
+              name: item.name,
+              qty: item.qty,
+              unit: item.unit,
+              price: item.price,
+              subtotal: lineNet,
+              itbis: (lineNet * (item.tax || 0)) / 100,
+            };
+          }),
+        subtotal: Math.round(computedSubtotal * 100) / 100,
+        discount: discountTotal ? Math.round(discountTotal * 100) / 100 : undefined,
+        itbis: Math.round(computedTax * 100) / 100,
+        total,
+        paymentMethod: method,
+        paymentBreakdown: [
+          payments.cash > 0 ? { method: 'efectivo', label: 'Efectivo', amount: payments.cash } : null,
+          payments.card > 0 ? { method: 'tarjeta', label: 'Tarjeta', amount: payments.card } : null,
+          payments.transfer > 0 ? { method: 'transferencia', label: 'Transferencia bancaria', amount: payments.transfer } : null,
+          payments.credit > 0 ? { method: 'credito', label: 'Crédito', amount: payments.credit } : null,
+        ].filter(Boolean) as any,
+        montoEfectivo: payments.cash,
+        montoTarjeta: payments.card,
+        montoTransferencia: payments.transfer,
+        montoCredito: payments.credit,
+        cashReceived: cashAmount || total,
+        change: computedChange,
+      };
+
+      setPrintInvoiceData(invoiceData);
+
+      // Despachar inmediatamente el modal de impresión nativo de Windows y reiniciar a nueva venta
+      setTimeout(() => {
+        let closed = false;
+        const finish = () => {
+          if (closed) return;
+          closed = true;
+          onNewSale?.();
+          onClose?.();
+        };
+        window.addEventListener('afterprint', finish, { once: true });
+        window.print();
+        window.setTimeout(finish, 1500);
+      }, 50);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Error al procesar el pago');
     } finally {
@@ -366,258 +445,6 @@ export default function PaymentPanel({
     return () => window.removeEventListener('keydown', onKeyDown);
   });
 
-  // ----------------------------------------------------
-  // VIEW 2: ORDER COMPLETED (¡VENTA COMPLETADA!)
-  // ----------------------------------------------------
-  if (orderCompleted) {
-    const now = new Date();
-    const computedSubtotal =
-      typeof subtotal === 'number'
-        ? subtotal
-        : cart.reduce((s, item) => s + item.price * item.qty * (1 - (item.discount || 0) / 100), 0);
-    const computedTax =
-      typeof taxTotal === 'number'
-        ? taxTotal
-        : Math.max(0, total - computedSubtotal + (discountTotal || 0));
-
-    const effectiveSaleResult = propCompletedSaleResult || completedSaleResult;
-
-    const actualInvoiceNumber =
-      effectiveSaleResult?.numero_factura ||
-      `FAC-${Date.now().toString().slice(-6)}`;
-
-    const actualNcf =
-      effectiveSaleResult?.ncf ||
-      (fiscalEnabled ? (ncfType === 'B01' ? 'B0100000001' : 'B0200000001') : null);
-
-    const completedInvoiceData = {
-      invoiceNumber: actualInvoiceNumber,
-      isFiscal: fiscalEnabled || Boolean(actualNcf),
-      ncf: actualNcf,
-      ncfType: fiscalEnabled ? ncfType : null,
-      ncfTypeName: fiscalEnabled && ncfType ? NCF_TYPES[ncfType]?.name : null,
-      expirationDate: '31/12/2027',
-      issueDate: now.toLocaleDateString('es-DO'),
-      issueTime: now.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' }),
-      cashier: user?.name || user?.username || 'Caja POS',
-      registerNumber: registerNumber || 'POS-01',
-      customerName: customer?.name || (companyName.trim() || 'Consumidor Final'),
-      customerRnc: customer?.rnc_cedula || rncClient.trim() || undefined,
-      customerPhone: customer?.phone || undefined,
-      items: cart
-        .filter((item) => item.qty > 0)
-        .map((item) => {
-          const lineNet = item.price * item.qty * (1 - (item.discount || 0) / 100);
-          return {
-            sku: item.sku,
-            name: item.name,
-            qty: item.qty,
-            unit: item.unit,
-            price: item.price,
-            subtotal: lineNet,
-            itbis: (lineNet * (item.tax || 0)) / 100,
-          };
-        }),
-      subtotal: Math.round(computedSubtotal * 100) / 100,
-      discount: discountTotal ? Math.round(discountTotal * 100) / 100 : undefined,
-      itbis: Math.round(computedTax * 100) / 100,
-      total,
-      paymentMethod: method,
-      paymentBreakdown: completedPayments
-        ? [
-            completedPayments.cash > 0
-              ? { method: 'efectivo', label: 'Efectivo', amount: completedPayments.cash }
-              : null,
-            completedPayments.card > 0
-              ? { method: 'tarjeta', label: 'Tarjeta', amount: completedPayments.card }
-              : null,
-            completedPayments.transfer > 0
-              ? { method: 'transferencia', label: 'Transferencia bancaria', amount: completedPayments.transfer }
-              : null,
-            completedPayments.credit > 0
-              ? { method: 'credito', label: 'Crédito', amount: completedPayments.credit }
-              : null,
-          ].filter(Boolean) as any
-        : undefined,
-      montoEfectivo: completedPayments?.cash,
-      montoTarjeta: completedPayments?.card,
-      montoTransferencia: completedPayments?.transfer,
-      montoCredito: completedPayments?.credit,
-      cashReceived: cashAmount || total,
-      change: lastChange || 0,
-    };
-
-    return (
-      <div className="flex flex-col h-full bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 overflow-y-auto">
-        {/* DOCUMENTO OFICIAL PARA IMPRESIÓN (SOLO VISIBLE EN PRINT) */}
-        <div className="hidden print:block printable-document">
-          <PrintableInvoice
-            invoiceData={completedInvoiceData}
-          />
-        </div>
-
-        {/* CONTENIDO INTERACTIVO EN PANTALLA (OCULTO EN PRINT) */}
-        <div className="print:hidden flex flex-col flex-1">
-          {/* Top Banner */}
-          <div className="bg-emerald-500/10 border-b border-emerald-500/20 p-6 text-center flex flex-col items-center justify-center">
-          <div className="w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center shadow-md mb-2">
-            <Check size={26} strokeWidth={3} />
-          </div>
-          <h2 className="text-xl font-black tracking-wide text-slate-800 dark:text-white uppercase">
-            ¡VENTA COMPLETADA!
-          </h2>
-          <p className="text-2xl font-extrabold tabular-nums text-emerald-600 dark:text-emerald-400 mt-0.5">
-            {fmt(total)}
-          </p>
-        </div>
-
-        {/* Body 2 columns */}
-        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 flex-1 items-start">
-          {/* Left Column: Summary & Actions */}
-          <div className="space-y-5">
-            <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-4 space-y-3">
-              <p className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 pb-2">
-                RESUMEN DE LA VENTA
-              </p>
-
-              <div className="space-y-2 text-xs font-semibold">
-                <div className="flex justify-between">
-                  <span className="text-slate-500 dark:text-slate-400">Total</span>
-                  <span className="font-extrabold text-slate-900 dark:text-white">{fmt(total)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500 dark:text-slate-400">Método de pago</span>
-                  <span className="font-extrabold text-emerald-600 dark:text-emerald-400 capitalize">
-                    {method === 'cash'
-                      ? 'Efectivo'
-                      : method === 'card'
-                        ? 'Tarjeta'
-                        : method === 'transfer'
-                          ? 'Transferencia'
-                          : method === 'credit'
-                            ? 'Crédito'
-                            : 'Múltiple'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500 dark:text-slate-400">Dinero recibido</span>
-                  <span className="font-extrabold text-slate-900 dark:text-white">{fmt(cashAmount || total)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500 dark:text-slate-400">Cambio entregado</span>
-                  <span className="font-extrabold text-emerald-600 dark:text-emerald-400">{fmt(lastChange)}</span>
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-700 space-y-1 text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                <div className="flex justify-between">
-                  <span>Factura</span>
-                  <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                    {completedInvoiceData.invoiceNumber}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Fecha</span>
-                  <span>{completedInvoiceData.issueDate} {completedInvoiceData.issueTime}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Cajero responsable</span>
-                  <span>{completedInvoiceData.cashier}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Action buttons */}
-            <div className="space-y-2.5">
-              <button
-                type="button"
-                onClick={() => {
-                  let closed = false;
-                  const finish = () => {
-                    if (closed) return;
-                    closed = true;
-                    onNewSale?.();
-                    onClose?.();
-                  };
-                  window.addEventListener('afterprint', finish, { once: true });
-                  window.print();
-                  // Fallback por si el navegador no dispara afterprint
-                  window.setTimeout(finish, 1200);
-                }}
-                className="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-md transition-all active:scale-98 cursor-pointer"
-              >
-                <Printer size={18} />
-                <span>IMPRIMIR FACTURA</span>
-                <span className="bg-emerald-700/60 text-white text-[10px] px-2 py-0.5 rounded font-mono ml-auto">F12</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  onNewSale?.();
-                  onClose?.();
-                }}
-                className="w-full py-3 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 font-extrabold text-xs flex items-center justify-center gap-2 transition-all active:scale-98 cursor-pointer"
-              >
-                <Plus size={16} />
-                <span>NUEVA VENTA</span>
-                <span className="bg-slate-100 dark:bg-slate-800 text-slate-500 text-[10px] px-2 py-0.5 rounded font-mono ml-auto">F2</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => toast.info('Enviando o guardando comprobante...')}
-                className="w-full py-3 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 font-extrabold text-xs flex items-center justify-between transition-all cursor-pointer"
-              >
-                <div className="flex items-center gap-2">
-                  <Send size={16} />
-                  <span>ENVIAR / GUARDAR</span>
-                </div>
-                <ChevronRight size={16} className="text-slate-400" />
-              </button>
-            </div>
-
-            {/* Progress / Auto-redirect banner */}
-            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 flex items-center gap-3 text-xs text-emerald-800 dark:text-emerald-300 font-semibold">
-              <Clock size={16} className="text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-              <div className="flex-1">
-                <p className="text-[11px] mb-1">Serás redirigido a nueva venta en 3 segundos...</p>
-                <div className="w-full bg-emerald-200 dark:bg-emerald-900/50 h-1.5 rounded-full overflow-hidden">
-                  <div className="bg-emerald-600 h-full w-full animate-pulse" />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Right Column: Receipt Preview */}
-          <div className="space-y-2">
-            <p className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              VISTA PREVIA DEL COMPROBANTE
-            </p>
-
-            <div className="max-h-[520px] overflow-y-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white shadow-sm p-1">
-              <PrintableInvoice
-                invoiceData={completedInvoiceData}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Footer Hint */}
-        <div className="bg-slate-50 dark:bg-slate-900/80 border-t border-slate-200/60 dark:border-slate-800 px-6 py-2.5 flex items-center justify-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
-          <Lightbulb size={16} className="text-amber-500" />
-          <span>
-            Consejo: Presiona <span className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 font-mono text-[10px] font-bold">F2</span> para nueva venta o <span className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 font-mono text-[10px] font-bold">F12</span> para imprimir
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-  }
-
-  // ----------------------------------------------------
-  // VIEW 1: PAYMENT FORM (PAGO EN CAJA)
-  // ----------------------------------------------------
   return (
     <div className="flex flex-col h-full bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 overflow-hidden">
       {/* Modal Header */}
@@ -997,6 +824,13 @@ export default function PaymentPanel({
           Finalizar
         </span>
       </div>
+
+      {/* DOCUMENTO OFICIAL PARA IMPRESIÓN DIRECTA CON WINDOW.PRINT() */}
+      {printInvoiceData && (
+        <div className="hidden print:block printable-document">
+          <PrintableInvoice invoiceData={printInvoiceData} />
+        </div>
+      )}
     </div>
   );
 }

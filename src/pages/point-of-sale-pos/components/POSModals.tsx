@@ -20,6 +20,7 @@ interface POSModalsProps {
   activeCashId: CashRegisterId;
   activeCashLabel: string;
   activeCashDbId?: string;
+  activeCashCierreId?: string;
 
   holdOpen: boolean;
   onCloseHold: () => void;
@@ -70,6 +71,7 @@ export const POSModals: React.FC<POSModalsProps> = ({
   activeCashId,
   activeCashLabel,
   activeCashDbId,
+  activeCashCierreId,
 
   holdOpen,
   onCloseHold,
@@ -118,8 +120,9 @@ export const POSModals: React.FC<POSModalsProps> = ({
       {expenseOpen && (
         <PosExpenseModal
           onClose={onCloseExpense}
-          cajaId={String(activeCashId)}
+          cajaId={String(activeCashDbId || activeCashId)}
           cashierLabel={activeCashLabel}
+          cierreId={activeCashCierreId}
         />
       )}
 
@@ -145,7 +148,12 @@ export const POSModals: React.FC<POSModalsProps> = ({
         />
       )}
 
-      {returnOpen && <PosReturnModal onClose={onCloseReturn} />}
+      {returnOpen && (
+        <PosReturnModal
+          onClose={onCloseReturn}
+          activeCashLabel={activeCashLabel}
+        />
+      )}
 
       {cashSwitchOpen && (
         <PosCashSwitchModal

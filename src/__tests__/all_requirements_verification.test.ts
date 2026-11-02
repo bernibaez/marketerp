@@ -40,6 +40,11 @@ import {
   obtenerPagosCxp,
 } from '@/services/cxp.service';
 import { generatePresentationSku } from '@/lib/barcodeUtils';
+import { calcularResumenCajaAbierta } from '@/services/cierresCaja.service';
+import { saveCashClosure } from '@/lib/cashClosureStore';
+import { crearGasto } from '@/services/gastos.service';
+import { crearDevolucion } from '@/services/devoluciones.service';
+import { registrarMovimientoCaja, obtenerMovimientosCaja } from '@/services/movimientosCaja.service';
 
 describe('Verificación Integral de Requerimientos ERP Mercato', () => {
   beforeEach(() => {
@@ -284,6 +289,199 @@ describe('Verificación Integral de Requerimientos ERP Mercato', () => {
       expect(canChangePrice(null)).toBe(false);
       expect(canChangePrice(undefined)).toBe(false);
       expect(canChangePrice({ role: 'Cajero' } as any)).toBe(false);
+    });
+  });
+
+  describe('Control de Gastos de Caja y Cuadre de Cierre', () => {
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it('guarda un gasto de 500 y lo refleja en total_retiros y monto_esperado del cierre de caja', async () => {
+      // Registrar un gasto de 500 en efectivo
+      await crearGasto({
+        categoria_id: 'cat-008',
+        descripcion: 'Compra de bombillos y suministros',
+        monto: 500,
+        metodo_pago: 'efectivo',
+        fecha: new Date().toISOString().slice(0, 10),
+      });
+
+      // Calcular el resumen de la caja activa
+      const resumen = await calcularResumenCajaAbierta('1');
+      expect(resumen.total_retiros).toBe(500);
+      expect(resumen.monto_esperado).toBe(
+        resumen.monto_apertura + resumen.total_efectivo + resumen.total_entradas - 500 - resumen.total_devoluciones
+      );
+    });
+
+    it('registra múltiples gastos de montos variados (50, 150, 500, 1200) sin perder ninguno y descuenta exactamente del monto esperado', async () => {
+      // Simular apertura de caja con 5,000
+      saveCashClosure({
+        id: 'cier-test-1',
+        code: 'TUR-001',
+        userId: 'usr-1',
+        username: 'admin',
+        userName: 'Admin',
+        openedAt: new Date().toISOString(),
+        closedAt: '',
+        date: new Date().toISOString().slice(0, 10),
+        cashRegisterId: '1',
+        cashRegisterLabel: 'Caja #1 - Administrador',
+        baseCash: 5000,
+        expectedCash: 5000,
+        countedCash: 0,
+        difference: 0,
+        status: 'abierta',
+        totalSales: 0,
+        totalCash: 0,
+        totalCard: 0,
+        cardCount: 0,
+        totalTransfer: 0,
+        transferCount: 0,
+        totalCheque: 0,
+        chequeCount: 0,
+        totalCredit: 0,
+        creditCount: 0,
+      });
+
+      // Registrar gastos sucesivos de caja
+      const montosGastos = [50, 150, 500, 1200];
+      const sumaEsperada = 50 + 150 + 500 + 1200; // 1900
+
+      for (let i = 0; i < montosGastos.length; i++) {
+        await crearGasto({
+          categoria_id: 'cat-008',
+          descripcion: `Gasto de prueba #${i + 1} por ${montosGastos[i]}`,
+          monto: montosGastos[i],
+          metodo_pago: 'efectivo',
+          caja_id: '1',
+          fecha: new Date().toISOString().slice(0, 10),
+        });
+      }
+
+      const resumen = await calcularResumenCajaAbierta('1');
+      expect(resumen.total_retiros).toBe(sumaEsperada);
+      expect(resumen.monto_apertura).toBe(5000);
+      expect(resumen.monto_esperado).toBe(5000 - sumaEsperada); // 3100
+    });
+
+    it('asegura que los movimientos registrados sin cierre_id se recuperen correctamente en el turno de la caja', async () => {
+      const mov = await registrarMovimientoCaja({
+        caja_id: '1',
+        cierre_id: null,
+        tipo: 'gasto',
+        monto: 250,
+        concepto: 'Pago de mensajería express',
+        categoria: 'Otros Gastos Operativos',
+      });
+      expect(mov.id).toBeDefined();
+
+      const movimientos = await obtenerMovimientosCaja('cier-test-1', '1');
+      const encontrado = movimientos.find((m) => m.monto === 250 && m.concepto.includes('mensajería'));
+      expect(encontrado).toBeDefined();
+      expect(encontrado?.tipo).toBe('gasto');
+    });
+  });
+
+  describe('Devoluciones de Dinero en Caja y Cuadre', () => {
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it('refleja devoluciones de efectivo en total_devoluciones y descuenta del monto_esperado', async () => {
+      saveCashClosure({
+        id: 'cier-test-2',
+        code: 'TUR-002',
+        userId: 'usr-1',
+        username: 'admin',
+        userName: 'Admin',
+        openedAt: new Date().toISOString(),
+        closedAt: '',
+        date: new Date().toISOString().slice(0, 10),
+        cashRegisterId: '1',
+        cashRegisterLabel: 'Caja #1 - Administrador',
+        baseCash: 3000,
+        expectedCash: 3000,
+        countedCash: 0,
+        difference: 0,
+        status: 'abierta',
+        totalSales: 0,
+        totalCash: 0,
+        totalCard: 0,
+        cardCount: 0,
+        totalTransfer: 0,
+        transferCount: 0,
+        totalCheque: 0,
+        chequeCount: 0,
+        totalCredit: 0,
+        creditCount: 0,
+      });
+
+      await crearDevolucion({
+        monto_total: 350,
+        motivo: 'Producto vencido devuelto por cliente',
+        metodo_reembolso: 'efectivo',
+        tipo: 'parcial',
+        items: [],
+      });
+
+      const resumen = await calcularResumenCajaAbierta('1');
+      expect(resumen.total_devoluciones).toBe(350);
+      expect(resumen.monto_esperado).toBe(3000 - 350);
+    });
+
+    it('maneja simultáneamente gastos de caja y devoluciones en efectivo manteniendo el cuadre exacto', async () => {
+      saveCashClosure({
+        id: 'cier-test-3',
+        code: 'TUR-003',
+        userId: 'usr-1',
+        username: 'admin',
+        userName: 'Admin',
+        openedAt: new Date().toISOString(),
+        closedAt: '',
+        date: new Date().toISOString().slice(0, 10),
+        cashRegisterId: '1',
+        cashRegisterLabel: 'Caja #1 - Administrador',
+        baseCash: 10000,
+        expectedCash: 10000,
+        countedCash: 0,
+        difference: 0,
+        status: 'abierta',
+        totalSales: 0,
+        totalCash: 0,
+        totalCard: 0,
+        cardCount: 0,
+        totalTransfer: 0,
+        transferCount: 0,
+        totalCheque: 0,
+        chequeCount: 0,
+        totalCredit: 0,
+        creditCount: 0,
+      });
+
+      // Gasto de 500
+      await crearGasto({
+        categoria_id: 'cat-008',
+        descripcion: 'Compra botellones de agua',
+        monto: 500,
+        metodo_pago: 'efectivo',
+        caja_id: '1',
+      });
+
+      // Devolución en efectivo de 200
+      await crearDevolucion({
+        monto_total: 200,
+        motivo: 'Devolución cliente empaque roto',
+        metodo_reembolso: 'efectivo',
+        tipo: 'parcial',
+        items: [],
+      });
+
+      const resumen = await calcularResumenCajaAbierta('1');
+      expect(resumen.total_retiros).toBe(500);
+      expect(resumen.total_devoluciones).toBe(200);
+      expect(resumen.monto_esperado).toBe(10000 - 500 - 200); // 9300
     });
   });
 });

@@ -5,43 +5,43 @@ import { addCashExpense, getCashExpenses, nextCode } from '@/lib/posStore';
 import {
   crearGasto,
   obtenerCategoriasGasto,
+  CATEGORIAS_GASTO_DEFAULT,
   type CategoriaGastoUi,
 } from '@/services/gastos.service';
+import { registrarMovimientoCaja } from '@/services/movimientosCaja.service';
 import { useAuth } from '@/context/AuthContext';
 
 export default function PosExpenseModal({
   onClose,
   cajaId,
   cashierLabel,
+  cierreId,
 }: {
   onClose: () => void;
   cajaId?: string;
   cashierLabel?: string;
+  cierreId?: string;
 }) {
   const { user } = useAuth();
-  const [categorias, setCategorias] = useState<CategoriaGastoUi[]>([]);
-  const [categoriaId, setCategoriaId] = useState('');
+  const [categorias, setCategorias] = useState<CategoriaGastoUi[]>(CATEGORIAS_GASTO_DEFAULT);
+  const [categoriaId, setCategoriaId] = useState<string>('cat-008');
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
-  const [loadingCats, setLoadingCats] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    setLoadingCats(true);
     obtenerCategoriasGasto()
       .then((cats) => {
-        if (cancelled) return;
+        if (cancelled || !cats || cats.length === 0) return;
         setCategorias(cats);
-        if (cats[0]) setCategoriaId(cats[0].id);
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          toast.error(e instanceof Error ? e.message : 'No se pudieron cargar categorías');
+        // Si la categoría actual no existe en las cargadas, seleccionar la primera
+        if (!cats.some((c) => c.id === categoriaId)) {
+          setCategoriaId(cats[0].id);
         }
       })
-      .finally(() => {
-        if (!cancelled) setLoadingCats(false);
+      .catch((e) => {
+        console.warn('Categorías fallback cargadas:', e);
       });
     return () => {
       cancelled = true;
@@ -51,7 +51,7 @@ export default function PosExpenseModal({
   const save = async () => {
     const value = parseFloat(amount);
     if (!description.trim() || !value || value <= 0) {
-      toast.error('Completa descripción y monto válido');
+      toast.error('Completa descripción y un monto válido mayor a 0');
       return;
     }
     if (!categoriaId) {
@@ -63,6 +63,10 @@ export default function PosExpenseModal({
     try {
       const today = new Date().toISOString().slice(0, 10);
       const respName = user?.name || cashierLabel || 'Cajero';
+      const catName = categorias.find((c) => c.id === categoriaId)?.name ?? 'Gastos Operativos';
+      const effectiveCajaId = cajaId ? String(cajaId) : '1';
+
+      // 1. Guardar en el servicio central de gastos (local y Supabase)
       await crearGasto({
         categoria_id: categoriaId,
         descripcion: description.trim(),
@@ -70,13 +74,30 @@ export default function PosExpenseModal({
         metodo_pago: 'efectivo',
         fecha: today,
         responsable_nombre: respName,
+        caja_id: effectiveCajaId,
+        cierre_id: cierreId,
         tiene_recibo: false,
         estado: 'aprobado',
       });
 
-      // También en caja local para maleta / resumen de efectivo del día
+      // 2. Registrar movimiento en movimientos_caja para arqueo y cuadre de caja
+      try {
+        await registrarMovimientoCaja({
+          caja_id: effectiveCajaId,
+          cierre_id: cierreId ?? null,
+          cajero_id: user?.id ?? null,
+          cajero_nombre: respName,
+          tipo: 'gasto',
+          monto: value,
+          concepto: description.trim(),
+          categoria: catName,
+        });
+      } catch (errMov) {
+        console.warn('Error al registrar movimiento de caja:', errMov);
+      }
+
+      // 3. Registrar en mercado_pos_expenses para persistencia local de POS
       const now = new Date();
-      const catName = categorias.find((c) => c.id === categoriaId)?.name ?? 'Gasto';
       addCashExpense({
         id: `exp-${Date.now()}`,
         code: nextCode('GCJ', getCashExpenses().length),
@@ -86,7 +107,7 @@ export default function PosExpenseModal({
         date: now.toISOString().slice(0, 10),
         time: now.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' }),
         user: user?.name || 'Cajero',
-        cashier: cashierLabel || (cajaId ? `Caja #${cajaId}` : 'Caja'),
+        cashier: cashierLabel || `Caja #${effectiveCajaId}`,
       });
 
       toast.success(`Gasto registrado: RD$ ${value.toLocaleString('es-DO')}`);
@@ -107,60 +128,69 @@ export default function PosExpenseModal({
             <X size={16} />
           </button>
         </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">Categoría</label>
-          <select
-            className="input-field"
-            value={categoriaId}
-            onChange={(e) => setCategoriaId(e.target.value)}
-            disabled={loadingCats || saving}
-          >
-            {categorias.length === 0 ? (
-              <option value="">Sin categorías — créalas en Gastos</option>
-            ) : (
-              categorias.map((c) => (
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+          className="space-y-4"
+        >
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Categoría</label>
+            <select
+              className="input-field"
+              value={categoriaId}
+              onChange={(e) => setCategoriaId(e.target.value)}
+              disabled={saving}
+            >
+              {categorias.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
-              ))
-            )}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">Descripción *</label>
-          <input
-            className="input-field"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Ej: Pago de mensajería"
-            disabled={saving}
-          />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">Monto (RD$) *</label>
-          <input
-            className="input-field"
-            type="number"
-            min={0}
-            step="0.01"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            disabled={saving}
-          />
-        </div>
-        <div className="flex justify-end gap-2">
-          <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>
-            Cancelar
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => void save()}
-            disabled={saving || loadingCats || !categoriaId}
-          >
-            {saving ? 'Guardando…' : 'Registrar gasto'}
-          </button>
-        </div>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Descripción *</label>
+            <input
+              autoFocus
+              className="input-field"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Ej: Pago de mensajería, botellón de agua..."
+              disabled={saving}
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Monto (RD$) *</label>
+            <input
+              className="input-field"
+              type="number"
+              min={0}
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.00"
+              disabled={saving}
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={saving || !categoriaId || !description.trim() || !amount}
+            >
+              {saving ? 'Guardando…' : 'Registrar gasto'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import {
   type VentaConDetalle,
 } from '@/services/ventas.service';
 import { crearDevolucion } from '@/services/devoluciones.service';
+import { registrarMovimientoCaja } from '@/services/movimientosCaja.service';
 import { useAuth } from '@/context/AuthContext';
 import { useCashRegisters } from '@/hooks/useCashRegisters';
 
@@ -214,6 +215,25 @@ export default function PosReturnModal({
       });
 
       setRegisteredReturnCode(dev.codigo);
+
+      // Si el reembolso es en efectivo, registrar la salida de dinero en caja para que cuadre el arqueo
+      if (methodDb === 'efectivo') {
+        try {
+          const cajaNum = activeCashLabel?.replace(/[^0-9]/g, '') || '1';
+          await registrarMovimientoCaja({
+            caja_id: cajaNum,
+            cajero_id: user?.id ?? null,
+            cajero_nombre: user?.name || 'Cajero',
+            tipo: 'salida',
+            monto: totalReturnAmount,
+            concepto: `Devolución de efectivo en Factura ${loadedSale.code} (${dev.codigo})`,
+            categoria: 'Devolución',
+          });
+        } catch (errMov) {
+          console.warn('Error al registrar movimiento en caja por devolución:', errMov);
+        }
+      }
+
       onSuccess?.();
       toast.info(`Solicitud ${dev.codigo} enviada para aprobación del administrador`);
     } catch (e) {

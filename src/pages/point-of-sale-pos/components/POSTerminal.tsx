@@ -598,6 +598,7 @@ export default function POSTerminal() {
         activeCashId={activeCashId}
         activeCashLabel={activeCash.label}
         activeCashDbId={activeCash.dbId}
+        activeCashCierreId={activeCash.cierreId}
 
         holdOpen={holdOpen}
         onCloseHold={() => setHoldOpen(false)}
