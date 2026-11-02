@@ -122,7 +122,8 @@ export function esPresentacionVinculada(producto: {
 }
 
 /** Al vender/comprar un empaque vinculado (fardo, cartón, six pack), el movimiento va al producto contenido.
- * Para productos vendidos por peso (carnes, embutidos por libra), se descuenta exactamente la cantidad pesada. */
+ * Para productos vendidos por peso (carnes, embutidos por libra), se descuenta exactamente la cantidad pesada
+ * (1:1 hacia el producto base si está vinculado, sin duplicar ni multiplicar por factores de empaque). */
 export function movimientoInventarioPresentacion(
   producto: {
     id: string;
@@ -136,23 +137,57 @@ export function movimientoInventarioPresentacion(
   },
   cantidad: number
 ): { productoId: string; cantidad: number } {
+  const unitLower = String(producto.unit || '').trim().toLowerCase();
+  const isWeightUnit = [
+    'lb',
+    'lbs',
+    'libra',
+    'libras',
+    'kg',
+    'kgs',
+    'kilogramo',
+    'kilogramos',
+    'g',
+    'gramo',
+    'gramos',
+    'oz',
+    'onza',
+    'onzas',
+  ].includes(unitLower);
+
   const isWeight =
     Boolean(producto.is_weight_product) ||
     Boolean(producto.es_pesado) ||
     producto.sale_type === 'weight' ||
     producto.sale_type === 'both' ||
-    ['lb', 'libra', 'kg', 'kilogramo', 'oz', 'onza'].includes(
-      String(producto.unit || '').trim().toLowerCase()
-    );
+    isWeightUnit;
 
   const baseId = producto.producto_base_id || producto.product_id_base;
 
-  if (!isWeight && esPresentacionVinculada(producto) && baseId) {
+  if (baseId) {
+    // Si es un producto vendido por peso (ej. carne de vaca / cortes por libra derivados de carne de vaca base):
+    // El inventario reside en el producto base y se descuenta exactamente la cantidad fraccionaria pesada (1:1),
+    // NUNCA multiplicando por factor de empaque residual ni descontando doble.
+    if (isWeight) {
+      return {
+        productoId: baseId,
+        cantidad: Number(cantidad || 0),
+      };
+    }
+
+    if (esPresentacionVinculada(producto)) {
+      return {
+        productoId: baseId,
+        cantidad: convertirAUnidadBase(cantidad, Number(producto.factor_conversion)),
+      };
+    }
+
     return {
       productoId: baseId,
-      cantidad: convertirAUnidadBase(cantidad, Number(producto.factor_conversion)),
+      cantidad: Number(cantidad || 0),
     };
   }
+
   return { productoId: producto.id, cantidad: Number(cantidad || 0) };
 }
 

@@ -173,8 +173,14 @@ BEGIN
                 v_stock_prev := COALESCE(v_prod.stock_actual, 0);
 
                 -- Si es producto por peso (carnes por libra), NUNCA aplicar factor multiplicador
+                -- Si tiene producto base vinculado (ej. corte derivado de carne de vaca base), descontar 1:1 del producto base
                 IF v_prod.es_pesado = TRUE OR v_prod.sale_type = 'weight' THEN
-                    v_target_prod_id := v_prod_id;
+                    IF v_prod.producto_base_id IS NOT NULL THEN
+                        v_target_prod_id := v_prod.producto_base_id;
+                        SELECT stock_actual INTO v_stock_prev FROM productos WHERE id = v_target_prod_id;
+                    ELSE
+                        v_target_prod_id := v_prod_id;
+                    END IF;
                     v_descuento_stock := v_cant;
                 ELSIF v_prod.producto_base_id IS NOT NULL AND COALESCE(v_prod.factor_conversion, 1) > 1 THEN
                     -- Es una presentación comercial empaquetada (Six Pack, Cartón, Fardo)

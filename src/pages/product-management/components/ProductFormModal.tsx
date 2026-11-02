@@ -2,11 +2,12 @@ import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useForm } from 'react-hook-form';
 import type { Product } from './ProductManagementScreen';
-import { Package, Printer, Sparkles, Layers, Search, X, Loader2 } from 'lucide-react';
+import { Package, Printer, Sparkles, Layers, Search, X, Loader2, Plus, Trash2 } from 'lucide-react';
 import { generateUniqueBarcode, generateUniqueSku, generatePresentationSku } from '@/lib/barcodeUtils';
 import { normalizePlu } from '@/lib/scaleBarcode';
 import { logAuditEvent } from '@/lib/auditStore';
 import { toast } from '@/lib/toast';
+import { saveOrUpdateCombo } from '@/lib/comboStore';
 import WeightProductForm, { type WeightFormState } from '@/components/weight/WeightProductForm';
 import type { SaleType, WeightUnit } from '@/types/database';
 import { buscarProductosParaVinculacion, obtenerProductoPorId, productoAUi } from '@/services/productos.service';
@@ -154,6 +155,13 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
   const [baseProductSearch, setBaseProductSearch] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
+  // Six-pack / Paquete compuesto con múltiples productos
+  const [packMode, setPackMode] = useState<'single' | 'composite'>('single');
+  const [compositeItems, setCompositeItems] = useState<
+    Array<{ product_id: string; product_name: string; quantity: number; cost?: number }>
+  >([]);
+  const [compSearchQuery, setCompSearchQuery] = useState('');
+
   const {
     register,
     handleSubmit,
@@ -215,13 +223,31 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
         allowDecimal: product.allowDecimal ?? true,
         generateScaleBarcode: product.generateScaleBarcode ?? false,
       });
-      setIsPresentation(Boolean(product.producto_base_id) || isPackUnitItem(product.unit));
-      setBaseProductId(product.producto_base_id || '');
-      setConversionFactorText(
-        product.factor_conversion && product.factor_conversion > 1
-          ? String(product.factor_conversion)
-          : ''
-      );
+      if (product.composite_items && Array.isArray(product.composite_items) && product.composite_items.length > 0) {
+        setIsPresentation(true);
+        setPackMode('composite');
+        setCompositeItems(
+          product.composite_items.map((ci) => ({
+            product_id: ci.product_id,
+            product_name: ci.product_name || allProducts?.find((p) => p.id === ci.product_id)?.name || 'Producto',
+            quantity: ci.quantity || 1,
+            cost: allProducts?.find((p) => p.id === ci.product_id)?.costPrice || 0,
+          }))
+        );
+        setBaseProductId('');
+        setConversionFactorText('');
+      } else {
+        setIsPresentation(Boolean(product.producto_base_id) || isPackUnitItem(product.unit));
+        setPackMode('single');
+        setBaseProductId(product.producto_base_id || '');
+        setConversionFactorText(
+          product.factor_conversion && product.factor_conversion > 1
+            ? String(product.factor_conversion)
+            : ''
+        );
+        setCompositeItems([]);
+      }
+      setCompSearchQuery('');
       setBaseProductSearch('');
       setIsSearchOpen(false);
     } else {
@@ -255,8 +281,11 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
         generateScaleBarcode: defaultIsScaleProduct,
       });
       setIsPresentation(false);
+      setPackMode('single');
       setBaseProductId('');
       setConversionFactorText('');
+      setCompositeItems([]);
+      setCompSearchQuery('');
       setBaseProductSearch('');
       setIsSearchOpen(false);
     }
@@ -380,21 +409,30 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
 
     if (isPresentation) {
       const packLabel = (getValues('unit') || 'empaque').toLowerCase();
-      if (!baseProductId) {
-        toast.error(`Selecciona el producto que contiene este ${packLabel}, o desmarca la vinculación.`);
-        return;
-      }
-      if (conversionFactor < 2) {
-        toast.error(`Indica cuántas unidades van en cada ${packLabel} (mínimo 2).`);
-        return;
+      if (packMode === 'single') {
+        if (!baseProductId) {
+          toast.error(`Selecciona el producto que contiene este ${packLabel}, o desmarca la vinculación.`);
+          return;
+        }
+        if (!isWeight && conversionFactor < 1) {
+          toast.error(`Indica cuántas unidades van en cada ${packLabel}.`);
+          return;
+        }
+      } else {
+        if (compositeItems.length === 0) {
+          toast.error(`Agrega al menos un componente al ${packLabel} compuesto.`);
+          return;
+        }
       }
     }
 
     // Resolve final SKU (auto-generated if empty)
     let finalSku = cleanSku;
     if (!finalSku) {
-      if (isPresentation && selectedBaseProduct) {
+      if (isPresentation && packMode === 'single' && selectedBaseProduct) {
         finalSku = generatePresentationSku(selectedUnit, selectedBaseProduct.sku, selectedBaseProduct.name);
+      } else if (isPresentation && packMode === 'composite') {
+        finalSku = generateUniqueSku('SIX');
       } else {
         const prefix = (data.name || '').trim().slice(0, 3).toUpperCase() || 'SKU';
         finalSku = generateUniqueSku(prefix);
@@ -429,62 +467,128 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
     const finalCategory = (data.category || '').trim() || (selectedBaseProduct?.category || 'General');
     const finalBrand = (data.brand || '').trim() || (selectedBaseProduct?.brand || '');
 
+    let computedStock = stock;
+    if (isPresentation) {
+      if (packMode === 'single' && baseProductId && selectedBaseProduct) {
+        computedStock = Math.floor(selectedBaseProduct.currentStock / conversionFactor);
+      } else if (packMode === 'composite' && compositeItems.length > 0) {
+        computedStock = Math.min(
+          ...compositeItems.map((ci) => {
+            const p = allProducts?.find((prod) => prod.id === ci.product_id);
+            const q = Math.max(1, ci.quantity);
+            return p ? Math.floor(p.currentStock / q) : 0;
+          })
+        );
+        if (!Number.isFinite(computedStock) || computedStock < 0) computedStock = 0;
+      }
+    }
+
     const saved: Product = {
-  id: product?.id ?? `prod-${Date.now()}`,
-  ...data,
-  sku: finalSku,
-  category: finalCategory,
-  brand: finalBrand,
-  plu: isWeight || isScaleProduct ? (cleanPlu || (product?.plu ?? '')) : '',
-  unit: isWeight ? (weightState.weightUnit === 'kg' ? 'Kilogramo' : weightState.weightUnit === 'lb' ? 'Libra' : data.unit) : data.unit,
-  costPrice: cost,
-  salePrice: sale,
-  wholesalePrice: Number(data.wholesalePrice),
-  tax: Number(data.tax),
-  minStock: minStk,
-  currentStock: isPresentation && baseProductId && selectedBaseProduct
-    ? Math.floor(selectedBaseProduct.currentStock / conversionFactor)
-    : stock,
-  stockStatus,
-  saleType: weightState.saleType,
-  weightUnit: weightState.weightUnit,
-  pricePerWeight: sale,
-  minWeight: weightState.minWeight,
-  maxWeight: weightState.maxWeight,
-  allowDecimal: weightState.allowDecimal,
-  generateScaleBarcode: weightState.generateScaleBarcode,
-  isWeightProduct: isWeight,
-  producto_base_id: isPresentation && baseProductId ? baseProductId : null,
-  factor_conversion: isPresentation && baseProductId ? Math.max(2, Number(conversionFactor) || 2) : 1,
-  unidad_base: isPresentation && selectedBaseProduct ? selectedBaseProduct.unit : undefined,
-};
+      id: product?.id ?? `prod-${Date.now()}`,
+      ...data,
+      sku: finalSku,
+      category: finalCategory,
+      brand: finalBrand,
+      plu: isWeight || isScaleProduct ? (cleanPlu || (product?.plu ?? '')) : '',
+      unit: isWeight ? (weightState.weightUnit === 'kg' ? 'Kilogramo' : weightState.weightUnit === 'lb' ? 'Libra' : data.unit) : data.unit,
+      costPrice: cost,
+      salePrice: sale,
+      wholesalePrice: Number(data.wholesalePrice),
+      tax: Number(data.tax),
+      minStock: minStk,
+      currentStock: computedStock,
+      stockStatus,
+      saleType: weightState.saleType,
+      weightUnit: weightState.weightUnit,
+      pricePerWeight: sale,
+      minWeight: weightState.minWeight,
+      maxWeight: weightState.maxWeight,
+      allowDecimal: weightState.allowDecimal,
+      generateScaleBarcode: weightState.generateScaleBarcode,
+      isWeightProduct: isWeight,
+      producto_base_id: isPresentation && packMode === 'single' && baseProductId ? baseProductId : null,
+      factor_conversion: isPresentation && packMode === 'single' && baseProductId ? (isWeight ? 1 : Math.max(1, Number(conversionFactor) || 1)) : 1,
+      unidad_base: isPresentation && packMode === 'single' && selectedBaseProduct ? selectedBaseProduct.unit : undefined,
+      composite_items: isPresentation && packMode === 'composite' && compositeItems.length > 0
+        ? compositeItems.map((ci) => ({ product_id: ci.product_id, product_name: ci.product_name, quantity: ci.quantity }))
+        : undefined,
+    };
 
-// System Audit Event
-if (isEdit && product) {
-  const priceChanged = product.salePrice !== sale;
-  logAuditEvent({
-    user: 'Admin General',
-    role: 'Administrador',
-    action: priceChanged ? 'Cambio de precio' : 'Edición de producto',
-    module: 'Gestión de Productos',
-    details: priceChanged
-      ? `Precio cambiado para "${saved.name}" de RD$ ${product.salePrice} a RD$ ${sale}`
-      : `Producto "${saved.name}" actualizado`,
-    before: { name: product.name, salePrice: product.salePrice, costPrice: product.costPrice },
-    after: { name: saved.name, salePrice: saved.salePrice, costPrice: saved.costPrice },
-  });
-} else {
-  logAuditEvent({
-    user: 'Admin General',
-    role: 'Administrador',
-    action: 'Edición de producto',
-    module: 'Gestión de Productos',
-    details: `Nuevo producto creado: "${saved.name}" (SKU: ${saved.sku})`,
-    after: { name: saved.name, sku: saved.sku, salePrice: saved.salePrice },
-  });
-}
+    // System Audit Event
+    if (isEdit && product) {
+      const priceChanged = product.salePrice !== sale;
+      logAuditEvent({
+        user: 'Admin General',
+        role: 'Administrador',
+        action: priceChanged ? 'Cambio de precio' : 'Edición de producto',
+        module: 'Gestión de Productos',
+        details: priceChanged
+          ? `Precio cambiado para "${saved.name}" de RD$ ${product.salePrice} a RD$ ${sale}`
+          : `Producto "${saved.name}" actualizado`,
+        before: { name: product.name, salePrice: product.salePrice, costPrice: product.costPrice },
+        after: { name: saved.name, salePrice: saved.salePrice, costPrice: saved.costPrice },
+      });
+    } else {
+      logAuditEvent({
+        user: 'Admin General',
+        role: 'Administrador',
+        action: 'Edición de producto',
+        module: 'Gestión de Productos',
+        details: `Nuevo producto creado: "${saved.name}" (SKU: ${saved.sku})`,
+        after: { name: saved.name, sku: saved.sku, salePrice: saved.salePrice },
+      });
+    }
 
-onSave(saved);
+    if (saved.composite_items && saved.composite_items.length > 0) {
+      try {
+        saveOrUpdateCombo({
+          id: `combo-${saved.id}`,
+          name: saved.name,
+          code: saved.sku,
+          barcode: saved.barcode || saved.sku,
+          description: `Paquete compuesto: ${saved.name}`,
+          category: saved.category || 'Paquetes',
+          price: saved.salePrice,
+          totalCost: saved.costPrice,
+          normalPrice: saved.salePrice,
+          discountType: 'fixed',
+          discountValue: 0,
+          savingsAmount: 0,
+          savingsPercent: 0,
+          marginPercent: Number(margin) || 0,
+          active: saved.status === 'active',
+          visibleInPos: true,
+          allowSaleWithoutStock: false,
+          applyTax: saved.tax > 0,
+          allBranches: true,
+          branches: [],
+          startDate: new Date().toISOString(),
+          endDate: '',
+          startTime: '',
+          endTime: '',
+          image: saved.image || '',
+          items: compositeItems.map((ci) => {
+            const p = allProducts?.find((prod) => prod.id === ci.product_id);
+            return {
+              id: `ci-${Date.now()}-${ci.product_id}`,
+              productId: ci.product_id,
+              sku: p?.sku || '',
+              name: ci.product_name || p?.name || '',
+              quantity: ci.quantity,
+              unitPrice: p?.salePrice || 0,
+              costPrice: p?.costPrice || 0,
+              subtotal: (p?.salePrice || 0) * ci.quantity,
+            };
+          }),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.warn('Could not sync composite product to combo store', e);
+      }
+    }
+
+    onSave(saved);
   };
 
 const costPrice = watch('costPrice');
@@ -692,6 +796,68 @@ const handleUnitSelection = (val: string) => {
     setConversionFactorText('');
   }
 };
+
+const filteredCompProducts = React.useMemo(() => {
+  if (!compSearchQuery.trim()) return [];
+  const q = compSearchQuery.toLowerCase().trim();
+  return combinedBaseProducts
+    .filter((p) => {
+      if (p.id === product?.id) return false;
+      return (
+        p.name.toLowerCase().includes(q) ||
+        (p.sku && p.sku.toLowerCase().includes(q)) ||
+        (p.barcode && p.barcode.includes(q)) ||
+        (p.category && p.category.toLowerCase().includes(q))
+      );
+    })
+    .slice(0, 15);
+}, [combinedBaseProducts, compSearchQuery, product?.id]);
+
+const handleAddCompositeItem = (p: Product) => {
+  if (compositeItems.some((ci) => ci.product_id === p.id)) {
+    toast.info(`"${p.name}" ya está en la lista. Puedes ajustar su cantidad.`);
+    return;
+  }
+  setCompositeItems((prev) => [
+    ...prev,
+    {
+      product_id: p.id,
+      product_name: p.name,
+      quantity: 1,
+      cost: p.costPrice || 0,
+    },
+  ]);
+  setCompSearchQuery('');
+};
+
+const handleUpdateCompositeQty = (prodId: string, qty: number) => {
+  setCompositeItems((prev) =>
+    prev.map((ci) => (ci.product_id === prodId ? { ...ci, quantity: qty } : ci))
+  );
+};
+
+const handleRemoveCompositeItem = (prodId: string) => {
+  setCompositeItems((prev) => prev.filter((ci) => ci.product_id !== prodId));
+};
+
+const totalCompositeCost = React.useMemo(() => {
+  return compositeItems.reduce((acc, ci) => {
+    const p = combinedBaseProducts.find((prod) => prod.id === ci.product_id);
+    const c = ci.cost ?? p?.costPrice ?? 0;
+    return acc + c * ci.quantity;
+  }, 0);
+}, [compositeItems, combinedBaseProducts]);
+
+const compositeStockAvail = React.useMemo(() => {
+  if (compositeItems.length === 0) return 0;
+  return Math.min(
+    ...compositeItems.map((ci) => {
+      const p = combinedBaseProducts.find((prod) => prod.id === ci.product_id);
+      const q = Math.max(1, ci.quantity);
+      return p ? Math.floor(p.currentStock / q) : 0;
+    })
+  );
+}, [compositeItems, combinedBaseProducts]);
 
 const margin = costPrice && salePrice && Number(costPrice) > 0
   ? (((Number(salePrice) - Number(costPrice)) / Number(salePrice)) * 100).toFixed(1)
@@ -945,7 +1111,7 @@ return (
                       <Layers size={13} className="text-primary" />
                     </div>
                     <span className="text-xs font-semibold text-foreground">
-                      Vinculación opcional de inventario para {selectedUnit}
+                      Vinculación de inventario para {selectedUnit}
                     </span>
                   </div>
                   <button
@@ -953,6 +1119,7 @@ return (
                     onClick={() => {
                       setIsPresentation(false);
                       setBaseProductId('');
+                      setCompositeItems([]);
                     }}
                     className="text-[11px] text-muted-foreground hover:text-danger hover:underline"
                   >
@@ -960,174 +1127,333 @@ return (
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-border/40">
-                  <div>
-                    <label className="block text-xs font-medium text-foreground mb-1">
-                      Producto Base del que descontará stock
-                    </label>
+                {/* Selector de modo: Producto base simple vs Paquete compuesto (Six pack mixto) */}
+                <div className="flex items-center gap-2 bg-background p-1 rounded-lg border border-border/60">
+                  <button
+                    type="button"
+                    onClick={() => setPackMode('single')}
+                    className={`flex-1 py-1.5 px-3 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                      packMode === 'single'
+                        ? 'bg-primary text-primary-foreground shadow-xs'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40'
+                    }`}
+                  >
+                    1 Producto Base (Factor)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPackMode('composite')}
+                    className={`flex-1 py-1.5 px-3 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                      packMode === 'composite'
+                        ? 'bg-primary text-primary-foreground shadow-xs'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40'
+                    }`}
+                  >
+                    Paquete Compuesto / Six Pack (Varios Productos)
+                  </button>
+                </div>
 
-                    {selectedBaseProduct && !isSearchOpen ? (
-                      <div className="flex items-center justify-between p-2 rounded-lg border border-primary/30 bg-background text-xs">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className="w-6 h-6 rounded bg-primary/10 flex items-center justify-center shrink-0">
-                            <Package size={13} className="text-primary" />
-                          </div>
-                          <div className="truncate">
-                            <span className="font-bold text-foreground block truncate">{selectedBaseProduct.name}</span>
-                            <span className="text-[11px] text-muted-foreground">
-                              {selectedBaseProduct.sku ? `SKU: ${selectedBaseProduct.sku} • ` : ''}
-                              Stock: <strong className="text-primary">{selectedBaseProduct.currentStock} {selectedBaseProduct.unit}</strong>
-                              {selectedBaseProduct.costPrice > 0 ? ` • Costo: RD$ ${selectedBaseProduct.costPrice}` : ''}
-                            </span>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsSearchOpen(true);
-                            setBaseProductSearch('');
-                          }}
-                          className="btn-secondary text-[11px] px-2.5 py-1 shrink-0 ml-2 font-medium"
-                        >
-                          Cambiar
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="relative" ref={searchContainerRef}>
-                        <div className="relative">
-                          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                          <input
-                            type="text"
-                            autoFocus={isSearchOpen}
-                            value={baseProductSearch}
-                            onChange={(e) => {
-                              setBaseProductSearch(e.target.value);
-                              if (!isSearchOpen) setIsSearchOpen(true);
-                            }}
-                            onFocus={() => setIsSearchOpen(true)}
-                            placeholder="Escribe el producto (ej: Botella de agua, Arroz, Aceite, Huevo)..."
-                            className="input-field pl-8 pr-14 text-xs w-full font-medium"
-                          />
-                          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                            {isSearchingBase && (
-                              <Loader2 size={13} className="animate-spin text-primary" />
-                            )}
-                            {baseProductSearch && (
-                              <button
-                                type="button"
-                                onClick={() => setBaseProductSearch('')}
-                                className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
-                                title="Limpiar búsqueda"
-                              >
-                                <X size={13} />
-                              </button>
-                            )}
-                          </div>
-                        </div>
+                {packMode === 'single' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-border/40">
+                    <div>
+                      <label className="block text-xs font-medium text-foreground mb-1">
+                        Producto Base del que descontará stock
+                      </label>
 
-                        {isSearchOpen && (
-                          <div className="absolute z-30 left-0 right-0 mt-1 max-h-64 overflow-y-auto bg-card border border-border rounded-xl shadow-xl divide-y divide-border/50 animate-fadeIn scrollbar-thin">
-                            <div className="px-3 py-1.5 bg-secondary/40 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between sticky top-0 backdrop-blur-xs z-10 border-b border-border/50">
-                              <span>
-                                {baseProductSearch
-                                  ? `${filteredBaseProducts.length} resultado(s) para "${baseProductSearch}"`
-                                  : `Catálogo (${filteredBaseProducts.length} productos disponibles)`}
+                      {selectedBaseProduct && !isSearchOpen ? (
+                        <div className="flex items-center justify-between p-2 rounded-lg border border-primary/30 bg-background text-xs">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="w-6 h-6 rounded bg-primary/10 flex items-center justify-center shrink-0">
+                              <Package size={13} className="text-primary" />
+                            </div>
+                            <div className="truncate">
+                              <span className="font-bold text-foreground block truncate">{selectedBaseProduct.name}</span>
+                              <span className="text-[11px] text-muted-foreground">
+                                {selectedBaseProduct.sku ? `SKU: ${selectedBaseProduct.sku} • ` : ''}
+                                Stock: <strong className="text-primary">{selectedBaseProduct.currentStock} {selectedBaseProduct.unit}</strong>
+                                {selectedBaseProduct.costPrice > 0 ? ` • Costo: RD$ ${selectedBaseProduct.costPrice}` : ''}
                               </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsSearchOpen(true);
+                              setBaseProductSearch('');
+                            }}
+                            className="btn-secondary text-[11px] px-2.5 py-1 shrink-0 ml-2 font-medium"
+                          >
+                            Cambiar
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="relative" ref={searchContainerRef}>
+                          <div className="relative">
+                            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                            <input
+                              type="text"
+                              autoFocus={isSearchOpen}
+                              value={baseProductSearch}
+                              onChange={(e) => {
+                                setBaseProductSearch(e.target.value);
+                                if (!isSearchOpen) setIsSearchOpen(true);
+                              }}
+                              onFocus={() => setIsSearchOpen(true)}
+                              placeholder="Escribe el producto (ej: Botella de agua, Arroz, Aceite, Huevo)..."
+                              className="input-field pl-8 pr-14 text-xs w-full font-medium"
+                            />
+                            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                               {isSearchingBase && (
-                                <span className="flex items-center gap-1 text-primary lowercase font-normal">
-                                  <Loader2 size={10} className="animate-spin" /> buscando...
-                                </span>
+                                <Loader2 size={13} className="animate-spin text-primary" />
+                              )}
+                              {baseProductSearch && (
+                                <button
+                                  type="button"
+                                  onClick={() => setBaseProductSearch('')}
+                                  className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                                  title="Limpiar búsqueda"
+                                >
+                                  <X size={13} />
+                                </button>
                               )}
                             </div>
+                          </div>
 
-                            {filteredBaseProducts.length === 0 ? (
-                              <div className="p-4 text-xs text-muted-foreground text-center space-y-1">
-                                <p className="font-medium text-foreground">
-                                  {isSearchingBase
-                                    ? 'Buscando en el catálogo completo...'
-                                    : `No se encontraron productos con "${baseProductSearch}"`}
-                                </p>
-                                {!isSearchingBase && (
-                                  <p className="text-[11px]">
-                                    Prueba escribiendo otra palabra clave, marca o código de barras.
-                                  </p>
+                          {isSearchOpen && (
+                            <div className="absolute z-30 left-0 right-0 mt-1 max-h-64 overflow-y-auto bg-card border border-border rounded-xl shadow-xl divide-y divide-border/50 animate-fadeIn scrollbar-thin">
+                              <div className="px-3 py-1.5 bg-secondary/40 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between sticky top-0 backdrop-blur-xs z-10 border-b border-border/50">
+                                <span>
+                                  {baseProductSearch
+                                    ? `${filteredBaseProducts.length} resultado(s) para "${baseProductSearch}"`
+                                    : `Catálogo (${filteredBaseProducts.length} productos disponibles)`}
+                                </span>
+                                {isSearchingBase && (
+                                  <span className="flex items-center gap-1 text-primary lowercase font-normal">
+                                    <Loader2 size={10} className="animate-spin" /> buscando...
+                                  </span>
                                 )}
                               </div>
-                            ) : (
-                              filteredBaseProducts.map((p) => (
-                                <button
-                                  key={p.id}
-                                  type="button"
-                                  onClick={() => handleSelectBaseProduct(p)}
-                                  className="w-full text-left p-2.5 hover:bg-secondary/40 transition-colors flex items-center justify-between text-xs group cursor-pointer"
-                                >
-                                  <div className="min-w-0 pr-2">
-                                    <div className="font-semibold text-foreground group-hover:text-primary transition-colors truncate">
-                                      {p.name}
+
+                              {filteredBaseProducts.length === 0 ? (
+                                <div className="p-4 text-xs text-muted-foreground text-center space-y-1">
+                                  <p className="font-medium text-foreground">
+                                    {isSearchingBase
+                                      ? 'Buscando en el catálogo completo...'
+                                      : `No se encontraron productos con "${baseProductSearch}"`}
+                                  </p>
+                                  {!isSearchingBase && (
+                                    <p className="text-[11px]">
+                                      Prueba escribiendo otra palabra clave, marca o código de barras.
+                                    </p>
+                                  )}
+                                </div>
+                              ) : (
+                                filteredBaseProducts.map((p) => (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => handleSelectBaseProduct(p)}
+                                    className="w-full text-left p-2.5 hover:bg-secondary/40 transition-colors flex items-center justify-between text-xs group cursor-pointer"
+                                  >
+                                    <div className="min-w-0 pr-2">
+                                      <div className="font-semibold text-foreground group-hover:text-primary transition-colors truncate">
+                                        {p.name}
+                                      </div>
+                                      <div className="text-[11px] text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                                        {p.sku && <span>SKU: {p.sku}</span>}
+                                        {p.category && <span className="text-muted-foreground/80">• {p.category}</span>}
+                                        <span>
+                                          • Stock: <strong className="text-foreground">{p.currentStock} {p.unit}</strong>
+                                        </span>
+                                        {p.costPrice > 0 && <span>• Costo: RD$ {p.costPrice}</span>}
+                                      </div>
                                     </div>
-                                    <div className="text-[11px] text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
-                                      {p.sku && <span>SKU: {p.sku}</span>}
-                                      {p.category && <span className="text-muted-foreground/80">• {p.category}</span>}
-                                      <span>
-                                        • Stock: <strong className="text-foreground">{p.currentStock} {p.unit}</strong>
-                                      </span>
-                                      {p.costPrice > 0 && <span>• Costo: RD$ {p.costPrice}</span>}
-                                    </div>
-                                  </div>
-                                  <span className="shrink-0 text-[11px] font-semibold text-primary opacity-0 group-hover:opacity-100 transition-opacity bg-primary/10 px-2 py-0.5 rounded-md">
-                                    Vincular →
-                                  </span>
-                                </button>
-                              ))
-                            )}
-                            {selectedBaseProduct && (
-                              <div className="p-1.5 bg-secondary/20 text-center sticky bottom-0 border-t border-border/50 backdrop-blur-xs">
-                                <button
-                                  type="button"
-                                  onClick={() => setIsSearchOpen(false)}
-                                  className="text-[11px] text-muted-foreground hover:text-foreground font-medium cursor-pointer"
-                                >
-                                  Mantener actual ({selectedBaseProduct.name})
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                                    <span className="shrink-0 text-[11px] font-semibold text-primary opacity-0 group-hover:opacity-100 transition-opacity bg-primary/10 px-2 py-0.5 rounded-md">
+                                      Vincular →
+                                    </span>
+                                  </button>
+                                ))
+                              )}
+                              {selectedBaseProduct && (
+                                <div className="p-1.5 bg-secondary/20 text-center sticky bottom-0 border-t border-border/50 backdrop-blur-xs">
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsSearchOpen(false)}
+                                    className="text-[11px] text-muted-foreground hover:text-foreground font-medium cursor-pointer"
+                                  >
+                                    Mantener actual ({selectedBaseProduct.name})
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-foreground mb-1">
+                        Unidades base por cada {selectedUnit} (Factor)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        inputMode="numeric"
+                        className="input-field text-xs w-full font-mono"
+                        placeholder={`Ej: ${selectedUnit === 'Fardo' ? '20' : selectedUnit === 'Cartón' ? '2' : '12'}`}
+                        value={conversionFactorText}
+                        onChange={(e) => setConversionFactorText(e.target.value.replace(/[^\d]/g, ''))}
+                      />
+                    </div>
+
+                    {selectedBaseProduct ? (
+                      <div className="sm:col-span-2 text-xs bg-background p-2.5 rounded-lg border border-primary/20 text-foreground flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <span className="text-muted-foreground">
+                          💡 Al vender 1 <strong>{selectedUnit}</strong> se descontarán <strong>{conversionFactor} {selectedBaseProduct.unit}</strong> de <strong>{selectedBaseProduct.name}</strong>.
+                        </span>
+                        <span className="font-bold text-primary whitespace-nowrap bg-primary/10 px-2 py-0.5 rounded">
+                          Stock disponible: ~{Math.floor(selectedBaseProduct.currentStock / conversionFactor)} {selectedUnit}s
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="sm:col-span-2 text-xs text-muted-foreground italic">
+                        Selecciona un producto base si deseas compartir inventario. Si no, puedes desmarcar la casilla y el {selectedUnit.toLowerCase()} descontará su propio stock independiente al venderse.
                       </div>
                     )}
                   </div>
+                ) : (
+                  /* Modo Paquete Compuesto / Six Pack Mixto */
+                  <div className="space-y-3 pt-1">
+                    <p className="text-xs text-muted-foreground">
+                      Agrega los diferentes productos que componen este {selectedUnit} (ej. 2 Jugos de naranja, 2 Jugos de pera, 2 Jugos de manzana). Al facturarse, se descontará automáticamente el stock de cada producto componente.
+                    </p>
 
-                  <div>
-                    <label className="block text-xs font-medium text-foreground mb-1">
-                      Unidades base por cada {selectedUnit} (Factor)
-                    </label>
-                    <input
-                      type="number"
-                      min={2}
-                      step={1}
-                      inputMode="numeric"
-                      className="input-field text-xs w-full font-mono"
-                      placeholder={`Ej: ${selectedUnit === 'Fardo' ? '20' : selectedUnit === 'Cartón' ? '2' : '12'}`}
-                      value={conversionFactorText}
-                      onChange={(e) => setConversionFactorText(e.target.value.replace(/[^\d]/g, ''))}
-                    />
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                        <input
+                          type="text"
+                          value={compSearchQuery}
+                          onChange={(e) => setCompSearchQuery(e.target.value)}
+                          placeholder="Buscar producto por nombre, SKU o categoría para agregar..."
+                          className="input-field pl-8 pr-8 text-xs w-full font-medium"
+                        />
+                        {compSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setCompSearchQuery('')}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          >
+                            <X size={13} />
+                          </button>
+                        )}
+                      </div>
+
+                      {compSearchQuery.trim() && (
+                        <div className="max-h-44 overflow-y-auto bg-card border border-border rounded-xl shadow-lg divide-y divide-border/50 text-xs">
+                          {filteredCompProducts.length === 0 ? (
+                            <div className="p-3 text-center text-muted-foreground">No se encontraron productos con "{compSearchQuery}"</div>
+                          ) : (
+                            filteredCompProducts.map((p) => (
+                              <div key={p.id} className="p-2 flex items-center justify-between hover:bg-secondary/30">
+                                <div className="min-w-0 pr-2">
+                                  <span className="font-semibold text-foreground block truncate">{p.name}</span>
+                                  <span className="text-[11px] text-muted-foreground">
+                                    Stock: <strong className="text-primary">{p.currentStock} {p.unit}</strong> • Costo: RD$ {p.costPrice}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddCompositeItem(p)}
+                                  className="btn-primary text-[11px] px-2.5 py-1 font-semibold flex items-center gap-1 shrink-0"
+                                >
+                                  <Plus size={12} /> Agregar
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Lista de Componentes */}
+                    <div className="border border-border/80 rounded-xl overflow-hidden bg-background">
+                      <div className="bg-secondary/40 px-3 py-2 text-[11px] font-bold text-muted-foreground uppercase flex items-center justify-between border-b border-border/60">
+                        <span>Componentes Agregados ({compositeItems.length})</span>
+                        <span>Cantidad en el Paquete</span>
+                      </div>
+
+                      {compositeItems.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-muted-foreground">
+                          No has agregado componentes aún. Busca productos arriba para incluirlos en el {selectedUnit}.
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-border/50">
+                          {compositeItems.map((ci) => {
+                            const compProd = combinedBaseProducts.find((p) => p.id === ci.product_id);
+                            const stockAvail = compProd ? compProd.currentStock : 0;
+                            return (
+                              <div key={ci.product_id} className="p-2.5 flex items-center justify-between gap-3 text-xs">
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-semibold text-foreground truncate">{ci.product_name}</div>
+                                  <div className="text-[11px] text-muted-foreground">
+                                    Stock actual: <strong className="text-foreground">{stockAvail}</strong> • Costo: RD$ {ci.cost || 0}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <label className="text-[11px] text-muted-foreground">Cant:</label>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    step={1}
+                                    value={ci.quantity}
+                                    onChange={(e) => handleUpdateCompositeQty(ci.product_id, Math.max(1, Number(e.target.value) || 1))}
+                                    className="input-field text-xs w-16 text-center font-mono py-1 px-1.5"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveCompositeItem(ci.product_id)}
+                                    className="text-muted-foreground hover:text-danger p-1 rounded-md transition-colors"
+                                    title="Eliminar del paquete"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Resumen del Paquete */}
+                    {compositeItems.length > 0 && (
+                      <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                        <div>
+                          <span className="font-bold text-foreground">
+                            Total componentes: {compositeItems.reduce((acc, c) => acc + c.quantity, 0)} unidades
+                          </span>
+                          <span className="text-muted-foreground ml-2">
+                            • Costo sugerido: <strong className="text-foreground">RD$ {totalCompositeCost.toFixed(2)}</strong>
+                          </span>
+                          {Number(costPrice || 0) !== totalCompositeCost && (
+                            <button
+                              type="button"
+                              onClick={() => setValue('costPrice', Math.round(totalCompositeCost * 100) / 100, { shouldDirty: true })}
+                              className="text-[11px] text-primary hover:underline ml-2 font-semibold"
+                            >
+                              (Aplicar al costo)
+                            </button>
+                          )}
+                        </div>
+                        <div className="font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-md whitespace-nowrap">
+                          Disponibles para venta: ~{compositeStockAvail} {selectedUnit}s
+                        </div>
+                      </div>
+                    )}
                   </div>
-
-                  {selectedBaseProduct ? (
-                    <div className="sm:col-span-2 text-xs bg-background p-2.5 rounded-lg border border-primary/20 text-foreground flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <span className="text-muted-foreground">
-                        💡 Al vender 1 <strong>{selectedUnit}</strong> se descontarán <strong>{conversionFactor} {selectedBaseProduct.unit}</strong> de <strong>{selectedBaseProduct.name}</strong>.
-                      </span>
-                      <span className="font-bold text-primary whitespace-nowrap bg-primary/10 px-2 py-0.5 rounded">
-                        Stock disponible: ~{Math.floor(selectedBaseProduct.currentStock / conversionFactor)} {selectedUnit}s
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="sm:col-span-2 text-xs text-muted-foreground italic">
-                      Selecciona un producto base si deseas compartir inventario. Si no, puedes desmarcar la casilla y el {selectedUnit.toLowerCase()} descontará su propio stock independiente al venderse.
-                    </div>
-                  )}
-                </div>
+                )}
               </div>
             )}
         </div>
@@ -1235,26 +1561,34 @@ return (
             label={isWeighted ? `Stock Actual (${weightUnitShort})` : "Stock Actual"}
             name="currentStock"
             error={errors.currentStock?.message}
-            required={!isEdit && !(isPresentation && baseProductId)}
+            required={!isEdit && !(isPresentation && (baseProductId || (packMode === 'composite' && compositeItems.length > 0)))}
             hint={
-              isPresentation && selectedBaseProduct
+              isPresentation && packMode === 'single' && selectedBaseProduct
                 ? `Calculado dinámicamente desde ${selectedBaseProduct.name} (~${Math.floor(selectedBaseProduct.currentStock / conversionFactor)} ${selectedUnit}s disponibles)`
-                : isEdit
-                  ? 'No editable aquí — usa Ajustes de Stock para cambiar existencias'
-                  : (isWeighted ? `Cantidad de ${weightUnitShort} actualmente en inventario` : 'Cantidad actual en inventario')
+                : isPresentation && packMode === 'composite' && compositeItems.length > 0
+                  ? `Calculado dinámicamente según componentes (~${compositeStockAvail} ${selectedUnit}s disponibles)`
+                  : isEdit
+                    ? 'No editable aquí — usa Ajustes de Stock para cambiar existencias'
+                    : (isWeighted ? `Cantidad de ${weightUnitShort} actualmente en inventario` : 'Cantidad actual en inventario')
             }
           >
             <input
               id="currentStock"
               type="number"
               min={0}
-              disabled={isEdit || (isPresentation && !!baseProductId)}
-              value={isPresentation && selectedBaseProduct ? Math.floor(selectedBaseProduct.currentStock / conversionFactor) : undefined}
+              disabled={isEdit || (isPresentation && (!!baseProductId || (packMode === 'composite' && compositeItems.length > 0)))}
+              value={
+                isPresentation && packMode === 'single' && selectedBaseProduct
+                  ? Math.floor(selectedBaseProduct.currentStock / conversionFactor)
+                  : isPresentation && packMode === 'composite' && compositeItems.length > 0
+                    ? compositeStockAvail
+                    : undefined
+              }
               {...register('currentStock', {
-                required: isEdit || (isPresentation && baseProductId) ? false : 'El stock actual es obligatorio',
+                required: isEdit || (isPresentation && (baseProductId || (packMode === 'composite' && compositeItems.length > 0))) ? false : 'El stock actual es obligatorio',
                 min: { value: 0, message: 'No puede ser negativo' },
               })}
-              className={`input-field tabular-nums ${(isEdit || (isPresentation && baseProductId)) ? 'opacity-60 cursor-not-allowed' : ''}`}
+              className={`input-field tabular-nums ${(isEdit || (isPresentation && (baseProductId || (packMode === 'composite' && compositeItems.length > 0)))) ? 'opacity-60 cursor-not-allowed' : ''}`}
               placeholder="0"
             />
           </FormField>

@@ -32,7 +32,7 @@ export function useSalesModals({
     obtenerClientes({ limite: 100 }).then((res) => {
       if (active) setDbClientes(res.datos);
     });
-    obtenerProductos({ limite: 100 }).then((res) => {
+    obtenerProductos({ limite: 5000 }).then((res) => {
       if (active) setDbProductos(res.datos);
     });
     return () => {

@@ -1,6 +1,7 @@
 import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupabase';
 import type { Devolucion, EstadoDevolucion } from '@/types/database';
-import { updateProductStockInStore } from '@/lib/productStore';
+import { updateProductStockInStore, getStoredProducts } from '@/lib/productStore';
+import { movimientoInventarioPresentacion } from './presentaciones.service';
 
 export interface ItemDevolucionPayload {
   producto_id?: string | null;
@@ -264,13 +265,18 @@ export async function cambiarEstadoDevolucion(
     });
     saveLocalDevoluciones(local);
 
-    // Si se aprueba localmente, devolver stock
+    // Si se aprueba localmente, devolver stock (cantidad exacta fraccionaria, respetando productos por peso y presentaciones)
     if (nuevoEstado === 'aprobada') {
       const target = getLocalDevoluciones().find((d) => d.id === devolucionId);
       if (target?.items) {
         for (const item of target.items) {
           if (item.producto_id) {
-            updateProductStockInStore(item.producto_id, Math.ceil(item.cantidad));
+            const stored = getStoredProducts().find((p) => p.id === item.producto_id);
+            const cantExacta = Number(item.cantidad || 0);
+            const mov = stored
+              ? movimientoInventarioPresentacion(stored, cantExacta)
+              : { productoId: item.producto_id, cantidad: cantExacta };
+            updateProductStockInStore(mov.productoId, mov.cantidad);
           }
         }
       }

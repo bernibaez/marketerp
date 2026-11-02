@@ -32,6 +32,11 @@ export interface Product {
   producto_base_id?: string | null;
   factor_conversion?: number;
   unidad_base?: string;
+  composite_items?: Array<{
+    product_id: string;
+    product_name?: string;
+    quantity: number;
+  }>;
 }
 
 export const initialProducts: Product[] = [

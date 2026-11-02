@@ -507,23 +507,47 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     for (const item of payload.items) {
       if (item.tipo_item === 'producto' && item.producto_id) {
         const stored = getStoredProducts().find((p) => p.id === item.producto_id);
-        const stockPrev = stored?.currentStock ?? 0;
-        const movimiento = stored
-          ? movimientoInventarioPresentacion(stored, item.cantidad)
-          : { productoId: item.producto_id, cantidad: item.cantidad };
-        updateProductStockInStore(movimiento.productoId, -movimiento.cantidad);
+        const compositeItems = (stored as any)?.composite_items;
 
-        registrarMovimientoInventario({
-          producto_id: movimiento.productoId,
-          producto_nombre: stored?.name || item.nombre_item,
-          tipo: 'Venta',
-          cantidad_salida: movimiento.cantidad,
-          stock_anterior: stockPrev,
-          stock_resultante: stockPrev - movimiento.cantidad,
-          documento_referencia: numero,
-          usuario: effectiveCajeroNombre,
-          motivo: `Venta POS Factura ${numero}`,
-        });
+        if (Array.isArray(compositeItems) && compositeItems.length > 0) {
+          // Descontar cada componente del paquete compuesto / six pack mixto
+          for (const ci of compositeItems) {
+            const baseProd = getStoredProducts().find((p) => p.id === ci.productId);
+            const stockPrev = baseProd?.currentStock ?? 0;
+            const cantDeduct = Math.round(Number(ci.quantity || 1) * Number(item.cantidad || 1) * 1000) / 1000;
+            updateProductStockInStore(ci.productId, -cantDeduct);
+
+            registrarMovimientoInventario({
+              producto_id: ci.productId,
+              producto_nombre: baseProd?.name || ci.name || 'Componente paquete',
+              tipo: 'Venta',
+              cantidad_salida: cantDeduct,
+              stock_anterior: stockPrev,
+              stock_resultante: stockPrev - cantDeduct,
+              documento_referencia: numero,
+              usuario: effectiveCajeroNombre,
+              motivo: `Componente de ${stored?.name || item.nombre_item} en Factura ${numero}`,
+            });
+          }
+        } else {
+          const stockPrev = stored?.currentStock ?? 0;
+          const movimiento = stored
+            ? movimientoInventarioPresentacion(stored, item.cantidad)
+            : { productoId: item.producto_id, cantidad: item.cantidad };
+          updateProductStockInStore(movimiento.productoId, -movimiento.cantidad);
+
+          registrarMovimientoInventario({
+            producto_id: movimiento.productoId,
+            producto_nombre: stored?.name || item.nombre_item,
+            tipo: 'Venta',
+            cantidad_salida: movimiento.cantidad,
+            stock_anterior: stockPrev,
+            stock_resultante: stockPrev - movimiento.cantidad,
+            documento_referencia: numero,
+            usuario: effectiveCajeroNombre,
+            motivo: `Venta POS Factura ${numero}`,
+          });
+        }
       } else if (item.tipo_item === 'combo' && item.combo_id) {
         // Descontar componentes del producto compuesto/combo
         const combos = getCombos();
@@ -1425,21 +1449,42 @@ export async function anularVenta(ventaId: string, motivo: string = 'Anulación'
       }
     } else if (it.producto_id) {
       const stored = getStoredProducts().find((p) => p.id === it.producto_id);
-      const stockPrev = stored?.currentStock ?? 0;
-      const mov = stored
-        ? movimientoInventarioPresentacion(stored, cant)
-        : { productoId: it.producto_id, cantidad: cant };
-      updateProductStockInStore(mov.productoId, mov.cantidad);
-      registrarMovimientoInventario({
-        producto_id: mov.productoId,
-        producto_nombre: stored?.name || it.nombre_item,
-        tipo: 'Anulación',
-        cantidad_entrada: mov.cantidad,
-        stock_anterior: stockPrev,
-        stock_resultante: stockPrev + mov.cantidad,
-        documento_referencia: currentSale?.numero_factura || ventaId,
-        motivo: `Restauración por anulación de factura: ${motivo}`,
-      });
+      const compositeItems = (stored as any)?.composite_items;
+
+      if (Array.isArray(compositeItems) && compositeItems.length > 0) {
+        for (const ci of compositeItems) {
+          const baseProd = getStoredProducts().find((p) => p.id === ci.productId);
+          const stockPrev = baseProd?.currentStock ?? 0;
+          const returnQty = Math.round(Number(ci.quantity || 1) * cant * 1000) / 1000;
+          updateProductStockInStore(ci.productId, returnQty);
+          registrarMovimientoInventario({
+            producto_id: ci.productId,
+            producto_nombre: baseProd?.name || ci.name || 'Componente paquete',
+            tipo: 'Anulación',
+            cantidad_entrada: returnQty,
+            stock_anterior: stockPrev,
+            stock_resultante: stockPrev + returnQty,
+            documento_referencia: currentSale?.numero_factura || ventaId,
+            motivo: `Restauración por anulación de factura: ${motivo}`,
+          });
+        }
+      } else {
+        const stockPrev = stored?.currentStock ?? 0;
+        const mov = stored
+          ? movimientoInventarioPresentacion(stored, cant)
+          : { productoId: it.producto_id, cantidad: cant };
+        updateProductStockInStore(mov.productoId, mov.cantidad);
+        registrarMovimientoInventario({
+          producto_id: mov.productoId,
+          producto_nombre: stored?.name || it.nombre_item,
+          tipo: 'Anulación',
+          cantidad_entrada: mov.cantidad,
+          stock_anterior: stockPrev,
+          stock_resultante: stockPrev + mov.cantidad,
+          documento_referencia: currentSale?.numero_factura || ventaId,
+          motivo: `Restauración por anulación de factura: ${motivo}`,
+        });
+      }
     }
   }
 
@@ -1540,11 +1585,22 @@ export async function actualizarVenta(
           }
         } else if (it.producto_id) {
           const stored = getStoredProducts().find((p) => p.id === it.producto_id);
-          const mov = stored
-            ? movimientoInventarioPresentacion(stored, cant)
-            : { productoId: it.producto_id, cantidad: cant };
-          const prev = impacts.get(mov.productoId) || 0;
-          impacts.set(mov.productoId, prev + mov.cantidad);
+          if ((stored as any)?.composite_items && Array.isArray((stored as any).composite_items) && (stored as any).composite_items.length > 0) {
+            for (const ci of (stored as any).composite_items) {
+              const compStored = getStoredProducts().find((p) => p.id === ci.product_id);
+              const compMov = compStored
+                ? movimientoInventarioPresentacion(compStored, Number(ci.quantity || 1) * cant)
+                : { productoId: ci.product_id, cantidad: Number(ci.quantity || 1) * cant };
+              const prev = impacts.get(compMov.productoId) || 0;
+              impacts.set(compMov.productoId, prev + compMov.cantidad);
+            }
+          } else {
+            const mov = stored
+              ? movimientoInventarioPresentacion(stored, cant)
+              : { productoId: it.producto_id, cantidad: cant };
+            const prev = impacts.get(mov.productoId) || 0;
+            impacts.set(mov.productoId, prev + mov.cantidad);
+          }
         }
       }
       return impacts;

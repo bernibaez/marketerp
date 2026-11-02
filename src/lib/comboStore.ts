@@ -350,7 +350,8 @@ export function getComboSalesHistory(): ComboSaleRecord[] {
 export function recordComboSale(
   combo: Combo,
   qty: number,
-  branch: string = 'Sucursal Principal'
+  branch: string = 'Sucursal Principal',
+  deductStock: boolean = false
 ): { success: boolean; error?: string } {
   // Check stock requirement for each component item
   const products = getStoredProducts();
@@ -377,10 +378,13 @@ export function recordComboSale(
     };
   }
 
-  // Deduct inventory for EACH component product
-  for (const item of combo.items) {
-    const requiredTotal = item.quantity * qty;
-    updateProductStockInStore(item.productId || item.sku, -requiredTotal);
+  // Deduct inventory for EACH component product ONLY if deductStock is requested
+  // (In normal sales checkout, ventas.service.ts already handles the exact deduction and Kardex to prevent duplicate deductions)
+  if (deductStock) {
+    for (const item of combo.items) {
+      const requiredTotal = item.quantity * qty;
+      updateProductStockInStore(item.productId || item.sku, -requiredTotal);
+    }
   }
 
   // Calculate profit and savings

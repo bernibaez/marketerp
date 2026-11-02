@@ -1,5 +1,6 @@
 import { tryGetSupabase } from '../clienteSupabase';
-import { getStoredProducts } from '@/lib/productStore';
+import { getStoredProducts, type ProductItem } from '@/lib/productStore';
+import { getLocalMovimientosInventario } from '../movimientosInventarioCentral.service';
 import {
   type PeriodoInforme,
   rangoFin,
@@ -132,17 +133,100 @@ export type InformeGanancias = {
 
 export async function informeGananciasPerdidas(p: PeriodoInforme): Promise<InformeGanancias> {
   const sb = tryGetSupabase();
-
-  // 1. Calcular Valor de Inventario Final del período utilizando el COSTO de los productos (precio_costo)
   const prodsCatalog = getStoredProducts();
-  const inventarioFinal =
-    Math.round(
-      prodsCatalog.reduce((sum, item) => {
-        const stock = Math.max(0, Number(item.currentStock ?? (item as any).stock ?? 0));
-        const cost = Math.max(0, Number(item.costPrice ?? (item as any).cost ?? 0));
-        return sum + stock * cost;
-      }, 0) * 100
-    ) / 100;
+  const finIso = rangoFin(p.hasta);
+  const inicioIso = p.desde;
+
+  // 1. Obtener movimientos de inventario centralizados y trazables
+  let allMovements: Array<{
+    producto_id: string;
+    cantidad_entrada: number;
+    cantidad_salida: number;
+    fecha: string;
+  }> = [];
+
+  if (sb) {
+    try {
+      const { data } = await sb
+        .from('movimientos_inventario')
+        .select('producto_id, cantidad_entrada, cantidad_salida, creado_en')
+        .gte('creado_en', inicioIso)
+        .limit(10000);
+      if (data && data.length > 0) {
+        allMovements = data.map((d: any) => ({
+          producto_id: d.producto_id,
+          cantidad_entrada: Number(d.cantidad_entrada || 0),
+          cantidad_salida: Number(d.cantidad_salida || 0),
+          fecha: d.creado_en,
+        }));
+      }
+    } catch {
+      // fallback
+    }
+  }
+
+  const localMovs = getLocalMovimientosInventario();
+  for (const lm of localMovs) {
+    if (!allMovements.some((m) => m.fecha === lm.fecha && m.producto_id === lm.producto_id)) {
+      allMovements.push({
+        producto_id: lm.producto_id,
+        cantidad_entrada: Number(lm.cantidad_entrada || 0),
+        cantidad_salida: Number(lm.cantidad_salida || 0),
+        fecha: lm.fecha,
+      });
+    }
+  }
+
+  // Mapas de stock por producto
+  const stockFinalMap = new Map<string, number>();
+  const stockInicialMap = new Map<string, number>();
+  const costMap = new Map<string, number>();
+
+  for (const item of prodsCatalog) {
+    const cost = Math.max(0, Number(item.costPrice ?? (item as any).cost ?? 0));
+    const current = Math.max(0, Number(item.currentStock ?? (item as any).stock ?? 0));
+    stockFinalMap.set(item.id, current);
+    stockInicialMap.set(item.id, current);
+    costMap.set(item.id, cost);
+  }
+
+  // Rollback de movimientos posteriores al fin del período (para que periodos históricos no usen stock actual)
+  for (const m of allMovements) {
+    if (m.fecha > finIso) {
+      const cur = stockFinalMap.get(m.producto_id);
+      if (cur !== undefined) {
+        stockFinalMap.set(m.producto_id, cur - m.cantidad_entrada + m.cantidad_salida);
+      }
+    }
+  }
+
+  // Inicializar stock de inicio de período desde el stock al cierre
+  for (const [id, st] of stockFinalMap.entries()) {
+    stockInicialMap.set(id, st);
+  }
+
+  // Rollback de movimientos ocurridos dentro del período para determinar con cuánto inició el período
+  for (const m of allMovements) {
+    if (m.fecha >= inicioIso && m.fecha <= finIso) {
+      const cur = stockInicialMap.get(m.producto_id);
+      if (cur !== undefined) {
+        stockInicialMap.set(m.producto_id, cur - m.cantidad_entrada + m.cantidad_salida);
+      }
+    }
+  }
+
+  // Valuación financiera de inventarios al costo
+  let totalInvFinal = 0;
+  for (const [id, st] of stockFinalMap.entries()) {
+    const cost = costMap.get(id) || 0;
+    totalInvFinal += Math.max(0, st) * cost;
+  }
+
+  let totalInvInicial = 0;
+  for (const [id, st] of stockInicialMap.entries()) {
+    const cost = costMap.get(id) || 0;
+    totalInvInicial += Math.max(0, st) * cost;
+  }
 
   // 2. Calcular Compras del período al costo
   let comprasPeriodo = 0;
@@ -244,12 +328,15 @@ export async function informeGananciasPerdidas(p: PeriodoInforme): Promise<Infor
     }
   }
 
-  // 4. Integración contable:
-  // Inventario inicial + Compras - Inventario final = Costo de ventas
-  // => Inventario inicial = Costo de ventas + Inventario final - Compras
   ventasSum = Math.round(ventasSum * 100) / 100;
   const costoVentas = Math.round(costo * 100) / 100;
-  const inventarioInicial = Math.max(0, Math.round((inventarioFinal + costoVentas - comprasPeriodo) * 100) / 100);
+
+  const inventarioFinal = Math.round(totalInvFinal * 100) / 100;
+  // Si no hay movimientos históricos para calcular inventario inicial, usar identidad contable
+  const inventarioInicial =
+    totalInvInicial > 0
+      ? Math.round(totalInvInicial * 100) / 100
+      : Math.max(0, Math.round((inventarioFinal + costoVentas - comprasPeriodo) * 100) / 100);
 
   const gananciaBruta = Math.round((ventasSum - costoVentas) * 100) / 100;
   const payments = [...byPay.entries()].map(([name, value]) => ({

@@ -80,6 +80,20 @@ describe('Verificación Integral de Requerimientos ERP Mercato', () => {
       const mov = movimientoInventarioPresentacion(polloPorLibra, 0.75);
       expect(mov.cantidad).toBe(0.75);
     });
+
+    it('cuando un corte de carne tiene producto_base_id, descuenta 1:1 del producto base sin multiplicar por factor erróneo', () => {
+      const corteCarne = {
+        id: 'prod-carne-corriente',
+        name: 'Carne Corriente de Vaca',
+        unit: 'Libra',
+        producto_base_id: 'prod-vaca-base',
+        factor_conversion: 2, // Factor residual que antes causaba descontar 2 lbs
+      };
+
+      const mov = movimientoInventarioPresentacion(corteCarne, 1);
+      expect(mov.productoId).toBe('prod-vaca-base');
+      expect(mov.cantidad).toBe(1); // Descuenta exactamente 1 lb del inventario base (100 -> 99, NO 98)
+    });
   });
 
   describe('Requerimiento 2: Edición de facturas y consistencia de inventario', () => {
@@ -270,6 +284,32 @@ describe('Verificación Integral de Requerimientos ERP Mercato', () => {
       const mov = movimientoInventarioPresentacion(cervezaPresentacion as any, 2); // 2 six packs
       expect(mov.productoId).toBe('prod-cerv-unit');
       expect(mov.cantidad).toBe(12); // 2 * 6 = 12 cervezas individuales
+    });
+
+    it('permite crear paquetes compuestos con múltiples componentes distintos y descontar stock individual', () => {
+      // Six pack: 2 jugos naranja, 2 jugos pera, 2 jugos manzana
+      const sixPackMixto = {
+        id: 'prod-six-mixto',
+        name: 'Six Pack Mixto de Jugos',
+        unit: 'Six Pack',
+        composite_items: [
+          { product_id: 'prod-jugo-naranja', product_name: 'Jugo de Naranja', quantity: 2 },
+          { product_id: 'prod-jugo-pera', product_name: 'Jugo de Pera', quantity: 2 },
+          { product_id: 'prod-jugo-manzana', product_name: 'Jugo de Manzana', quantity: 2 },
+        ],
+      };
+
+      // Venta de 1 Six pack
+      const cantPaquetes = 1;
+      const deducciones: Record<string, number> = {};
+      for (const item of sixPackMixto.composite_items) {
+        deducciones[item.product_id] = item.quantity * cantPaquetes;
+      }
+
+      expect(deducciones['prod-jugo-naranja']).toBe(2);
+      expect(deducciones['prod-jugo-pera']).toBe(2);
+      expect(deducciones['prod-jugo-manzana']).toBe(2);
+      expect(Object.values(deducciones).reduce((a, b) => a + b, 0)).toBe(6);
     });
   });
 

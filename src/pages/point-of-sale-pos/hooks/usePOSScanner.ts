@@ -618,8 +618,9 @@ export function usePOSScanner({
 
       const allProds = [...storeProducts, ...demoExtras];
       const qLower = q.toLowerCase();
-
       const upperQ = q.toUpperCase();
+
+      // 1. Búsqueda por código de barras, SKU o código de balanza exacto
       let matchedProd = allProds.find((p) => {
         const b = String(p.barcode ?? '').trim().toUpperCase();
         const s = String(p.sku ?? '').trim().toUpperCase();
@@ -630,22 +631,50 @@ export function usePOSScanner({
         matchedProd = allProds.find((p) => productMatchesScanCode(p, q));
       }
 
+      // 2. Búsqueda por texto (nombre / término clave) con validación estricta de producto único vs múltiples
       if (!matchedProd) {
-        matchedProd = allProds.find((p) => (p.name || '').toLowerCase() === qLower);
-      }
+        // Coincidencia exacta por nombre
+        const exactNameMatches = allProds.filter((p) => (p.name || '').toLowerCase() === qLower);
+        if (exactNameMatches.length === 1) {
+          matchedProd = exactNameMatches[0];
+        } else if (exactNameMatches.length > 1) {
+          toast.info(
+            `Se encontraron ${exactNameMatches.length} productos con "${q}". Selecciona el producto deseado en el catálogo.`
+          );
+          setSearchQuery(q);
+          return false;
+        } else {
+          // Coincidencia que inicia con el término
+          const prefixMatches = allProds.filter((p) => (p.name || '').toLowerCase().startsWith(qLower));
+          if (prefixMatches.length === 1) {
+            matchedProd = prefixMatches[0];
+          } else if (prefixMatches.length > 1) {
+            toast.info(
+              `Se encontraron ${prefixMatches.length} productos que coinciden con "${q}". Selecciona uno en el catálogo.`
+            );
+            setSearchQuery(q);
+            return false;
+          } else {
+            // Coincidencia parcial que contiene el término (ej: "Soft" en "Carne Soft")
+            const partialMatches = allProds.filter(
+              (p) =>
+                (p.name || '').toLowerCase().includes(qLower) ||
+                (p.barcode && p.barcode.toLowerCase().includes(qLower)) ||
+                (p.sku && p.sku.toLowerCase().includes(qLower)) ||
+                (p.plu && p.plu.toLowerCase().includes(qLower))
+            );
 
-      if (!matchedProd) {
-        matchedProd = allProds.find((p) => (p.name || '').toLowerCase().startsWith(qLower));
-      }
-
-      if (!matchedProd) {
-        matchedProd = allProds.find(
-          (p) =>
-            p.barcode.toLowerCase().includes(qLower) ||
-            p.sku.toLowerCase().includes(qLower) ||
-            (p.plu && p.plu.toLowerCase().includes(qLower)) ||
-            (p.name || '').toLowerCase().includes(qLower)
-        );
+            if (partialMatches.length === 1) {
+              matchedProd = partialMatches[0];
+            } else if (partialMatches.length > 1) {
+              toast.info(
+                `Se encontraron ${partialMatches.length} productos que coinciden con "${q}". Selecciona uno en el catálogo.`
+              );
+              setSearchQuery(q);
+              return false;
+            }
+          }
+        }
       }
 
       if (matchedProd) {
@@ -757,12 +786,21 @@ export function usePOSScanner({
       );
 
       if (!matchedCombo) {
-        matchedCombo = activeCombos.find(
+        const comboMatches = activeCombos.filter(
           (c) =>
             c.name.toLowerCase().includes(qLower) ||
             c.code.toLowerCase().includes(qLower) ||
             (c.barcode && c.barcode.toLowerCase() === qLower)
         );
+        if (comboMatches.length === 1) {
+          matchedCombo = comboMatches[0];
+        } else if (comboMatches.length > 1) {
+          toast.info(
+            `Se encontraron ${comboMatches.length} combos que coinciden con "${q}". Selecciona uno en el catálogo.`
+          );
+          setSearchQuery(q);
+          return false;
+        }
       }
 
       if (matchedCombo) {
@@ -792,7 +830,7 @@ export function usePOSScanner({
         return true;
       }
 
-      toast.error(`No se encontró producto ni combo con SKU o código: "${q}"`);
+      toast.error(`No se encontró ningún producto ni combo con: "${q}"`);
       return keepCodeSelected();
     },
     [
