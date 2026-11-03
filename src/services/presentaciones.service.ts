@@ -169,6 +169,25 @@ export function movimientoInventarioPresentacion(
     // El inventario reside en el producto base y se descuenta exactamente la cantidad fraccionaria pesada (1:1),
     // NUNCA multiplicando por factor de empaque residual ni descontando doble.
     if (isWeight) {
+      const factor = Number(producto.factor_conversion || 1);
+      const isDirectWeightUnit = ['lb', 'lbs', 'libra', 'libras', 'kg', 'kgs', 'kilogramo', 'kilogramos', 'g', 'gramo', 'gramos', 'oz', 'onza', 'onzas'].includes(unitLower);
+
+      // Si el producto se vende directamente por peso (ej. libra de corte corriente), descuenta 1:1
+      if (isDirectWeightUnit && factor <= 1) {
+        return {
+          productoId: baseId,
+          cantidad: Number(cantidad || 0),
+        };
+      }
+
+      // Si es una presentación comercial vinculada a un producto base por peso (ej: Paquete / Porción de 2 o 5 libras):
+      if (factor > 1 && !isDirectWeightUnit) {
+        return {
+          productoId: baseId,
+          cantidad: convertirAUnidadBase(cantidad, factor),
+        };
+      }
+
       return {
         productoId: baseId,
         cantidad: Number(cantidad || 0),

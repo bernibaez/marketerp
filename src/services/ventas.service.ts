@@ -512,14 +512,16 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
         if (Array.isArray(compositeItems) && compositeItems.length > 0) {
           // Descontar cada componente del paquete compuesto / six pack mixto
           for (const ci of compositeItems) {
-            const baseProd = getStoredProducts().find((p) => p.id === ci.productId);
+            const compProdId = ci.product_id || (ci as any).productId;
+            if (!compProdId) continue;
+            const baseProd = getStoredProducts().find((p) => p.id === compProdId);
             const stockPrev = baseProd?.currentStock ?? 0;
             const cantDeduct = Math.round(Number(ci.quantity || 1) * Number(item.cantidad || 1) * 1000) / 1000;
-            updateProductStockInStore(ci.productId, -cantDeduct);
+            updateProductStockInStore(compProdId, -cantDeduct);
 
             registrarMovimientoInventario({
-              producto_id: ci.productId,
-              producto_nombre: baseProd?.name || ci.name || 'Componente paquete',
+              producto_id: compProdId,
+              producto_nombre: baseProd?.name || ci.product_name || (ci as any).name || 'Componente paquete',
               tipo: 'Venta',
               cantidad_salida: cantDeduct,
               stock_anterior: stockPrev,
@@ -1421,6 +1423,9 @@ export async function anularVenta(ventaId: string, motivo: string = 'Anulación'
   } catch {
     // ignore
   }
+  if (!currentSale) {
+    currentSale = getLocalVentas().find((v) => v.id === ventaId) ?? null;
+  }
 
   // 1. Revertir y restaurar stock en inventario para cada ítem de la factura anulada
   const items = currentSale?.detalle_ventas ?? [];
@@ -1431,12 +1436,28 @@ export async function anularVenta(ventaId: string, motivo: string = 'Anulación'
       const combo = getCombos().find((c) => c.id === it.combo_id);
       if (combo && Array.isArray(combo.items)) {
         for (const ci of combo.items) {
-          const baseProd = getStoredProducts().find((p) => p.id === ci.productId);
+          const compProdId = ci.productId || (ci as any).product_id;
+          if (!compProdId) continue;
+          const baseProd = getStoredProducts().find((p) => p.id === compProdId);
           const stockPrev = baseProd?.currentStock ?? 0;
           const returnQty = Math.round(Number((ci as any).quantity ?? (ci as any).qty ?? 1) * cant * 1000) / 1000;
-          updateProductStockInStore(ci.productId, returnQty);
+          updateProductStockInStore(compProdId, returnQty);
+
+          if (sb && isUUID(compProdId)) {
+            try {
+              const { data: pData } = await sb.from('productos').select('stock_actual').eq('id', compProdId).single();
+              if (pData) {
+                await sb.from('productos').update({
+                  stock_actual: round2(Number(pData.stock_actual || 0) + returnQty),
+                }).eq('id', compProdId);
+              }
+            } catch {
+              // ignore
+            }
+          }
+
           registrarMovimientoInventario({
-            producto_id: ci.productId,
+            producto_id: compProdId,
             producto_nombre: baseProd?.name || ci.name || 'Componente combo',
             tipo: 'Anulación',
             cantidad_entrada: returnQty,
@@ -1452,14 +1473,31 @@ export async function anularVenta(ventaId: string, motivo: string = 'Anulación'
       const compositeItems = (stored as any)?.composite_items;
 
       if (Array.isArray(compositeItems) && compositeItems.length > 0) {
+        // Paquete compuesto / six pack mixto: restaurar cada producto componente individual
         for (const ci of compositeItems) {
-          const baseProd = getStoredProducts().find((p) => p.id === ci.productId);
+          const compProdId = ci.product_id || (ci as any).productId;
+          if (!compProdId) continue;
+          const baseProd = getStoredProducts().find((p) => p.id === compProdId);
           const stockPrev = baseProd?.currentStock ?? 0;
           const returnQty = Math.round(Number(ci.quantity || 1) * cant * 1000) / 1000;
-          updateProductStockInStore(ci.productId, returnQty);
+          updateProductStockInStore(compProdId, returnQty);
+
+          if (sb && isUUID(compProdId)) {
+            try {
+              const { data: pData } = await sb.from('productos').select('stock_actual').eq('id', compProdId).single();
+              if (pData) {
+                await sb.from('productos').update({
+                  stock_actual: round2(Number(pData.stock_actual || 0) + returnQty),
+                }).eq('id', compProdId);
+              }
+            } catch {
+              // ignore
+            }
+          }
+
           registrarMovimientoInventario({
-            producto_id: ci.productId,
-            producto_nombre: baseProd?.name || ci.name || 'Componente paquete',
+            producto_id: compProdId,
+            producto_nombre: baseProd?.name || ci.product_name || (ci as any).name || 'Componente paquete',
             tipo: 'Anulación',
             cantidad_entrada: returnQty,
             stock_anterior: stockPrev,
@@ -1473,14 +1511,29 @@ export async function anularVenta(ventaId: string, motivo: string = 'Anulación'
         const mov = stored
           ? movimientoInventarioPresentacion(stored, cant)
           : { productoId: it.producto_id, cantidad: cant };
-        updateProductStockInStore(mov.productoId, mov.cantidad);
+        const returnQty = round2(mov.cantidad);
+        updateProductStockInStore(mov.productoId, returnQty);
+
+        if (sb && isUUID(mov.productoId)) {
+          try {
+            const { data: pData } = await sb.from('productos').select('stock_actual').eq('id', mov.productoId).single();
+            if (pData) {
+              await sb.from('productos').update({
+                stock_actual: round2(Number(pData.stock_actual || 0) + returnQty),
+              }).eq('id', mov.productoId);
+            }
+          } catch {
+            // ignore
+          }
+        }
+
         registrarMovimientoInventario({
           producto_id: mov.productoId,
           producto_nombre: stored?.name || it.nombre_item,
           tipo: 'Anulación',
-          cantidad_entrada: mov.cantidad,
+          cantidad_entrada: returnQty,
           stock_anterior: stockPrev,
-          stock_resultante: stockPrev + mov.cantidad,
+          stock_resultante: stockPrev + returnQty,
           documento_referencia: currentSale?.numero_factura || ventaId,
           motivo: `Restauración por anulación de factura: ${motivo}`,
         });
@@ -1493,25 +1546,29 @@ export async function anularVenta(ventaId: string, motivo: string = 'Anulación'
   );
   saveLocalVentas(list);
 
-  if (sb) {
+  if (sb && isUUID(ventaId)) {
     try {
       const { error } = await sb.rpc('anular_venta_pos', {
         p_venta_id: ventaId,
         p_motivo: motivo,
       });
-      if (!error) return;
+      if (error) {
+        await sb.from('ventas').update({ estado: 'anulada' }).eq('id', ventaId);
+      }
     } catch {
-      // Fallback a actualización directa
+      try {
+        await sb.from('ventas').update({ estado: 'anulada' }).eq('id', ventaId);
+      } catch {
+        // ignore
+      }
     }
-
-    const { error } = await sb
-      .from('ventas')
-      .update({ estado: 'anulada' })
-      .eq('id', ventaId);
-
-    if (error) throw error;
   }
+
+  invalidarCacheProductos();
 }
+
+/** Alias para eliminar o anular venta asegurando la recuperación completa de stock */
+export const eliminarVenta = anularVenta;
 
 export interface EditarVentaItem {
   id?: string;
@@ -1684,32 +1741,35 @@ export async function actualizarVenta(
       }
     }
 
-    if (!rpcSuccess) {
-      // Actualización directa si el RPC aún no está desplegado en base remota
-      const updateData: Record<string, unknown> = {
-        actualizado_en: new Date().toISOString(),
-      };
+    if (!rpcSuccess && isUUID(ventaId)) {
+      // Actualización directa segura en Supabase (solo campos existentes en ventas, sin actualizado_en que rompe RLS)
+      const updateData: Record<string, unknown> = {};
       if (payload.cliente_id !== undefined) updateData.cliente_id = isUUID(payload.cliente_id) ? payload.cliente_id : null;
       if (payload.metodo_pago !== undefined) updateData.metodo_pago = payload.metodo_pago;
-      if (payload.tipo_ncf !== undefined) updateData.tipo_ncf = payload.tipo_ncf;
-      if (payload.ncf !== undefined) updateData.ncf = payload.ncf;
-      if (payload.subtotal !== undefined) updateData.subtotal = payload.subtotal;
-      if (payload.monto_impuesto !== undefined) updateData.monto_impuesto = payload.monto_impuesto;
-      if (payload.monto_descuento !== undefined) updateData.monto_descuento = payload.monto_descuento;
-      if (payload.monto_total !== undefined) updateData.monto_total = payload.monto_total;
-      if (payload.costo_total !== undefined) updateData.costo_total = payload.costo_total;
+      if (payload.tipo_ncf !== undefined) updateData.tipo_ncf = payload.tipo_ncf || null;
+      if (payload.ncf !== undefined) updateData.ncf = payload.ncf || null;
+      if (payload.subtotal !== undefined) updateData.subtotal = round2(payload.subtotal);
+      if (payload.monto_impuesto !== undefined) updateData.monto_impuesto = round2(payload.monto_impuesto);
+      if (payload.monto_descuento !== undefined) updateData.monto_descuento = round2(payload.monto_descuento);
+      if (payload.monto_total !== undefined) updateData.monto_total = round2(payload.monto_total);
+      if (payload.costo_total !== undefined) updateData.costo_total = round2(payload.costo_total);
       if (payload.estado !== undefined) updateData.estado = payload.estado;
 
-      const { error: updateErr } = await sb.from('ventas').update(updateData).eq('id', ventaId);
-      if (updateErr) throw updateErr;
+      try {
+        const { error: updateErr } = await sb.from('ventas').update(updateData).eq('id', ventaId);
+        if (updateErr) {
+          console.warn('Advertencia al actualizar venta en Supabase:', updateErr.message);
+        }
+      } catch (err) {
+        console.warn('Error al conectar con Supabase para actualizar venta:', err);
+      }
 
       // Actualizar detalle_ventas en Supabase si se pasaron items
       if (payload.items && payload.items.length > 0) {
         try {
           await sb.from('detalle_ventas').delete().eq('venta_id', ventaId);
           await sb.from('detalle_ventas').insert(
-            payload.items.map((it, idx) => ({
-              id: `${ventaId}-item-${Date.now()}-${idx + 1}`,
+            payload.items.map((it) => ({
               venta_id: ventaId,
               producto_id: isUUID(it.producto_id) ? it.producto_id : null,
               combo_id: isUUID(it.combo_id) ? it.combo_id : null,
@@ -1722,26 +1782,29 @@ export async function actualizarVenta(
               subtotal: round2(it.subtotal),
             }))
           );
-        } catch {
-          // ignore if table constraints prevent direct delete/insert
+        } catch (err) {
+          console.warn('Advertencia al actualizar detalle_ventas en Supabase:', err);
         }
       }
 
       // Actualizar stock en Supabase para cada delta
       for (const d of deltas) {
-        try {
-          const { data: pData } = await sb.from('productos').select('stock_actual').eq('id', d.producto_id).single();
-          if (pData) {
-            await sb.from('productos').update({
-              stock_actual: Number(pData.stock_actual || 0) - d.delta,
-              actualizado_en: new Date().toISOString(),
-            }).eq('id', d.producto_id);
+        if (isUUID(d.producto_id)) {
+          try {
+            const { data: pData } = await sb.from('productos').select('stock_actual').eq('id', d.producto_id).single();
+            if (pData) {
+              await sb.from('productos').update({
+                stock_actual: round2(Number(pData.stock_actual || 0) - d.delta),
+              }).eq('id', d.producto_id);
+            }
+          } catch {
+            // ignore
           }
-        } catch {
-          // ignore
         }
       }
     }
+
+    invalidarCacheProductos();
   }
 
   // 4. Actualizar metadata y almacenamiento local

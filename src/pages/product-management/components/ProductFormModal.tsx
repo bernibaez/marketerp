@@ -148,10 +148,11 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
   const [baseProductResolved, setBaseProductResolved] = useState<Product | null>(null);
   const [remoteBaseProducts, setRemoteBaseProducts] = useState<Product[]>([]);
   const [isSearchingBase, setIsSearchingBase] = useState(false);
+  const [isSearchingComp, setIsSearchingComp] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const [conversionFactorText, setConversionFactorText] = useState('');
-  const conversionFactor = Math.max(1, Math.floor(Number(conversionFactorText) || 0) || 1);
-  const setConversionFactor = (n: number) => setConversionFactorText(n > 1 ? String(n) : '');
+  const conversionFactor = Math.max(0.001, parseFloat(conversionFactorText) || 1);
+  const setConversionFactor = (n: number) => setConversionFactorText(n > 0 ? String(n) : '');
   const [baseProductSearch, setBaseProductSearch] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
@@ -161,6 +162,7 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
     Array<{ product_id: string; product_name: string; quantity: number; cost?: number }>
   >([]);
   const [compSearchQuery, setCompSearchQuery] = useState('');
+  const [isCompSearchOpen, setIsCompSearchOpen] = useState(false);
 
   const {
     register,
@@ -241,7 +243,7 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
         setPackMode('single');
         setBaseProductId(product.producto_base_id || '');
         setConversionFactorText(
-          product.factor_conversion && product.factor_conversion > 1
+          product.factor_conversion && product.factor_conversion > 0
             ? String(product.factor_conversion)
             : ''
         );
@@ -414,8 +416,8 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
           toast.error(`Selecciona el producto que contiene este ${packLabel}, o desmarca la vinculación.`);
           return;
         }
-        if (!isWeight && conversionFactor < 1) {
-          toast.error(`Indica cuántas unidades van en cada ${packLabel}.`);
+        if (conversionFactor <= 0) {
+          toast.error(`Indica cuántas unidades o libras van en cada ${packLabel}.`);
           return;
         }
       } else {
@@ -486,6 +488,7 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
     const saved: Product = {
       id: product?.id ?? `prod-${Date.now()}`,
       ...data,
+      supplier: isEdit ? (product?.supplier || data.supplier || '') : (data.supplier || ''),
       sku: finalSku,
       category: finalCategory,
       brand: finalBrand,
@@ -507,7 +510,7 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
       generateScaleBarcode: weightState.generateScaleBarcode,
       isWeightProduct: isWeight,
       producto_base_id: isPresentation && packMode === 'single' && baseProductId ? baseProductId : null,
-      factor_conversion: isPresentation && packMode === 'single' && baseProductId ? (isWeight ? 1 : Math.max(1, Number(conversionFactor) || 1)) : 1,
+      factor_conversion: isPresentation && packMode === 'single' && baseProductId ? conversionFactor : 1,
       unidad_base: isPresentation && packMode === 'single' && selectedBaseProduct ? selectedBaseProduct.unit : undefined,
       composite_items: isPresentation && packMode === 'composite' && compositeItems.length > 0
         ? compositeItems.map((ci) => ({ product_id: ci.product_id, product_name: ci.product_name, quantity: ci.quantity }))
@@ -665,6 +668,37 @@ useEffect(() => {
   };
 }, [baseProductSearch, isPresentation, isSearchOpen, product?.id]);
 
+// Búsqueda en tiempo real contra catálogo de Supabase para paquetes compuestos y six packs
+useEffect(() => {
+  if (!isPresentation || packMode !== 'composite') return;
+  const term = compSearchQuery.trim();
+  if (!term) return;
+
+  setIsSearchingComp(true);
+  const timer = setTimeout(() => {
+    let isMounted = true;
+    buscarProductosParaVinculacion(term, product?.id)
+      .then((list) => {
+        if (isMounted) {
+          const mapped = list.map(productoAUi);
+          setRemoteBaseProducts((prev) => {
+            const map = new Map<string, Product>();
+            for (const p of prev) map.set(p.id, p);
+            for (const p of mapped) map.set(p.id, p);
+            return Array.from(map.values());
+          });
+        }
+      })
+      .finally(() => {
+        if (isMounted) setIsSearchingComp(false);
+      });
+  }, 180);
+
+  return () => {
+    clearTimeout(timer);
+  };
+}, [compSearchQuery, isPresentation, packMode, product?.id]);
+
 // Cerrar selector al hacer click fuera
 useEffect(() => {
   if (!isSearchOpen) return;
@@ -780,6 +814,9 @@ const handleUnitSelection = (val: string) => {
     const valNorm = val.toLowerCase();
     if (valNorm.includes('six')) {
       setConversionFactorText('6');
+      if (compositeItems.length > 0 || !baseProductId) {
+        setPackMode('composite');
+      }
     } else if (valNorm.includes('docena')) {
       setConversionFactorText('12');
     }
@@ -798,8 +835,12 @@ const handleUnitSelection = (val: string) => {
 };
 
 const filteredCompProducts = React.useMemo(() => {
-  if (!compSearchQuery.trim()) return [];
   const q = compSearchQuery.toLowerCase().trim();
+  if (!q) {
+    return combinedBaseProducts
+      .filter((p) => p.id !== product?.id)
+      .slice(0, 20);
+  }
   return combinedBaseProducts
     .filter((p) => {
       if (p.id === product?.id) return false;
@@ -807,15 +848,21 @@ const filteredCompProducts = React.useMemo(() => {
         p.name.toLowerCase().includes(q) ||
         (p.sku && p.sku.toLowerCase().includes(q)) ||
         (p.barcode && p.barcode.includes(q)) ||
-        (p.category && p.category.toLowerCase().includes(q))
+        (p.category && p.category.toLowerCase().includes(q)) ||
+        (p.brand && p.brand.toLowerCase().includes(q))
       );
     })
-    .slice(0, 15);
+    .slice(0, 25);
 }, [combinedBaseProducts, compSearchQuery, product?.id]);
 
 const handleAddCompositeItem = (p: Product) => {
   if (compositeItems.some((ci) => ci.product_id === p.id)) {
-    toast.info(`"${p.name}" ya está en la lista. Puedes ajustar su cantidad.`);
+    const existing = compositeItems.find((ci) => ci.product_id === p.id);
+    const newQty = (existing?.quantity || 1) + 1;
+    setCompositeItems((prev) =>
+      prev.map((ci) => (ci.product_id === p.id ? { ...ci, quantity: newQty } : ci))
+    );
+    toast.success(`+1 "${p.name}" agregado (Total: ${newQty})`);
     return;
   }
   setCompositeItems((prev) => [
@@ -827,6 +874,7 @@ const handleAddCompositeItem = (p: Product) => {
       cost: p.costPrice || 0,
     },
   ]);
+  toast.success(`"${p.name}" agregado al paquete`);
   setCompSearchQuery('');
 };
 
@@ -1065,34 +1113,36 @@ return (
               </label>
             </div>
 
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label htmlFor="supplier" className="block text-sm font-semibold text-foreground">
-                  Proveedor Registrado <span className="text-danger ml-0.5">*</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQuickAddType('supplier');
-                    setQuickAddName('');
-                    setQuickAddExtra('');
-                  }}
-                  className="text-xs text-primary font-bold hover:underline inline-flex items-center gap-0.5"
-                >
-                  + Nuevo
-                </button>
+            {!isEdit && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="supplier" className="block text-sm font-semibold text-foreground">
+                    Proveedor Registrado <span className="text-danger ml-0.5">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuickAddType('supplier');
+                      setQuickAddName('');
+                      setQuickAddExtra('');
+                    }}
+                    className="text-xs text-primary font-bold hover:underline inline-flex items-center gap-0.5"
+                  >
+                    + Nuevo
+                  </button>
+                </div>
+                <select id="supplier" {...register('supplier', { required: !isEdit })} className="input-field">
+                  {supplierOptions.length === 0 ? (
+                    <option value="">(No hay proveedores registrados)</option>
+                  ) : (
+                    supplierOptions.map((s) => (
+                      <option key={`sup-opt-${s}`} value={s}>{s}</option>
+                    ))
+                  )}
+                </select>
+                {errors.supplier && <p className="text-sm text-danger">{errors.supplier.message}</p>}
               </div>
-              <select id="supplier" {...register('supplier', { required: true })} className="input-field">
-                {supplierOptions.length === 0 ? (
-                  <option value="">(No hay proveedores registrados)</option>
-                ) : (
-                  supplierOptions.map((s) => (
-                    <option key={`sup-opt-${s}`} value={s}>{s}</option>
-                  ))
-                )}
-              </select>
-              {errors.supplier && <p className="text-sm text-danger">{errors.supplier.message}</p>}
-            </div>
+            )}
 
             <FormField label="Estado" name="status" error={errors.status?.message} required>
               <select id="status" {...register('status', { required: true })} className="input-field">
@@ -1293,17 +1343,17 @@ return (
 
                     <div>
                       <label className="block text-xs font-medium text-foreground mb-1">
-                        Unidades base por cada {selectedUnit} (Factor)
+                        Unidades / Libras base por cada {selectedUnit} (Factor)
                       </label>
                       <input
                         type="number"
-                        min={1}
-                        step={1}
-                        inputMode="numeric"
+                        min={0.001}
+                        step="any"
+                        inputMode="decimal"
                         className="input-field text-xs w-full font-mono"
-                        placeholder={`Ej: ${selectedUnit === 'Fardo' ? '20' : selectedUnit === 'Cartón' ? '2' : '12'}`}
+                        placeholder={`Ej: ${selectedUnit === 'Fardo' ? '20' : selectedUnit === 'Cartón' ? '2' : selectedUnit === 'Six Pack' ? '6' : '1'}`}
                         value={conversionFactorText}
-                        onChange={(e) => setConversionFactorText(e.target.value.replace(/[^\d]/g, ''))}
+                        onChange={(e) => setConversionFactorText(e.target.value.replace(/[^0-9.]/g, ''))}
                       />
                     </div>
 
@@ -1326,7 +1376,7 @@ return (
                   /* Modo Paquete Compuesto / Six Pack Mixto */
                   <div className="space-y-3 pt-1">
                     <p className="text-xs text-muted-foreground">
-                      Agrega los diferentes productos que componen este {selectedUnit} (ej. 2 Jugos de naranja, 2 Jugos de pera, 2 Jugos de manzana). Al facturarse, se descontará automáticamente el stock de cada producto componente.
+                      Agrega los diferentes productos que componen este {selectedUnit} (ej. 2 Jugos de naranja, 2 Jugos de pera, 2 Jugos de manzana). Puedes elegir más de un producto diferente para armar tu Six Pack o Combo.
                     </p>
 
                     <div className="space-y-2">
@@ -1335,43 +1385,78 @@ return (
                         <input
                           type="text"
                           value={compSearchQuery}
-                          onChange={(e) => setCompSearchQuery(e.target.value)}
-                          placeholder="Buscar producto por nombre, SKU o categoría para agregar..."
-                          className="input-field pl-8 pr-8 text-xs w-full font-medium"
+                          onFocus={() => setIsCompSearchOpen(true)}
+                          onChange={(e) => {
+                            setCompSearchQuery(e.target.value);
+                            setIsCompSearchOpen(true);
+                          }}
+                          placeholder="Buscar producto por nombre o seleccionar del catálogo..."
+                          className="input-field pl-8 pr-16 text-xs w-full font-medium"
                         />
-                        {compSearchQuery && (
+                        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                          {isSearchingComp && <Loader2 size={13} className="animate-spin text-primary" />}
+                          {compSearchQuery && (
+                            <button
+                              type="button"
+                              onClick={() => setCompSearchQuery('')}
+                              className="text-muted-foreground hover:text-foreground p-0.5"
+                              title="Limpiar"
+                            >
+                              <X size={13} />
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() => setCompSearchQuery('')}
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                            onClick={() => setIsCompSearchOpen(!isCompSearchOpen)}
+                            className="text-[10px] font-semibold text-primary hover:underline px-1"
                           >
-                            <X size={13} />
+                            {isCompSearchOpen ? 'Cerrar' : 'Ver todos'}
                           </button>
-                        )}
+                        </div>
                       </div>
 
-                      {compSearchQuery.trim() && (
-                        <div className="max-h-44 overflow-y-auto bg-card border border-border rounded-xl shadow-lg divide-y divide-border/50 text-xs">
+                      {isCompSearchOpen && (
+                        <div className="max-h-52 overflow-y-auto bg-card border border-border rounded-xl shadow-lg divide-y divide-border/50 text-xs">
+                          <div className="p-1.5 px-3 bg-secondary/40 text-[10px] font-bold text-muted-foreground uppercase flex items-center justify-between sticky top-0 backdrop-blur-xs">
+                            <span>{compSearchQuery ? `Resultados para "${compSearchQuery}"` : 'Productos Disponibles para Agregar'}</span>
+                            <button
+                              type="button"
+                              onClick={() => setIsCompSearchOpen(false)}
+                              className="text-muted-foreground hover:text-foreground text-[10px]"
+                            >
+                              ✕
+                            </button>
+                          </div>
                           {filteredCompProducts.length === 0 ? (
-                            <div className="p-3 text-center text-muted-foreground">No se encontraron productos con "{compSearchQuery}"</div>
+                            <div className="p-3 text-center text-muted-foreground">
+                              {isSearchingComp ? 'Buscando en base de datos...' : `No se encontraron productos con "${compSearchQuery}"`}
+                            </div>
                           ) : (
-                            filteredCompProducts.map((p) => (
-                              <div key={p.id} className="p-2 flex items-center justify-between hover:bg-secondary/30">
-                                <div className="min-w-0 pr-2">
-                                  <span className="font-semibold text-foreground block truncate">{p.name}</span>
-                                  <span className="text-[11px] text-muted-foreground">
-                                    Stock: <strong className="text-primary">{p.currentStock} {p.unit}</strong> • Costo: RD$ {p.costPrice}
-                                  </span>
+                            filteredCompProducts.map((p) => {
+                              const alreadyAdded = compositeItems.find((ci) => ci.product_id === p.id);
+                              return (
+                                <div key={p.id} className="p-2 px-3 flex items-center justify-between hover:bg-secondary/30 transition-colors">
+                                  <div className="min-w-0 pr-2">
+                                    <span className="font-semibold text-foreground block truncate">{p.name}</span>
+                                    <span className="text-[11px] text-muted-foreground">
+                                      Stock: <strong className="text-primary">{p.currentStock} {p.unit}</strong> • Costo: RD$ {p.costPrice}
+                                      {alreadyAdded && (
+                                        <span className="ml-2 text-emerald-600 dark:text-emerald-400 font-bold">
+                                          ({alreadyAdded.quantity} en paquete)
+                                        </span>
+                                      )}
+                                    </span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddCompositeItem(p)}
+                                    className="btn-primary text-[11px] px-2.5 py-1 font-semibold flex items-center gap-1 shrink-0"
+                                  >
+                                    <Plus size={12} /> {alreadyAdded ? '+1 más' : 'Agregar'}
+                                  </button>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={() => handleAddCompositeItem(p)}
-                                  className="btn-primary text-[11px] px-2.5 py-1 font-semibold flex items-center gap-1 shrink-0"
-                                >
-                                  <Plus size={12} /> Agregar
-                                </button>
-                              </div>
-                            ))
+                              );
+                            })
                           )}
                         </div>
                       )}
@@ -1386,7 +1471,7 @@ return (
 
                       {compositeItems.length === 0 ? (
                         <div className="p-4 text-center text-xs text-muted-foreground">
-                          No has agregado componentes aún. Busca productos arriba para incluirlos en el {selectedUnit}.
+                          No has agregado componentes aún. Puedes seleccionar más de un producto del catálogo arriba para incluirlo en el {selectedUnit}.
                         </div>
                       ) : (
                         <div className="divide-y divide-border/50">
@@ -1401,20 +1486,35 @@ return (
                                     Stock actual: <strong className="text-foreground">{stockAvail}</strong> • Costo: RD$ {ci.cost || 0}
                                   </div>
                                 </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <label className="text-[11px] text-muted-foreground">Cant:</label>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateCompositeQty(ci.product_id, Math.max(1, ci.quantity - 1))}
+                                    className="w-6 h-6 rounded-md bg-secondary hover:bg-secondary/80 flex items-center justify-center font-bold text-xs"
+                                    title="Restar 1"
+                                  >
+                                    -
+                                  </button>
                                   <input
                                     type="number"
                                     min={1}
                                     step={1}
                                     value={ci.quantity}
                                     onChange={(e) => handleUpdateCompositeQty(ci.product_id, Math.max(1, Number(e.target.value) || 1))}
-                                    className="input-field text-xs w-16 text-center font-mono py-1 px-1.5"
+                                    className="input-field text-xs w-12 text-center font-mono py-1 px-1"
                                   />
                                   <button
                                     type="button"
+                                    onClick={() => handleUpdateCompositeQty(ci.product_id, ci.quantity + 1)}
+                                    className="w-6 h-6 rounded-md bg-secondary hover:bg-secondary/80 flex items-center justify-center font-bold text-xs"
+                                    title="Sumar 1"
+                                  >
+                                    +
+                                  </button>
+                                  <button
+                                    type="button"
                                     onClick={() => handleRemoveCompositeItem(ci.product_id)}
-                                    className="text-muted-foreground hover:text-danger p-1 rounded-md transition-colors"
+                                    className="text-muted-foreground hover:text-danger p-1 rounded-md transition-colors ml-1"
                                     title="Eliminar del paquete"
                                   >
                                     <Trash2 size={14} />
@@ -1433,6 +1533,15 @@ return (
                         <div>
                           <span className="font-bold text-foreground">
                             Total componentes: {compositeItems.reduce((acc, c) => acc + c.quantity, 0)} unidades
+                            {selectedUnit.toLowerCase().includes('six') && (
+                              <span className={`ml-2 px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                                compositeItems.reduce((acc, c) => acc + c.quantity, 0) === 6
+                                  ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
+                                  : 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
+                              }`}>
+                                {compositeItems.reduce((acc, c) => acc + c.quantity, 0) === 6 ? '✓ 6/6 unidades exactas' : `${compositeItems.reduce((acc, c) => acc + c.quantity, 0)}/6 unidades`}
+                              </span>
+                            )}
                           </span>
                           <span className="text-muted-foreground ml-2">
                             • Costo sugerido: <strong className="text-foreground">RD$ {totalCompositeCost.toFixed(2)}</strong>
