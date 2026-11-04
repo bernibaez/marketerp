@@ -41,12 +41,21 @@ export default function ProductLabel({
   scale = 1,
   className = '',
 }: ProductLabelProps) {
-  // Dimensiones en milímetros
+  // Dimensiones en milímetros con soporte real Horizontal (ancho > alto) vs Vertical (alto > ancho)
   const baseWidth = size.id === 'custom' ? customWidthMm : size.widthMm;
   const baseHeight = size.id === 'custom' ? customHeightMm : size.heightMm;
 
-  const widthMm = orientation === 'landscape' ? Math.max(baseWidth, baseHeight) : baseWidth;
-  const heightMm = orientation === 'landscape' ? Math.min(baseWidth, baseHeight) : baseHeight;
+  const isLandscape = orientation === 'landscape';
+  const widthMm = size.isContinuous
+    ? baseWidth
+    : isLandscape
+      ? Math.max(baseWidth, baseHeight)
+      : Math.min(baseWidth, baseHeight);
+  const heightMm = size.isContinuous
+    ? (isLandscape ? Math.min(baseWidth, baseHeight) : Math.max(baseWidth, baseHeight, 60))
+    : isLandscape
+      ? Math.min(baseWidth, baseHeight)
+      : Math.max(baseWidth, baseHeight);
 
   // Código a renderizar (prioriza código de barras, luego sku, luego id)
   const rawCode = (product.barcode || product.sku || product.id || '').trim();

@@ -2,14 +2,14 @@ import React, { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X, Printer, Download, FileText, CheckCircle2, Building2, Copy, Check,
-  Receipt, ShieldCheck, Calendar, User, ArrowRight, Sparkles
+  Receipt, ShieldCheck, Calendar, User, ArrowRight, Sparkles, Minus, Plus
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { exportTableToPdf, formatMoneyPdf } from '@/lib/exportPdf';
 import type { FiscalInvoiceRecord } from '@/lib/ncfStore';
 import { NCF_TYPES } from '@/lib/ncfStore';
 import PrintableInvoice from './PrintableInvoice';
-import { getInvoiceSettings, type PrintFormat } from '@/lib/invoiceSettingsStore';
+import { getInvoiceSettings, type PrintFormat, type FontSizeOption } from '@/lib/invoiceSettingsStore';
 
 interface FiscalInvoiceModalProps {
   invoice: FiscalInvoiceRecord;
@@ -21,6 +21,8 @@ export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceMo
   const [copiedNcf, setCopiedNcf] = useState(false);
   // Leer el formato configurado en Configuración → Facturación como valor inicial
   const [viewFormat, setViewFormat] = useState<PrintFormat>(() => getInvoiceSettings().printFormat);
+  const [fontSizeOption, setFontSizeOption] = useState<FontSizeOption>(() => getInvoiceSettings().fontSizeOption || 'normal');
+  const [zoomScale, setZoomScale] = useState<number>(1.0);
 
   const ncfInfo = NCF_TYPES[invoice.ncfType];
 
@@ -148,6 +150,95 @@ export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceMo
               </button>
             </div>
 
+            {/* Selector de tamaño y zoom de letra térmico */}
+            <div className="flex items-center gap-1 p-1 bg-slate-200/60 dark:bg-slate-800 rounded-xl text-xs font-bold">
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 px-1 font-bold uppercase tracking-wider hidden sm:inline">
+                Letra:
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setFontSizeOption('compact');
+                  setZoomScale(0.88);
+                }}
+                className={`px-2 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
+                  fontSizeOption === 'compact'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+                title="Tamaño Compacto (88%)"
+              >
+                A-
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFontSizeOption('normal');
+                  setZoomScale(1.0);
+                }}
+                className={`px-2 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
+                  fontSizeOption === 'normal' && zoomScale === 1.0
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+                title="Tamaño Normal (100%)"
+              >
+                A
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFontSizeOption('large');
+                  setZoomScale(1.15);
+                }}
+                className={`px-2 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
+                  fontSizeOption === 'large'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+                title="Tamaño Grande (115%)"
+              >
+                A+
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFontSizeOption('xlarge');
+                  setZoomScale(1.30);
+                }}
+                className={`px-2 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
+                  fontSizeOption === 'xlarge'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+                title="Tamaño Extra Grande (130%)"
+              >
+                A++
+              </button>
+
+              <div className="h-3.5 w-px bg-slate-300 dark:bg-slate-700 my-auto mx-0.5" />
+
+              <button
+                type="button"
+                onClick={() => setZoomScale((z) => Math.max(0.75, Number((z - 0.05).toFixed(2))))}
+                className="p-1 rounded text-slate-500 hover:text-slate-900 hover:bg-white/50 transition cursor-pointer"
+                title="Reducir zoom (-5%)"
+              >
+                <Minus size={12} />
+              </button>
+              <span className="font-mono text-[10px] w-8 text-center font-bold text-slate-800 dark:text-slate-100 tabular-nums">
+                {Math.round(zoomScale * 100)}%
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoomScale((z) => Math.min(1.4, Number((z + 0.05).toFixed(2))))}
+                className="p-1 rounded text-slate-500 hover:text-slate-900 hover:bg-white/50 transition cursor-pointer"
+                title="Aumentar zoom (+5%)"
+              >
+                <Plus size={12} />
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={onClose}
@@ -161,6 +252,8 @@ export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceMo
         {/* Modal Body / Printable Invoice Display */}
         <div className="p-6 sm:p-8 overflow-y-auto print:p-0 print:overflow-visible print:h-auto print:max-h-none print:min-h-0 print:text-black">
           <PrintableInvoice
+            fontSizeOverride={fontSizeOption}
+            zoomScale={zoomScale}
             invoiceData={{
               invoiceNumber: invoice.numero_factura || invoice.ncf || invoice.id,
               isFiscal: true,

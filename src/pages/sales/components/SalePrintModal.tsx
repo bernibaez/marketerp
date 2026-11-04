@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Printer, Receipt, FileText, X, Download } from 'lucide-react';
+import { Printer, Receipt, FileText, X, Download, Minus, Plus } from 'lucide-react';
 import type { Cliente } from '@/types/database';
 import type { VentaConDetalle } from '@/services/ventas.service';
+import type { FontSizeOption } from '@/types/invoice';
 import PrintableInvoice from '@/components/PrintableInvoice';
 import { getInvoiceSettings, syncInvoiceSettingsFromSupabase, type PrintFormat } from '@/lib/invoiceSettingsStore';
 import { exportTableToPdf, formatMoneyPdf } from '@/lib/exportPdf';
@@ -23,6 +24,10 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
   const [printFormat, setPrintFormat] = useState<PrintFormat>(() => {
     return getInvoiceSettings().printFormat;
   });
+  const [fontSizeOption, setFontSizeOption] = useState<FontSizeOption>(() => {
+    return getInvoiceSettings().fontSizeOption || 'normal';
+  });
+  const [zoomScale, setZoomScale] = useState<number>(1.0);
 
   useEffect(() => {
     void syncInvoiceSettingsFromSupabase().then((s) => {
@@ -113,6 +118,96 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
                 <FileText size={12} /> Carta/A4
               </button>
             </div>
+
+            {/* Ajuste de Tamaño / Letra / Zoom térmico */}
+            <div className="flex items-center gap-1 p-0.5 bg-secondary rounded-lg text-xs font-semibold border border-border">
+              <span className="text-[10px] text-muted-foreground px-1 font-bold uppercase tracking-wider hidden sm:inline">
+                Letra:
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setFontSizeOption('compact');
+                  setZoomScale(0.88);
+                }}
+                className={`px-1.5 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
+                  fontSizeOption === 'compact'
+                    ? 'bg-card text-foreground font-bold shadow-2xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                title="Tamaño Compacto (88%)"
+              >
+                A-
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFontSizeOption('normal');
+                  setZoomScale(1.0);
+                }}
+                className={`px-1.5 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
+                  fontSizeOption === 'normal' && zoomScale === 1.0
+                    ? 'bg-card text-foreground font-bold shadow-2xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                title="Tamaño Normal (100%)"
+              >
+                A
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFontSizeOption('large');
+                  setZoomScale(1.15);
+                }}
+                className={`px-1.5 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
+                  fontSizeOption === 'large'
+                    ? 'bg-card text-foreground font-bold shadow-2xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                title="Tamaño Grande (115%)"
+              >
+                A+
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFontSizeOption('xlarge');
+                  setZoomScale(1.30);
+                }}
+                className={`px-1.5 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
+                  fontSizeOption === 'xlarge'
+                    ? 'bg-card text-foreground font-bold shadow-2xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                title="Tamaño Extra Grande (130%)"
+              >
+                A++
+              </button>
+
+              <div className="h-3.5 w-px bg-border my-auto mx-0.5" />
+
+              <button
+                type="button"
+                onClick={() => setZoomScale((z) => Math.max(0.75, Number((z - 0.05).toFixed(2))))}
+                className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-card transition cursor-pointer"
+                title="Reducir zoom (-5%)"
+              >
+                <Minus size={11} />
+              </button>
+              <span className="font-mono text-[10px] w-8 text-center font-bold text-foreground tabular-nums">
+                {Math.round(zoomScale * 100)}%
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoomScale((z) => Math.min(1.4, Number((z + 0.05).toFixed(2))))}
+                className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-card transition cursor-pointer"
+                title="Aumentar zoom (+5%)"
+              >
+                <Plus size={11} />
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={onClose}
@@ -131,6 +226,8 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
             </div>
           ) : (
             <PrintableInvoice
+              fontSizeOverride={fontSizeOption}
+              zoomScale={zoomScale}
               invoiceData={{
                 invoiceNumber: sale.numero_factura,
                 isFiscal: Boolean(sale.ncf),

@@ -154,28 +154,50 @@ export function InvoiceDesignForm({
             <label className="text-xs text-slate-700 dark:text-slate-300 block mb-1 font-medium">
               Tamaño de letra térmico
             </label>
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+              <button
+                type="button"
+                onClick={() => onFieldChange('fontSizeOption', 'compact')}
+                className={`py-1.5 px-2 text-xs rounded-lg border text-center transition cursor-pointer font-medium ${
+                  settings.fontSizeOption === 'compact'
+                    ? 'border-slate-900 dark:border-white font-bold bg-slate-900 dark:bg-white text-white dark:text-slate-900'
+                    : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                Compacto
+              </button>
               <button
                 type="button"
                 onClick={() => onFieldChange('fontSizeOption', 'normal')}
-                className={`py-1.5 px-3 text-xs rounded-lg border text-center transition cursor-pointer font-medium ${
+                className={`py-1.5 px-2 text-xs rounded-lg border text-center transition cursor-pointer font-medium ${
                   (settings.fontSizeOption || 'normal') === 'normal'
                     ? 'border-slate-900 dark:border-white font-bold bg-slate-900 dark:bg-white text-white dark:text-slate-900'
                     : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
                 }`}
               >
-                Normal (~7.5 pt)
+                Normal
               </button>
               <button
                 type="button"
                 onClick={() => onFieldChange('fontSizeOption', 'large')}
-                className={`py-1.5 px-3 text-xs rounded-lg border text-center transition cursor-pointer font-medium ${
+                className={`py-1.5 px-2 text-xs rounded-lg border text-center transition cursor-pointer font-medium ${
                   settings.fontSizeOption === 'large'
                     ? 'border-slate-900 dark:border-white font-bold bg-slate-900 dark:bg-white text-white dark:text-slate-900'
                     : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
                 }`}
               >
-                Grande (~9.5 pt)
+                Grande
+              </button>
+              <button
+                type="button"
+                onClick={() => onFieldChange('fontSizeOption', 'xlarge')}
+                className={`py-1.5 px-2 text-xs rounded-lg border text-center transition cursor-pointer font-medium ${
+                  settings.fontSizeOption === 'xlarge'
+                    ? 'border-slate-900 dark:border-white font-bold bg-slate-900 dark:bg-white text-white dark:text-slate-900'
+                    : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                Extra (+30%)
               </button>
             </div>
           </div>

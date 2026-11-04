@@ -60,8 +60,17 @@ export function usePrintLabels() {
     const baseW = size.id === 'custom' ? customW : size.widthMm;
     const baseH = size.id === 'custom' ? customH : size.heightMm;
 
-    const widthMm = orientation === 'landscape' ? Math.max(baseW, baseH) : baseW;
-    const heightMm = orientation === 'landscape' ? Math.min(baseW, baseH) : baseH;
+    const isLandscape = orientation === 'landscape';
+    const widthMm = size.isContinuous
+      ? baseW
+      : isLandscape
+        ? Math.max(baseW, baseH)
+        : Math.min(baseW, baseH);
+    const heightMm = size.isContinuous
+      ? (isLandscape ? Math.min(baseW, baseH) : Math.max(baseW, baseH, 60))
+      : isLandscape
+        ? Math.min(baseW, baseH)
+        : Math.max(baseW, baseH);
 
     const styleEl = document.createElement('style');
     styleEl.id = 'dynamic-label-print-style';
@@ -148,7 +157,7 @@ export function usePrintLabels() {
       // Etiqueta individual estándar (ej: 50x30mm o 40x25mm)
       styleEl.innerHTML = `
         @page {
-          size: ${widthMm}mm ${heightMm}mm;
+          size: ${widthMm}mm ${heightMm}mm ${isLandscape ? 'landscape' : 'portrait'};
           margin: 0;
         }
         @media print {

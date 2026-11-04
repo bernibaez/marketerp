@@ -100,7 +100,7 @@ export const DEFAULT_LABEL_CONFIG: LabelPrintConfig = {
   showBusinessName: true,
   businessName: 'Mi Colmado / Supermercado ERP',
   currencySymbol: 'RD$',
-  orientation: 'portrait',
+  orientation: 'landscape',
   copies: {},
   productFormats: {},
   gridColumns: 3,

@@ -604,21 +604,55 @@ value={modalWholesalePrice === 0 ? '' : modalWholesalePrice}
 
             {modalPrice > 0 && (
               <div className="bg-card p-4 rounded-xl border border-border space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                  <span className="font-bold text-muted-foreground">Sugerir venta por margen:</span>
-                  <div className="flex items-center gap-1.5">
-                    {[20, 30, 35, 40, 50].map((pct) => (
+                <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-foreground text-xs sm:text-sm">
+                      % Ganancia manual:
+                    </span>
+                    <div className="relative w-28">
+                      <input
+                        type="number"
+                        step="0.5"
+                        placeholder="0"
+                        value={
+                          modalPrice > 0 && modalSalePrice > 0
+                            ? Number((((modalSalePrice - modalPrice) / modalPrice) * 100).toFixed(1))
+                            : ''
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value.trim();
+                          if (val === '') {
+                            setModalSalePrice(modalPrice);
+                          } else {
+                            const pct = parseFloat(val) || 0;
+                            const newPrice = Math.round((modalPrice * (1 + pct / 100)) * 100) / 100;
+                            setModalSalePrice(newPrice);
+                          }
+                        }}
+                        onFocus={(e) => e.target.select()}
+                        onClick={(e) => (e.target as HTMLInputElement).select()}
+                        className="input-field text-sm font-extrabold text-right pr-6 h-9 tabular-nums border-emerald-500/50 text-emerald-600 dark:text-emerald-400 focus:ring-emerald-500/30"
+                        title="Ingresa el porcentaje de ganancia deseado para calcular el precio automáticamente"
+                      />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-emerald-600">%</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs text-muted-foreground font-semibold mr-1">Presets:</span>
+                    {[15, 20, 25, 30, 35, 40, 50].map((pct) => (
                       <button
                         key={`margin-${pct}`}
                         type="button"
-                        onClick={() => setModalSalePrice(Math.round(modalPrice * (1 + pct / 100)))}
-                        className="px-2.5 py-1.5 text-xs font-extrabold bg-secondary hover:bg-emerald-500/15 hover:text-emerald-600 rounded-lg border border-border tabular-nums cursor-pointer"
+                        onClick={() => setModalSalePrice(Math.round(modalPrice * (1 + pct / 100) * 100) / 100)}
+                        className="px-2 py-1 text-xs font-extrabold bg-secondary hover:bg-emerald-500/15 hover:text-emerald-600 rounded-lg border border-border tabular-nums cursor-pointer transition-colors"
                       >
                         +{pct}%
                       </button>
                     ))}
                   </div>
                 </div>
+
                 <div className="pt-2 border-t border-border/50 flex items-center justify-between text-sm">
                   <span className="text-muted-foreground font-medium">
                     Ganancia/und:{' '}
@@ -642,7 +676,7 @@ value={modalWholesalePrice === 0 ? '' : modalWholesalePrice}
                     {modalPrice > 0
                       ? (((modalSalePrice - modalPrice) / modalPrice) * 100).toFixed(1)
                       : 0}
-                    %
+                    % de margen
                   </span>
                 </div>
               </div>

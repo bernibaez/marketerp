@@ -314,6 +314,49 @@ export default function LabelPrintDialog({
                   </div>
                 </div>
 
+                {/* Orientación: Horizontal (Apaisado) vs Vertical (Retrato) */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    Orientación del Ticket / Etiqueta
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => updateConfig({ orientation: 'landscape' })}
+                      className={`p-2.5 rounded-xl border flex items-center justify-center gap-2.5 text-xs font-bold transition cursor-pointer ${
+                        config.orientation === 'landscape'
+                          ? 'border-primary bg-primary/10 text-primary shadow-xs ring-1 ring-primary/40'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="w-5 h-3.5 border-2 border-current rounded-xs flex items-center justify-center">
+                        <span className="text-[8px] font-mono leading-none">━</span>
+                      </div>
+                      <div className="text-left">
+                        <p className="leading-tight">Horizontal</p>
+                        <p className="text-[10px] font-normal text-muted-foreground">Apaisado / Código a lo ancho</p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateConfig({ orientation: 'portrait' })}
+                      className={`p-2.5 rounded-xl border flex items-center justify-center gap-2.5 text-xs font-bold transition cursor-pointer ${
+                        config.orientation === 'portrait'
+                          ? 'border-primary bg-primary/10 text-primary shadow-xs ring-1 ring-primary/40'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="w-3.5 h-5 border-2 border-current rounded-xs flex items-center justify-center">
+                        <span className="text-[8px] font-mono leading-none">┃</span>
+                      </div>
+                      <div className="text-left">
+                        <p className="leading-tight">Vertical</p>
+                        <p className="text-[10px] font-normal text-muted-foreground">Retrato / Código vertical</p>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Dimensiones personalizadas si elige "custom" */}
                 {config.sizeId === 'custom' && (
                   <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/60">

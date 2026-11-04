@@ -740,20 +740,33 @@ export function PurchaseCreateView({
                           </div>
                         </td>
 
-                        {/* Margen Venta justo al lado de Precio de Venta */}
+                        {/* Margen Venta (% ganancia manual editable) */}
                         <td className="py-2 px-2 text-center">
-                          <div className="flex flex-col items-center justify-center">
-                            <span
-                              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-black tabular-nums leading-tight ${
-                                marginAmt >= 0
-                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                                  : 'bg-danger-bg text-danger border border-danger/20'
-                              }`}
-                              title={`Ganancia unitaria: RD$ ${marginAmt.toFixed(2)}`}
-                            >
-                              {marginPct >= 0 ? `+${marginPct.toFixed(0)}%` : `${marginPct.toFixed(0)}%`}
-                            </span>
-                            <span className="text-[9px] font-mono text-muted-foreground mt-0.5 tabular-nums">
+                          <div className="flex flex-col items-center justify-center gap-0.5">
+                            <div className="inline-flex items-center gap-1 justify-center">
+                              <input
+                                type="number"
+                                step="1"
+                                placeholder="0"
+                                value={item.price > 0 && item.salePrice > 0 ? Number(marginPct.toFixed(1)) : ''}
+                                onChange={(e) => {
+                                  const val = e.target.value.trim();
+                                  if (val === '') {
+                                    onUpdateLineSalePrice(item.id, item.price);
+                                  } else {
+                                    const pct = parseFloat(val) || 0;
+                                    const calculatedPrice = Math.round((item.price * (1 + pct / 100)) * 100) / 100;
+                                    onUpdateLineSalePrice(item.id, calculatedPrice);
+                                  }
+                                }}
+                                onFocus={(e) => e.target.select()}
+                                onClick={(e) => (e.target as HTMLInputElement).select()}
+                                className="input-field w-16 text-center py-1 px-1 font-extrabold text-xs tabular-nums text-emerald-600 dark:text-emerald-400 border-emerald-500/40 bg-emerald-500/5 focus:bg-background"
+                                title="Porcentaje de ganancia deseado (calcula el precio de venta automáticamente)"
+                              />
+                              <span className="text-[10px] font-bold text-emerald-600">%</span>
+                            </div>
+                            <span className="text-[9px] font-mono text-muted-foreground tabular-nums">
                               {marginAmt >= 0 ? `+${marginAmt.toFixed(2)}` : `${marginAmt.toFixed(2)}`}
                             </span>
                           </div>
@@ -781,27 +794,38 @@ export function PurchaseCreateView({
                           </div>
                         </td>
 
-                        {/* Margen Al Por Mayor justo al lado */}
+                        {/* Margen Al Por Mayor editable */}
                         <td className="py-2 px-2 text-center">
-                          {item.wholesalePrice && item.wholesalePrice > 0 ? (
-                            <div className="flex flex-col items-center justify-center">
-                              <span
-                                className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-black tabular-nums leading-tight ${
-                                  wholesaleMarginAmt >= 0
-                                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
-                                    : 'bg-danger-bg text-danger border border-danger/20'
-                                }`}
-                                title={`Ganancia mayorista unitaria: RD$ ${wholesaleMarginAmt.toFixed(2)}`}
-                              >
-                                {wholesaleMarginPct >= 0 ? `+${wholesaleMarginPct.toFixed(0)}%` : `${wholesaleMarginPct.toFixed(0)}%`}
-                              </span>
-                              <span className="text-[9px] font-mono text-amber-600 dark:text-amber-400 mt-0.5 tabular-nums">
+                          <div className="flex flex-col items-center justify-center gap-0.5">
+                            <div className="inline-flex items-center gap-1 justify-center">
+                              <input
+                                type="number"
+                                step="1"
+                                placeholder="0"
+                                value={item.price > 0 && item.wholesalePrice && item.wholesalePrice > 0 ? Number(wholesaleMarginPct.toFixed(1)) : ''}
+                                onChange={(e) => {
+                                  const val = e.target.value.trim();
+                                  if (val === '') {
+                                    onUpdateLineWholesalePrice(item.id, item.price);
+                                  } else {
+                                    const pct = parseFloat(val) || 0;
+                                    const calculatedPrice = Math.round((item.price * (1 + pct / 100)) * 100) / 100;
+                                    onUpdateLineWholesalePrice(item.id, calculatedPrice);
+                                  }
+                                }}
+                                onFocus={(e) => e.target.select()}
+                                onClick={(e) => (e.target as HTMLInputElement).select()}
+                                className="input-field w-16 text-center py-1 px-1 font-extrabold text-xs tabular-nums text-amber-600 dark:text-amber-400 border-amber-500/40 bg-amber-500/5 focus:bg-background"
+                                title="Porcentaje de ganancia al por mayor (calcula precio mayorista automáticamente)"
+                              />
+                              <span className="text-[10px] font-bold text-amber-600">%</span>
+                            </div>
+                            {item.wholesalePrice && item.wholesalePrice > 0 && (
+                              <span className="text-[9px] font-mono text-amber-600 dark:text-amber-400 tabular-nums">
                                 {wholesaleMarginAmt >= 0 ? `+${wholesaleMarginAmt.toFixed(2)}` : `${wholesaleMarginAmt.toFixed(2)}`}
                               </span>
-                            </div>
-                          ) : (
-                            <span className="text-[10px] text-muted-foreground italic">-</span>
-                          )}
+                            )}
+                          </div>
                         </td>
 
                         {/* Subtotal */}

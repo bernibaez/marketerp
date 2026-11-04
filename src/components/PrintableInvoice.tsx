@@ -71,6 +71,8 @@ export interface PrintableInvoiceProps {
   };
   settingsOverride?: Partial<InvoiceSettings>;
   formatOverride?: PrintFormat;
+  fontSizeOverride?: import('@/types/invoice').FontSizeOption;
+  zoomScale?: number;
   className?: string;
 }
 
@@ -116,6 +118,8 @@ export default function PrintableInvoice({
   invoiceData,
   settingsOverride,
   formatOverride,
+  fontSizeOverride,
+  zoomScale,
   className = '',
 }: PrintableInvoiceProps) {
   const [storeSettings, setStoreSettings] = useState<InvoiceSettings>(() => getInvoiceSettings());
@@ -341,6 +345,8 @@ export default function PrintableInvoice({
           settings={settings}
           width={effectiveWidth}
           logoUrl={logoUrl}
+          fontSizeOption={fontSizeOverride}
+          zoomScale={zoomScale}
         />
       </div>
     );

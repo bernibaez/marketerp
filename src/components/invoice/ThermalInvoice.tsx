@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import type { InvoiceData, InvoiceSettings, PaperWidth } from '@/types/invoice';
+import type { InvoiceData, InvoiceSettings, PaperWidth, FontSizeOption } from '@/types/invoice';
 import {
   formatCurrency,
   formatDate,
@@ -14,6 +14,8 @@ export interface ThermalInvoiceProps {
   width?: PaperWidth;
   logoUrl?: string | null;
   className?: string;
+  fontSizeOption?: FontSizeOption;
+  zoomScale?: number;
 }
 
 export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
@@ -22,6 +24,8 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
   width,
   logoUrl,
   className = '',
+  fontSizeOption,
+  zoomScale,
 }) => {
   // Ancho efectivo: prop width tiene prioridad, luego settings.paperWidth, default 80
   const activeWidth: PaperWidth = width ?? settings.paperWidth ?? 80;
@@ -77,11 +81,30 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
   const containerWidthMm = is50mm ? '44mm' : is58mm ? '48mm' : '72mm';
   const paddingX = is50mm ? '1.5mm' : is58mm ? '2mm' : '2.5mm';
 
-  // Tamaño de fuente base
-  const isLargeFont = settings.fontSizeOption === 'large';
-  const baseFontSize = isLargeFont ? '10.5px' : '9.5px';
-  const smallFontSize = isLargeFont ? '9px' : '8px';
-  const microFontSize = isLargeFont ? '8px' : '7px';
+  // Tamaño de fuente base y escala de zoom
+  const effectiveFontSizeOption: FontSizeOption =
+    fontSizeOption ?? settings.fontSizeOption ?? 'normal';
+  const effectiveZoom = zoomScale ?? settings.zoomScale ?? 1.0;
+
+  const fontMultiplier = useMemo(() => {
+    switch (effectiveFontSizeOption) {
+      case 'compact':
+        return 0.88;
+      case 'large':
+        return 1.15;
+      case 'xlarge':
+        return 1.30;
+      case 'normal':
+      default:
+        return 1.0;
+    }
+  }, [effectiveFontSizeOption]);
+
+  const totalScale = fontMultiplier * effectiveZoom;
+
+  const baseFontSize = `${(9.5 * totalScale).toFixed(1)}px`;
+  const smallFontSize = `${(8.0 * totalScale).toFixed(1)}px`;
+  const microFontSize = `${(7.0 * totalScale).toFixed(1)}px`;
 
   // Título del comprobante
   const receiptTitle = useMemo(() => {

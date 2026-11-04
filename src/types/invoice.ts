@@ -1,5 +1,5 @@
 export type PaperWidth = 50 | 58 | 80;
-export type FontSizeOption = 'normal' | 'large';
+export type FontSizeOption = 'compact' | 'normal' | 'large' | 'xlarge';
 
 export type PrintFormat = 'ticket_80mm' | 'ticket_58mm' | 'ticket_50mm' | 'full_page' | 'half_page';
 export type TemplateStyle = 'modern' | 'classic' | 'minimal' | 'bold';
@@ -81,6 +81,7 @@ export interface InvoiceSettings {
   showNcf: boolean;
   copyText: string;
   fontSizeOption: FontSizeOption;
+  zoomScale?: number;
   defaultCopies: number;
 
   // Visibilidad granular
