@@ -143,3 +143,4 @@ describe('Utilidades de Código de Barras (utils/barcode)', () => {
     });
   });
 });
+

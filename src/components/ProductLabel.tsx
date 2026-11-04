@@ -69,8 +69,9 @@ export default function ProductLabel({
   const widthPx = Math.round(widthMm * pxPerMm);
   const minHeightPx = Math.round(heightMm * pxPerMm);
 
-  // Separar parte entera y decimales del precio para jerarquía visual óptima
-  const formattedPrice = Number(product.salePrice || 0).toLocaleString('es-DO', {
+  // Separar parte entera y decimales del precio para jerarquía visual óptima (salePrice o price de fallback)
+  const numericPrice = Number(product.salePrice ?? (product as unknown as { price?: number }).price ?? 0);
+  const formattedPrice = numericPrice.toLocaleString('es-DO', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -121,8 +122,11 @@ export default function ProductLabel({
       {/* Cabecera: Nombre del negocio */}
       {showBusinessName && businessName && (
         <p
-          className="text-[8px] sm:text-[9px] font-bold uppercase tracking-wider text-slate-600 truncate leading-none mb-0.5"
-          style={{ color: '#444444' }}
+          className="font-bold uppercase tracking-wider text-slate-600 truncate leading-none mb-0.5"
+          style={{
+            color: '#444444',
+            fontSize: isPrintMode ? '6.5pt' : undefined,
+          }}
         >
           {businessName}
         </p>
@@ -133,7 +137,11 @@ export default function ProductLabel({
         <p
           className="font-bold text-[10px] sm:text-[11px] leading-tight text-black line-clamp-2 px-0.5"
           title={product.name}
-          style={{ color: '#000000' }}
+          style={{
+            color: '#000000',
+            fontSize: isPrintMode ? (heightMm < 30 ? '7.5pt' : '9pt') : undefined,
+            lineHeight: isPrintMode ? '1.15' : undefined,
+          }}
         >
           {product.name}
         </p>
@@ -144,13 +152,25 @@ export default function ProductLabel({
         <div className="flex items-start justify-center text-black leading-none my-0.5 font-black">
           <span
             className="text-[9px] sm:text-[10px] font-bold mr-0.5 mt-0.5 tracking-tight align-top"
-            style={{ color: '#111111' }}
+            style={{
+              color: '#111111',
+              fontSize: isPrintMode ? (heightMm < 30 ? '7pt' : '8pt') : undefined,
+            }}
           >
             {currencySymbol}
           </span>
           <span
-            className="text-lg sm:text-2xl font-black tracking-tight"
-            style={{ color: '#000000', fontSize: heightMm < 30 ? '16px' : '22px' }}
+            className="tracking-tight font-black"
+            style={{
+              color: '#000000',
+              fontSize: isPrintMode
+                ? heightMm < 30
+                  ? '13pt'
+                  : '18pt'
+                : heightMm < 30
+                  ? '16px'
+                  : '22px',
+            }}
           >
             {formattedPrice}
           </span>
@@ -165,7 +185,7 @@ export default function ProductLabel({
           width={barcodeModuleWidth}
           height={barcodeHeight}
           displayValue={showBarcodeText}
-          fontSize={heightMm < 30 ? 8 : 10}
+          fontSize={isPrintMode ? (heightMm < 30 ? 7 : 8) : (heightMm < 30 ? 8 : 10)}
           margin={0}
           lineColor="#000000"
           background="transparent"
@@ -174,7 +194,12 @@ export default function ProductLabel({
 
       {/* Pie: SKU o datos complementarios */}
       {showSku && (product.sku || product.barcode) && (
-        <div className="flex items-center justify-between text-[7.5px] sm:text-[8.5px] text-slate-500 font-mono px-0.5 leading-none mt-0.5 border-t border-slate-100 pt-0.5">
+        <div
+          className="flex items-center justify-between text-slate-500 font-mono px-0.5 leading-none mt-0.5 border-t border-slate-100 pt-0.5"
+          style={{
+            fontSize: isPrintMode ? '6pt' : undefined,
+          }}
+        >
           <span className="truncate">SKU: {product.sku || '—'}</span>
           {product.unit && <span className="truncate uppercase font-bold text-slate-600">{product.unit}</span>}
         </div>

@@ -108,3 +108,4 @@ export const DEFAULT_LABEL_CONFIG: LabelPrintConfig = {
   gridGapMm: 2,
   gridMarginMm: 8,
 };
+
