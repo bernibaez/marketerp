@@ -157,7 +157,7 @@ export default function LabelPrintDialog({
       ? createPortal(
           <div
             ref={printSheetRef}
-            className={`printable-area ${
+            className={`printable-area label-print-sheet ${
               selectedSize.isGrid
                 ? 'label-print-grid-container'
                 : selectedSize.isContinuous
@@ -209,7 +209,7 @@ export default function LabelPrintDialog({
   return (
     <>
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-900/60 backdrop-blur-xs overflow-y-auto animate-fade-in"
+        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-900/60 backdrop-blur-xs overflow-y-auto animate-fade-in print:hidden"
         role="dialog"
         aria-modal="true"
         aria-labelledby="label-dialog-title"

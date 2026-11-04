@@ -30,8 +30,20 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
     });
   }, []);
 
+  const handlePrint = () => {
+    document.body.setAttribute('data-printing', 'true');
+    const cleanup = () => {
+      document.body.removeAttribute('data-printing');
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    window.print();
+    setTimeout(cleanup, 2000);
+  };
+
   return createPortal(
     <div
+      data-printable-modal="true"
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-hidden print:p-0 print:bg-white print:static print:overflow-visible print:h-auto print:max-h-none print:inset-auto"
       onClick={onClose}
     >
@@ -184,7 +196,7 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => window.print()}
+            onClick={handlePrint}
             className="bg-[#007052] hover:bg-[#005c43] text-white text-xs py-2 px-4 rounded-xl font-bold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
           >
             <Printer size={15} /> Imprimir Ahora

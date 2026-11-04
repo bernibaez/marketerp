@@ -380,19 +380,22 @@
   }
 
   /* ========================================================================
-     ELIMINACIÓN RADICAL DE PÁGINAS EN BLANCO (PROBLEMA PÁGINA 9 EN CHROME)
-     Cuando se imprime cualquier comprobante o modal montado en portal sobre document.body:
-     Desconectamos por completo #root del árbol de renderizado usando display: none.
-     Esto evita que los elementos invisibles de la aplicación ocupen altura y generen
-     páginas vacías 1 a 8 antes del recibo.
+     ELIMINACIÓN TOTAL DE INTERFAZ DE FONDO Y PÁGINAS RESIDUALES AL IMPRIMIR
+     Desconectamos por completo #root del árbol de renderizado cuando hay cualquier
+     impresión activa (factura térmica, modal de recibo, hoja de etiquetas).
+     Previene que la pantalla de fondo (ventas, tablas, catálogos) aparezca en la impresión.
      ======================================================================== */
-  body:has(#mercato-thermal-print-portal) > *:not(#mercato-thermal-print-portal),
-  body:has(> .printable-document) > #root,
-  body:has(> .dialog-inline-host) > #root,
-  body:has(> [role="dialog"]) > #root,
-  body:has(> div:has(.thermal-invoice-printable)) > #root,
-  body:has(> div:has(.printable-invoice-container)) > #root,
-  body:has(> .label-print-sheet) > #root {
+  body[data-printing="true"] > #root,
+  body.is-printing > #root,
+  body:has(#mercato-thermal-print-portal) > #root,
+  body:has(.printable-document) > #root,
+  body:has(.printable-area) > #root,
+  body:has(.label-print-sheet) > #root,
+  body:has(.thermal-invoice-printable) > #root,
+  body:has(.thermal-invoice-host) > #root,
+  body:has(.dialog-inline-host) > #root,
+  body:has([role="dialog"]) > #root,
+  body:has([data-printable-modal="true"]) > #root {
     display: none !important;
     height: 0 !important;
     min-height: 0 !important;
@@ -401,6 +404,7 @@
     position: absolute !important;
     top: -99999px !important;
     left: -99999px !important;
+    visibility: hidden !important;
   }
 
   /* Ocultar interfaz residual */
@@ -569,11 +573,16 @@
 /* Fuera de impresión: la hoja de etiquetas no se ve en pantalla */
 @media screen {
   .label-print-sheet {
+    display: none !important;
     position: fixed !important;
     left: -10000px !important;
     top: 0 !important;
-    width: 80mm;
-    pointer-events: none;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
   }
   #mercato-thermal-print-portal {
     display: none !important;

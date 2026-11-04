@@ -159,10 +159,12 @@ export function usePrintInvoice(defaultOptions?: PrintInvoiceOptions) {
         beforeCb();
       }
 
+      document.body.setAttribute('data-printing', 'true');
       injectPrintStyles(effectiveWidth);
 
       const handleAfterPrint = () => {
         window.removeEventListener('afterprint', handleAfterPrint);
+        document.body.removeAttribute('data-printing');
         cleanupStyles();
         isPrintingRef.current = false;
         if (afterCb) {

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import LoginPage from './pages/LoginPage';
@@ -29,6 +29,30 @@ function Guard({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
+  useEffect(() => {
+    const handleBeforePrint = () => {
+      const hasPrintable = Boolean(
+        document.querySelector(
+          '.printable-document, .printable-area, .label-print-sheet, .thermal-invoice-printable, .thermal-invoice-host, #mercato-thermal-print-portal, [data-printable-modal="true"]'
+        )
+      );
+      if (hasPrintable) {
+        document.body.setAttribute('data-printing', 'true');
+      }
+    };
+
+    const handleAfterPrint = () => {
+      document.body.removeAttribute('data-printing');
+    };
+
+    window.addEventListener('beforeprint', handleBeforePrint);
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint);
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+  }, []);
+
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />

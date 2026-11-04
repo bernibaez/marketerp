@@ -32,7 +32,14 @@ export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceMo
   };
 
   const handlePrint = () => {
+    document.body.setAttribute('data-printing', 'true');
+    const cleanup = () => {
+      document.body.removeAttribute('data-printing');
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
     window.print();
+    setTimeout(cleanup, 2000);
   };
 
   const handleExportPdf = () => {

@@ -403,9 +403,11 @@ export default function PaymentPanel({
       // Despachar inmediatamente el modal de impresión nativo de Windows y reiniciar a nueva venta
       setTimeout(() => {
         let closed = false;
+        document.body.setAttribute('data-printing', 'true');
         const finish = () => {
           if (closed) return;
           closed = true;
+          document.body.removeAttribute('data-printing');
           onNewSale?.();
           onClose?.();
         };

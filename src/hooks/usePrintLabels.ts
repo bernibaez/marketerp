@@ -66,6 +66,30 @@ export function usePrintLabels() {
     const styleEl = document.createElement('style');
     styleEl.id = 'dynamic-label-print-style';
 
+    const hideRootCss = `
+        body > #root {
+          display: none !important;
+          height: 0 !important;
+          min-height: 0 !important;
+          max-height: 0 !important;
+          overflow: hidden !important;
+          position: absolute !important;
+          top: -99999px !important;
+          left: -99999px !important;
+          visibility: hidden !important;
+        }
+        header, aside, nav, .sidebar, .topbar, button, .no-print, .print\\:hidden, [role="dialog"] {
+          display: none !important;
+        }
+        .label-print-sheet {
+          display: block !important;
+          position: static !important;
+          margin: 0 auto !important;
+          padding: 0 !important;
+          visibility: visible !important;
+        }
+    `;
+
     if (size.isGrid) {
       // Formato A4
       styleEl.innerHTML = `
@@ -74,6 +98,7 @@ export function usePrintLabels() {
           margin: 6mm;
         }
         @media print {
+          ${hideRootCss}
           html, body {
             margin: 0 !important;
             padding: 0 !important;
@@ -101,6 +126,7 @@ export function usePrintLabels() {
           margin: 0 !important;
         }
         @media print {
+          ${hideRootCss}
           html, body {
             margin: 0 !important;
             padding: 0 !important;
@@ -126,6 +152,7 @@ export function usePrintLabels() {
           margin: 0;
         }
         @media print {
+          ${hideRootCss}
           html, body {
             margin: 0 !important;
             padding: 0 !important;
@@ -151,9 +178,22 @@ export function usePrintLabels() {
 
   const printLabels = useCallback(
     (size: LabelSize, customW: number, customH: number, orientation: 'portrait' | 'landscape') => {
+      document.body.setAttribute('data-printing', 'true');
       injectDynamicPageStyle(size, customW, customH, orientation);
+
+      const handleAfterPrint = () => {
+        window.removeEventListener('afterprint', handleAfterPrint);
+        document.body.removeAttribute('data-printing');
+        const styleEl = document.getElementById('dynamic-label-print-style');
+        if (styleEl) styleEl.remove();
+      };
+      window.addEventListener('afterprint', handleAfterPrint);
+
       window.setTimeout(() => {
         window.print();
+        window.setTimeout(() => {
+          handleAfterPrint();
+        }, 1500);
       }, 120);
     },
     [injectDynamicPageStyle]
