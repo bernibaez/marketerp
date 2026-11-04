@@ -143,6 +143,12 @@ export default function BarcodeSvg({
       className={`block mx-auto max-w-full ${className}`}
       shapeRendering="crispEdges"
       aria-label={`Código de barras ${format}: ${value}`}
+      style={{
+        display: 'block',
+        margin: '0 auto',
+        maxWidth: '100%',
+        height: 'auto',
+      }}
     />
   );
 }

@@ -386,8 +386,11 @@
      Previene que la pantalla de fondo (ventas, tablas, catálogos) aparezca en la impresión.
      ======================================================================== */
   body[data-printing="true"] > #root,
+  body[data-printing-labels="true"] > #root,
   body.is-printing > #root,
+  body.is-printing-labels > #root,
   body:has(#mercato-thermal-print-portal) > #root,
+  body:has(#mercato-label-print-portal) > #root,
   body:has(.printable-document) > #root,
   body:has(.printable-area) > #root,
   body:has(.label-print-sheet) > #root,
@@ -400,10 +403,13 @@
     height: 0 !important;
     min-height: 0 !important;
     max-height: 0 !important;
+    width: 0 !important;
+    max-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
     overflow: hidden !important;
-    position: absolute !important;
-    top: -99999px !important;
-    left: -99999px !important;
+    position: static !important;
     visibility: hidden !important;
   }
 
@@ -423,11 +429,29 @@
     display: none !important;
   }
 
+  /* Al imprimir etiquetas o facturas desde portales dedicados, ocultar todos los modales */
+  body[data-printing-labels="true"] [role="dialog"],
+  body.is-printing-labels [role="dialog"],
+  body:has(#mercato-label-print-portal) [role="dialog"],
+  body[data-printing-labels="true"] .modal-panel,
+  body.is-printing-labels .modal-panel,
+  body[data-printing-labels="true"] .fixed.inset-0,
+  body.is-printing-labels .fixed.inset-0 {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    overflow: hidden !important;
+  }
+
   /* Contenedores de modales y diálogos cuando se imprimen directamente */
-  .dialog-inline-host,
-  .dialog-inline-host > div,
-  .modal-panel,
-  [role="dialog"] {
+  body:not([data-printing-labels="true"]):not(.is-printing-labels) .dialog-inline-host,
+  body:not([data-printing-labels="true"]):not(.is-printing-labels) .dialog-inline-host > div,
+  body:not([data-printing-labels="true"]):not(.is-printing-labels) .modal-panel,
+  body:not([data-printing-labels="true"]):not(.is-printing-labels) [role="dialog"] {
     background: #ffffff !important;
     color: #000000 !important;
     height: auto !important;
@@ -441,6 +465,26 @@
     padding: 0 !important;
     border: none !important;
     box-shadow: none !important;
+  }
+
+  /* ZONA DE IMPRESIÓN DEDICADA DE ETIQUETAS DE CÓDIGOS DE BARRA */
+  #mercato-label-print-portal,
+  .label-print-sheet {
+    display: block !important;
+    position: static !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    visibility: visible !important;
+  }
+
+  #mercato-label-print-portal *,
+  .label-print-sheet * {
+    visibility: visible !important;
   }
 
   /* ZONA DE IMPRESIÓN DEDICADA (#mercato-thermal-print-portal) */
@@ -572,6 +616,7 @@
 
 /* Fuera de impresión: la hoja de etiquetas no se ve en pantalla */
 @media screen {
+  #mercato-label-print-portal,
   .label-print-sheet {
     display: none !important;
     position: fixed !important;
@@ -582,6 +627,21 @@
     overflow: hidden !important;
     opacity: 0 !important;
     visibility: hidden !important;
+    pointer-events: none !important;
+  }
+  /* Cuando se está generando PDF, permitir a html2canvas leer e imprimir el contenedor */
+  body[data-generating-pdf="true"] #mercato-label-print-portal,
+  body[data-generating-pdf="true"] .label-print-sheet {
+    display: block !important;
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    z-index: -9999 !important;
+    opacity: 0.01 !important;
+    visibility: visible !important;
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
     pointer-events: none !important;
   }
   #mercato-thermal-print-portal {

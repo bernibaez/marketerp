@@ -50,6 +50,7 @@ export function usePrintLabels() {
   /**
    * Genera e inyecta dinámicamente la regla @page para que la impresora
    * corte el papel o ajuste el margen al tamaño exacto de la etiqueta elegida.
+   * Totalmente compatible con Chrome en Windows 10 y Windows 11.
    */
   const injectDynamicPageStyle = useCallback((
     size: LabelSize,
@@ -72,37 +73,56 @@ export function usePrintLabels() {
     const isRotated = rotation === 90 || rotation === 270;
     const widthMm = isRotated && !size.isContinuous ? natH : natW;
     const heightMm = isRotated && !size.isContinuous ? natW : natH;
-    const pageOrientation = isRotated ? 'portrait' : (orientation === 'landscape' ? 'landscape' : 'portrait');
 
     const styleEl = document.createElement('style');
     styleEl.id = 'dynamic-label-print-style';
 
     const hideRootCss = `
-        body > #root {
+        body[data-printing="true"] > #root,
+        body[data-printing-labels="true"] > #root,
+        body.is-printing-labels > #root,
+        #root {
           display: none !important;
+          width: 0 !important;
           height: 0 !important;
           min-height: 0 !important;
           max-height: 0 !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          border: none !important;
           overflow: hidden !important;
-          position: absolute !important;
-          top: -99999px !important;
-          left: -99999px !important;
+          position: static !important;
           visibility: hidden !important;
         }
-        header, aside, nav, .sidebar, .topbar, button, .no-print, .print\\:hidden, [role="dialog"] {
+        header, aside, nav, .sidebar, .topbar, button, .no-print, .print\\:hidden, [role="dialog"], .modal-panel, .dialog-inline-host, .fixed.inset-0 {
           display: none !important;
+          visibility: hidden !important;
+          height: 0 !important;
+          width: 0 !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          border: none !important;
+          overflow: hidden !important;
         }
+        #mercato-label-print-portal,
         .label-print-sheet {
           display: block !important;
           position: static !important;
           margin: 0 auto !important;
           padding: 0 !important;
+          width: 100% !important;
+          height: auto !important;
+          visibility: visible !important;
+          overflow: visible !important;
+        }
+        #mercato-label-print-portal *,
+        .label-print-sheet * {
           visibility: visible !important;
         }
     `;
 
     if (size.isGrid) {
-      // Formato A4
+      // Formato A4 (rejilla de etiquetas)
       styleEl.innerHTML = `
         @page {
           size: A4 portrait;
@@ -121,45 +141,71 @@ export function usePrintLabels() {
             display: grid !important;
             grid-template-columns: repeat(${size.columns || 3}, 1fr) !important;
             gap: 2mm !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
             page-break-after: always;
           }
           .label-print-grid-item {
             break-inside: avoid !important;
             page-break-inside: avoid !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
           }
         }
       `;
     } else if (size.isContinuous) {
-      // Formato térmico continuo (ej. 58mm o 80mm)
+      // Formato térmico continuo (ej. rollo 58mm o 80mm)
       styleEl.innerHTML = `
         @page {
           size: auto;
-          margin: 0 !important;
+          margin: 0;
         }
         @media print {
           ${hideRootCss}
           html, body {
             margin: 0 !important;
             padding: 0 !important;
-            width: ${widthMm}mm !important;
+            width: 100% !important;
             background: #ffffff !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
-          .label-print-continuous-item {
+          .label-print-continuous-container {
             width: ${widthMm}mm !important;
+            max-width: ${widthMm}mm !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
+          }
+          .label-print-continuous-item {
+            width: 100% !important;
+            max-width: 100% !important;
             break-inside: avoid !important;
             page-break-inside: avoid !important;
-            margin-bottom: 2mm !important;
-            border-bottom: 1px dashed #cccccc !important;
+            margin: 0 auto 2mm auto !important;
+            padding-bottom: 2mm !important;
+            border-bottom: 1px dashed #aaaaaa !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+          }
+          .label-print-continuous-item:last-child {
+            margin-bottom: 0 !important;
+            padding-bottom: 0 !important;
+            border-bottom: none !important;
           }
         }
       `;
     } else {
       // Etiqueta individual estándar (ej: 50x30mm o 40x25mm)
+      // IMPORTANTE: En la especificación W3C CSS Paged Media y en Google Chrome (Windows 10/11),
+      // los valores de longitud (ej. 50mm 30mm) NUNCA deben combinarse con palabras clave 'portrait' o 'landscape'.
+      // La orientación queda intrínsecamente definida por el orden de ancho y alto (ancho x alto).
+      // Si se incluye 'portrait' o 'landscape', Chrome marca la regla como INVÁLIDA y cae en papel Letter/A4,
+      // provocando que la etiqueta aparezca diminuta en una esquina.
       styleEl.innerHTML = `
         @page {
-          size: ${widthMm}mm ${heightMm}mm ${pageOrientation};
+          size: ${widthMm}mm ${heightMm}mm;
           margin: 0;
         }
         @media print {
@@ -169,22 +215,40 @@ export function usePrintLabels() {
             padding: 0 !important;
             width: ${widthMm}mm !important;
             height: ${heightMm}mm !important;
+            min-width: ${widthMm}mm !important;
+            min-height: ${heightMm}mm !important;
+            max-width: ${widthMm}mm !important;
+            max-height: ${heightMm}mm !important;
             background: #ffffff !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+            overflow: hidden !important;
+          }
+          .label-print-single-container {
+            width: ${widthMm}mm !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
           }
           .label-print-single-item {
             width: ${widthMm}mm !important;
             height: ${heightMm}mm !important;
+            max-width: ${widthMm}mm !important;
+            max-height: ${heightMm}mm !important;
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
             break-inside: avoid !important;
             page-break-inside: avoid !important;
+            break-after: page !important;
             page-break-after: always !important;
             overflow: hidden !important;
-            margin: 0 !important;
+            margin: 0 auto !important;
             padding: 0 !important;
+            box-sizing: border-box !important;
+          }
+          .label-print-single-item:last-child {
+            break-after: auto !important;
+            page-break-after: auto !important;
           }
         }
       `;
@@ -202,22 +266,27 @@ export function usePrintLabels() {
       rotation: 0 | 90 | 180 | 270 = 0
     ) => {
       document.body.setAttribute('data-printing', 'true');
+      document.body.setAttribute('data-printing-labels', 'true');
+      document.body.classList.add('is-printing-labels');
       injectDynamicPageStyle(size, customW, customH, orientation, rotation);
 
       const handleAfterPrint = () => {
         window.removeEventListener('afterprint', handleAfterPrint);
         document.body.removeAttribute('data-printing');
+        document.body.removeAttribute('data-printing-labels');
+        document.body.classList.remove('is-printing-labels');
         const styleEl = document.getElementById('dynamic-label-print-style');
         if (styleEl) styleEl.remove();
       };
       window.addEventListener('afterprint', handleAfterPrint);
 
+      // Esperar 160ms para que el navegador aplique los estilos dinámicos antes de invocar window.print()
       window.setTimeout(() => {
         window.print();
         window.setTimeout(() => {
           handleAfterPrint();
         }, 1500);
-      }, 120);
+      }, 160);
     },
     [injectDynamicPageStyle]
   );
@@ -230,6 +299,7 @@ export function usePrintLabels() {
       }
 
       setIsGeneratingPdf(true);
+      document.body.setAttribute('data-generating-pdf', 'true');
       try {
         const { default: jsPDF } = await import('jspdf');
         const { default: html2canvas } = await import('html2canvas');
@@ -265,6 +335,7 @@ export function usePrintLabels() {
         return false;
       } finally {
         setIsGeneratingPdf(false);
+        document.body.removeAttribute('data-generating-pdf');
       }
     },
     []

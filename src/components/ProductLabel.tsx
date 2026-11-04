@@ -241,7 +241,7 @@ export default function ProductLabel({
             boxSizing: 'border-box',
             backgroundColor: '#ffffff',
             color: '#000000',
-            padding: '1.2mm',
+            padding: naturalHeightMm < 30 ? '0.8mm' : '1.2mm',
             WebkitPrintColorAdjust: 'exact',
             printColorAdjust: 'exact',
             fontFamily: 'Inter, Arial, Helvetica, sans-serif',

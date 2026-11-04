@@ -167,6 +167,8 @@ export default function LabelPrintDialog({
       ? createPortal(
           <div
             ref={printSheetRef}
+            id="mercato-label-print-portal"
+            data-label-portal="true"
             className={`printable-area label-print-sheet ${
               selectedSize.isGrid
                 ? 'label-print-grid-container'
@@ -749,9 +751,14 @@ export default function LabelPrintDialog({
                 ))}
               </div>
 
-              <div className="pt-2 text-[11px] text-slate-400 text-center flex items-center justify-center gap-1.5">
-                <CheckCircle2 size={13} className="text-emerald-500" />
-                Renderizado SVG con <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded text-slate-600 dark:text-slate-300">crispEdges</code> para máxima nitidez en lectura con escáner físico.
+              <div className="pt-2 text-[11px] text-slate-500 dark:text-slate-400 text-center flex flex-col items-center justify-center gap-1">
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 size={13} className="text-emerald-500" />
+                  <span>Renderizado SVG con <code className="bg-slate-100 dark:bg-slate-800 px-1 rounded text-slate-600 dark:text-slate-300">crispEdges</code> para máxima nitidez en lectura con escáner físico.</span>
+                </div>
+                <div className="text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100/70 dark:bg-slate-800/50 px-2.5 py-1 rounded-md border border-slate-200/60 dark:border-slate-700/60">
+                  <span className="font-semibold text-slate-700 dark:text-slate-200">Chrome en Windows 10/11:</span> En el diálogo de impresión, selecciona <span className="font-medium">Márgenes: "Ninguno"</span> para centrado exacto 1:1 sin páginas residuales.
+                </div>
               </div>
             </div>
           </div>
