@@ -182,7 +182,9 @@ export function usePOSCart() {
               }
             }
           }
-        } catch {}
+        } catch {
+          /* ignore */
+        }
       }
 
       const isActuallyOut =

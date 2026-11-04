@@ -446,7 +446,9 @@ export function applyPresentationConversions(
   for (const p of extraCatalog) index(p);
   try {
     for (const p of getStoredProducts()) index(p as any);
-  } catch {}
+  } catch {
+    /* ignore */
+  }
   for (const p of products) index(p);
 
   return products.map((p) => {

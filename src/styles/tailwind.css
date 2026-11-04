@@ -418,14 +418,18 @@
   /* Si hay un contenedor de documento formal o factura presente */
   body:has(.printable-document),
   body:has(.printable-invoice-container),
-  body:has(.printable-area) {
+  body:has(.printable-area),
+  body:has(.thermal-invoice-printable),
+  body:has(.thermal-invoice-host) {
     overflow: visible !important;
     background: #ffffff !important;
   }
 
   body:has(.printable-document) *,
   body:has(.printable-invoice-container) *,
-  body:has(.printable-area) * {
+  body:has(.printable-area) *,
+  body:has(.thermal-invoice-printable) *,
+  body:has(.thermal-invoice-host) * {
     visibility: hidden;
   }
 
@@ -434,7 +438,11 @@
   .printable-area,
   .printable-area *,
   .printable-document,
-  .printable-document * {
+  .printable-document *,
+  .thermal-invoice-printable,
+  .thermal-invoice-printable *,
+  .thermal-invoice-host,
+  .thermal-invoice-host * {
     visibility: visible !important;
   }
 

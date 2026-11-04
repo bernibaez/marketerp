@@ -1,3 +1,5 @@
+import ThermalInvoice from './invoice/ThermalInvoice';
+import type { InvoiceData, PaperWidth } from '@/types/invoice';
 import React, { useEffect, useState, useMemo } from 'react';
 import {
   getInvoiceSettings,
@@ -292,342 +294,48 @@ export default function PrintableInvoice({
   // Formato claro, estético y diseñado para impresión continua sin truncado
   // -------------------------------------------------------------
   if (isTicket) {
-    const printFormatClass = activeFormat === 'ticket_58mm' ? 'print-format-58mm' : 'print-format-80mm';
-    const separatorClass = getSeparatorBorder(settings.separatorStyle || 'dashed');
+    const effectiveWidth: PaperWidth =
+      widthMm <= 54 ? 50 : widthMm <= 65 ? 58 : 80;
+
+    const mappedThermalData: InvoiceData = {
+      numero: invoiceData.invoiceNumber,
+      invoiceNumber: invoiceData.invoiceNumber,
+      ncf: invoiceData.ncf,
+      ncfType: invoiceData.ncfType,
+      ncfTypeName: invoiceData.ncfTypeName,
+      fecha: invoiceData.issueDate || formattedDateTime,
+      hora: invoiceData.issueTime || '',
+      cajero: invoiceData.cashier,
+      cliente: invoiceData.customerName,
+      clienteRnc: invoiceData.customerRnc,
+      items: (invoiceData.items || []).map((it) => ({
+        cantidad: it.qty,
+        descripcion: it.name,
+        precioUnitario: it.price,
+        total: it.subtotal,
+        sku: it.sku,
+        qty: it.qty,
+        name: it.name,
+        price: it.price,
+        subtotal: it.subtotal,
+      })),
+      subtotal: invoiceData.subtotal,
+      impuesto: invoiceData.itbis,
+      total: invoiceData.total,
+      pagado: invoiceData.cashReceived ?? invoiceData.total,
+      cambio: invoiceData.change ?? 0,
+      discount: invoiceData.discount,
+      paymentMethod: invoiceData.paymentMethod,
+    };
 
     return (
-      <div
-        className={`printable-invoice-container ${printFormatClass} bg-white text-slate-900 border border-slate-200/90 shadow-xs p-4 sm:p-5 select-none transition-all mx-auto print:shadow-none print:border-none print:p-0 ${getLineSpacingClass(
-          settings.printDensity || 'normal'
-        )} ${className}`}
-        style={{
-          width: `${previewWidthPx}px`,
-          maxWidth: '100%',
-          height: 'auto',
-          overflow: 'visible',
-          paddingLeft: `${Math.max(8, (settings.marginMm ?? 3) * 3.78)}px`,
-          paddingRight: `${Math.max(8, (settings.marginMm ?? 3) * 3.78)}px`,
-          fontFamily: getFontFamily(settings.fontFamily || 'sans'),
-          fontSize: `${baseFontPt}px`,
-          fontWeight: settings.fontWeight === 'bold' ? 700 : settings.fontWeight === 'medium' ? 600 : 400,
-          textTransform: settings.uppercaseOnly ? 'uppercase' : 'none',
-        }}
-      >
-        {/* Encabezado del ticket */}
-        <div className="text-center space-y-1">
-          {settings.showLogo && logoUrl && (
-            <div className="flex justify-center pb-1">
-              <img
-                src={logoUrl}
-                alt="Logo Empresa"
-                style={{ height: `${getLogoHeightPx(settings.logoSize || 'medium')}px` }}
-                className="object-contain"
-              />
-            </div>
-          )}
-          <p
-            className="font-black uppercase tracking-tight text-slate-950"
-            style={{ fontSize: `${baseFontPt + 3}px` }}
-          >
-            {settings.companyName || 'Supermercado Mercato S.R.L.'}
-          </p>
-          {settings.showSlogan && settings.customSlogan && (
-            <p className="text-slate-600 italic" style={{ fontSize: `${baseFontPt - 1.5}px` }}>
-              "{settings.customSlogan}"
-            </p>
-          )}
-          {settings.showCompanyRnc && (
-            <p className="font-semibold text-slate-800" style={{ fontSize: `${baseFontPt - 0.5}px` }}>
-              RNC: {settings.companyRnc || '101000001'}
-              {settings.showCompanyPhone && settings.companyPhone ? ` · Tel: ${settings.companyPhone}` : ''}
-            </p>
-          )}
-          {settings.showCompanyAddress && settings.companyAddress && (
-            <p className="text-slate-600 leading-tight" style={{ fontSize: `${baseFontPt - 1.5}px` }}>
-              {settings.companyAddress}
-            </p>
-          )}
-          {!settings.showCompanyRnc && settings.showCompanyPhone && settings.companyPhone && (
-            <p className="text-slate-600" style={{ fontSize: `${baseFontPt - 1.5}px` }}>
-              Tel: {settings.companyPhone}
-            </p>
-          )}
-          {settings.showCompanyEmail && settings.companyEmail && (
-            <p className="text-slate-600" style={{ fontSize: `${baseFontPt - 1.5}px` }}>
-              {settings.companyEmail}
-            </p>
-          )}
-
-          {/* Título de comprobante */}
-          <div className="pt-2 pb-0.5">
-            <p className="font-black uppercase tracking-wide text-slate-950" style={{ fontSize: `${baseFontPt + 0.5}px` }}>
-              {getReceiptTitle()}
-            </p>
-          </div>
-        </div>
-
-        {/* Separador superior */}
-        <div className={`my-2 ${separatorClass}`} />
-
-        {/* Metadatos (No. Fac, Caja, Cajero, Fecha, NCF) */}
-        <div
-          className="space-y-1 text-slate-800"
-          style={{ fontSize: `${baseFontPt - 0.5}px` }}
-        >
-          <div className="flex justify-between gap-2">
-            <span className="text-slate-600 font-medium shrink-0">No. Fac:</span>
-            <span className="font-mono font-bold text-slate-950 text-right truncate">
-              {invoiceData.invoiceNumber}
-            </span>
-          </div>
-
-          {invoiceData.ncf && (
-            <div className="flex justify-between gap-2">
-              <span className="text-slate-600 font-medium shrink-0">NCF:</span>
-              <span className="font-mono font-bold text-slate-950 text-right">
-                {invoiceData.ncf}
-              </span>
-            </div>
-          )}
-
-          {isFiscal && invoiceData.expirationDate && (
-            <div className="flex justify-between gap-2">
-              <span className="text-slate-600 shrink-0">Vencimiento:</span>
-              <span className="font-mono text-slate-800 text-right">
-                {invoiceData.expirationDate}
-              </span>
-            </div>
-          )}
-
-          <div className="flex justify-between gap-2">
-            <span className="text-slate-600 font-medium shrink-0">Caja:</span>
-            <span className="font-semibold text-slate-950 text-right">
-              {invoiceData.registerNumber || 'Caja #1 - Administrador'}
-            </span>
-          </div>
-
-          <div className="flex justify-between gap-2">
-            <span className="text-slate-600 font-medium shrink-0">Cajero:</span>
-            <span className="font-semibold text-slate-950 text-right">
-              {invoiceData.cashier || 'Admin General'}
-            </span>
-          </div>
-
-          <div className="flex justify-between gap-2">
-            <span className="text-slate-600 font-medium shrink-0">Fecha:</span>
-            <span className="font-semibold text-slate-950 text-right">
-              {formattedDateTime}
-            </span>
-          </div>
-
-          {settings.showCustomerInfo && invoiceData.customerName && (
-            <div className="flex justify-between gap-2 pt-0.5 border-t border-dotted border-slate-200">
-              <span className="text-slate-600 font-medium shrink-0">Cliente:</span>
-              <span className="font-semibold text-slate-950 text-right truncate max-w-[200px]">
-                {invoiceData.customerName}
-              </span>
-            </div>
-          )}
-
-          {invoiceData.customerRnc && (isFiscal || settings.showCustomerRncInNormal) && (
-            <div className="flex justify-between gap-2">
-              <span className="text-slate-600 font-medium shrink-0">RNC Cliente:</span>
-              <span className="font-mono font-bold text-slate-950 text-right">
-                {invoiceData.customerRnc}
-              </span>
-            </div>
-          )}
-
-          {settings.showCustomerPhone && invoiceData.customerPhone && (
-            <div className="flex justify-between gap-2">
-              <span className="text-slate-600 shrink-0">Tel. Cliente:</span>
-              <span className="text-right text-slate-800">{invoiceData.customerPhone}</span>
-            </div>
-          )}
-
-          {settings.showCustomerAddress && invoiceData.customerAddress && (
-            <div className="flex justify-between gap-2">
-              <span className="text-slate-600 shrink-0">Dirección:</span>
-              <span className="text-right truncate max-w-[190px] text-slate-800">
-                {invoiceData.customerAddress}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Cabecera de la tabla de Ítems */}
-        <div className={`mt-2 pt-2 pb-1 ${separatorClass}`}>
-          <div className="flex justify-between font-black text-slate-900 uppercase tracking-wider text-[11px]">
-            <span>Cant. Descripción</span>
-            <span>Importe</span>
-          </div>
-        </div>
-
-        {/* Lista de Ítems sin truncado ni solapamiento */}
-        <div className={`pt-1 pb-2 ${separatorClass} space-y-2`}>
-          {invoiceData.items.map((item, idx) => (
-            <div
-              key={idx}
-              className="printable-invoice-item space-y-0.5"
-              style={{ breakInside: 'avoid', pageBreakInside: 'avoid' }}
-            >
-              <div className="flex justify-between items-start gap-2">
-                <span className="font-bold text-slate-950 leading-snug break-words">
-                  {settings.showItemSku && item.sku ? `[${item.sku}] ` : ''}
-                  {item.name}
-                </span>
-                <span className="font-black text-slate-950 tabular-nums shrink-0 text-right">
-                  {fmt(item.subtotal)}
-                </span>
-              </div>
-              <div
-                className="text-slate-600 font-medium"
-                style={{ fontSize: `${baseFontPt - 1.5}px` }}
-              >
-                <span>
-                  {item.qty}{item.unit && !['und', 'ud', 'unidad', 'unidades'].includes(item.unit.toLowerCase()) ? ` ${item.unit}` : ''} x ${fmt(item.price)}
-                </span>
-                {item.itbis !== undefined && item.itbis > 0 && settings.showTaxBreakdown && (
-                  <span className="ml-2 text-slate-500 font-normal">
-                    (ITBIS: {fmt(item.itbis)})
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Subtotal, Descuento, ITBIS y Total */}
-        <div className={`py-2 ${separatorClass} space-y-1.5`}>
-          <div className="flex justify-between text-slate-700 font-medium" style={{ fontSize: `${baseFontPt - 0.5}px` }}>
-            <span>Subtotal:</span>
-            <span className="tabular-nums font-semibold text-slate-900">{fmt(invoiceData.subtotal)}</span>
-          </div>
-          {typeof invoiceData.discount === 'number' && invoiceData.discount > 0 && (
-            <div className="flex justify-between text-slate-700 font-medium" style={{ fontSize: `${baseFontPt - 0.5}px` }}>
-              <span>Descuento:</span>
-              <span className="tabular-nums font-bold text-emerald-700">-{fmt(invoiceData.discount)}</span>
-            </div>
-          )}
-          {settings.showTaxBreakdown && (
-            <div className="flex justify-between text-slate-700 font-medium" style={{ fontSize: `${baseFontPt - 0.5}px` }}>
-              <span>ITBIS (18%):</span>
-              <span className="tabular-nums font-semibold text-slate-900">{fmt(invoiceData.itbis)}</span>
-            </div>
-          )}
-          <div
-            className="flex justify-between font-black text-slate-950 pt-1.5 border-t border-slate-900"
-            style={{ fontSize: `${baseFontPt + 2}px` }}
-          >
-            <span>TOTAL:</span>
-            <span className="tabular-nums">{fmt(invoiceData.total)}</span>
-          </div>
-        </div>
-
-        {/* Sección de Pago */}
-        <div
-          className={`py-2 ${separatorClass} space-y-1 text-slate-800`}
-          style={{ fontSize: `${baseFontPt - 0.5}px` }}
-        >
-          {isMultiPayment ? (
-            <div className="space-y-1">
-              <div className="flex justify-between font-bold text-slate-950 pb-0.5">
-                <span className="text-slate-600">Pago:</span>
-                <span className="uppercase font-black text-slate-950">MÚLTIPLE</span>
-              </div>
-              {computedPaymentBreakdown.map((p, idx) => (
-                <div key={idx} className="flex justify-between pl-2 text-slate-700">
-                  <span>{p.label}:</span>
-                  <span className="tabular-nums font-semibold text-slate-950">{fmt(p.amount)}</span>
-                </div>
-              ))}
-              <div className="flex justify-between font-bold text-slate-950 pt-0.5 border-t border-slate-200">
-                <span className="text-slate-600">Recibido:</span>
-                <span className="tabular-nums font-black text-slate-950">{fmt(totalPagadoEfectivo)}</span>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-1">
-              <div className="flex justify-between">
-                <span className="text-slate-600 font-medium">Pago:</span>
-                <span className="font-bold text-slate-950 uppercase">{primaryPaymentLabel}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-600 font-medium">Recibido:</span>
-                <span className="font-bold text-slate-950 tabular-nums">
-                  {fmt(invoiceData.cashReceived ?? invoiceData.total)}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {invoiceData.change !== undefined && Number(invoiceData.change) > 0 && (
-            <div className="flex justify-between font-bold text-slate-950 pt-0.5">
-              <span className="text-slate-600 font-medium">Cambio:</span>
-              <span className="tabular-nums font-black">{fmt(invoiceData.change)}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Código de barras / QR si está activo */}
-        {settings.showBarcodeQr && (
-          <QrCodeMock
-            label={
-              isFiscal && invoiceData.ncf
-                ? `NCF: ${invoiceData.ncf} · DGII Válido`
-                : invoiceData.invoiceNumber
-            }
-          />
-        )}
-
-        {/* Mensaje de cortesía */}
-        <div className={`py-2 ${separatorClass} text-center space-y-1`}>
-          <p className="font-medium italic text-slate-700 leading-snug" style={{ fontSize: `${baseFontPt - 1}px` }}>
-            {settings.footerMessage || '¡Gracias por preferirnos! Conserve este comprobante para cualquier reclamación.'}
-          </p>
-          {settings.showTerms && settings.termsAndConditions && (
-            <p className="text-[8.5px] leading-tight text-slate-500 pt-0.5">
-              {settings.termsAndConditions}
-            </p>
-          )}
-          {settings.showDgiiLegend && isFiscal && (
-            <p className="text-[8px] font-bold text-slate-700 pt-0.5">
-              {settings.dgiiNotice || 'Documento autorizado por la DGII conforme a la Ley 11-92.'}
-            </p>
-          )}
-        </div>
-
-        {/* Firmas Cajero y Cliente */}
-        {settings.showSignatureLine && (
-          <div className={`pt-4 pb-2 ${separatorClass}`}>
-            <div className="grid grid-cols-2 gap-6 text-center">
-              <div>
-                <div className="border-t border-slate-700 mb-1" />
-                <span className="text-[10px] text-slate-700 font-bold uppercase tracking-wider">
-                  Cajero
-                </span>
-              </div>
-              <div>
-                <div className="border-t border-slate-700 mb-1" />
-                <span className="text-[10px] text-slate-700 font-bold uppercase tracking-wider">
-                  Cliente
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Pie del sistema */}
-        <div className="pt-2 pb-1 text-center select-none">
-          <p className="text-[9px] font-medium text-slate-400 tracking-wider">
-            Sistema Mercato Desktop
-          </p>
-        </div>
-
-        {/* Avance de papel configurado */}
-        {settings.feedLines > 0 && (
-          <div style={{ height: `${Math.min(6, settings.feedLines) * 6}px` }} />
-        )}
+      <div className={`printable-invoice-container thermal-invoice-host print:p-0 mx-auto ${className}`}>
+        <ThermalInvoice
+          data={mappedThermalData}
+          settings={settings}
+          width={effectiveWidth}
+          logoUrl={logoUrl}
+        />
       </div>
     );
   }

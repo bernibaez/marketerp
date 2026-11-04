@@ -9,10 +9,9 @@ import {
 } from '@/lib/invoiceSettingsStore';
 import { getCompanyLogo, setCompanyLogo, clearCompanyLogo } from '@/lib/companyLogo';
 import { toast } from '@/lib/toast';
-import { isSupabaseConfigured } from '@/services/clienteSupabase';
-import { obtenerConfiguracionEmpresa, guardarConfiguracionEmpresa } from '@/services/empresa.service';
 import { InvoiceDesignForm } from './components/InvoiceDesignForm';
 import { InvoiceLivePreview } from './components/InvoiceLivePreview';
+import { usePrintInvoice } from '@/hooks/usePrintInvoice';
 
 export interface InvoiceSettingsTabProps {
   onBack?: () => void;
@@ -26,6 +25,10 @@ export default function InvoiceSettingsTab({ onBack, showBackButton = false }: I
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const { print: printThermalTest } = usePrintInvoice({
+    paperWidth: settings.paperWidth || 80,
+  });
+
   useEffect(() => {
     void syncInvoiceSettingsFromSupabase()
       .then((synced) => {
@@ -37,9 +40,22 @@ export default function InvoiceSettingsTab({ onBack, showBackButton = false }: I
   const handleFieldChange = <K extends keyof InvoiceSettings>(key: K, value: InvoiceSettings[K]) => {
     setSettings((prev) => {
       const updated = { ...prev, [key]: value };
-      if (key === 'printFormat') {
-        if (value === 'ticket_58mm') updated.customWidthMm = 58;
-        if (value === 'ticket_80mm') updated.customWidthMm = 80;
+      if (key === 'paperWidth') {
+        const numW = value as number;
+        updated.customWidthMm = numW;
+        if (numW === 50 || numW === 58) {
+          updated.printFormat = 'ticket_58mm';
+        } else {
+          updated.printFormat = 'ticket_80mm';
+        }
+      } else if (key === 'printFormat') {
+        if (value === 'ticket_58mm') {
+          updated.paperWidth = updated.paperWidth === 50 ? 50 : 58;
+          updated.customWidthMm = updated.paperWidth;
+        } else if (value === 'ticket_80mm') {
+          updated.paperWidth = 80;
+          updated.customWidthMm = 80;
+        }
       }
       return updated;
     });
@@ -74,7 +90,7 @@ export default function InvoiceSettingsTab({ onBack, showBackButton = false }: I
     try {
       const saved = await saveInvoiceSettingsToSupabase(settings);
       setSettings(saved);
-      toast.success('Configuración de factura guardada en Supabase y aplicada al POS y Ventas');
+      toast.success('Configuración de factura guardada y aplicada al sistema');
     } catch (e) {
       toast.error('Error al guardar la configuración: ' + (e instanceof Error ? e.message : ''));
     } finally {
@@ -86,7 +102,7 @@ export default function InvoiceSettingsTab({ onBack, showBackButton = false }: I
     setSettings(DEFAULT_INVOICE_SETTINGS);
     try {
       await saveInvoiceSettingsToSupabase(DEFAULT_INVOICE_SETTINGS);
-      toast.info('Valores restablecidos y guardados en Supabase');
+      toast.info('Valores restablecidos y guardados');
     } catch {
       saveInvoiceSettings(DEFAULT_INVOICE_SETTINGS);
       toast.info('Valores restablecidos a predeterminados');
@@ -94,9 +110,9 @@ export default function InvoiceSettingsTab({ onBack, showBackButton = false }: I
   };
 
   const handlePrintTest = () => {
-    // Guardar temporalmente para que el PrintableInvoice use las opciones actuales
+    // Guardar temporalmente para que el formato aplique de inmediato
     saveInvoiceSettings(settings);
-    window.print();
+    printThermalTest({ paperWidth: settings.paperWidth || 80 });
   };
 
   return (
@@ -119,10 +135,10 @@ export default function InvoiceSettingsTab({ onBack, showBackButton = false }: I
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-6 border-b border-slate-200/80 dark:border-slate-800">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
-            Diseño & Configuración de Facturas
+            Diseño & Configuración de Factura Térmica
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Personaliza el ancho manual, fuentes térmicas, márgenes y elementos que aparecen en tus comprobantes.
+            Personaliza el ancho de rollo (80mm / 50mm / 58mm), tipografía térmica, visibilidad de datos y vista previa a escala real.
           </p>
         </div>
 
@@ -138,7 +154,7 @@ export default function InvoiceSettingsTab({ onBack, showBackButton = false }: I
               <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
               <rect x="6" y="14" width="12" height="8" />
             </svg>
-            <span>Imprimir prueba</span>
+            <span>Imprimir prueba ({settings.paperWidth || 80}mm)</span>
           </button>
 
           <button
@@ -176,6 +192,7 @@ export default function InvoiceSettingsTab({ onBack, showBackButton = false }: I
           logoUrl={logoUrl}
           previewTab={previewTab}
           onTabChange={setPreviewTab}
+          onWidthChange={(w) => handleFieldChange('paperWidth', w)}
         />
       </div>
     </div>
