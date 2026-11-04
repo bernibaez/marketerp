@@ -150,93 +150,141 @@ export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceMo
               </button>
             </div>
 
-            {/* Selector de tamaño y zoom de letra térmico */}
-            <div className="flex items-center gap-1 p-1 bg-slate-200/60 dark:bg-slate-800 rounded-xl text-xs font-bold">
+            {/* Selector de tamaño y zoom de letra térmico manual */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-200/60 dark:bg-slate-800 rounded-xl text-xs font-bold">
               <span className="text-[10px] text-slate-500 dark:text-slate-400 px-1 font-bold uppercase tracking-wider hidden sm:inline">
                 Letra:
               </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setFontSizeOption('compact');
-                  setZoomScale(0.88);
-                }}
-                className={`px-2 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
-                  fontSizeOption === 'compact'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
-                    : 'text-slate-500 hover:text-slate-900'
-                }`}
-                title="Tamaño Compacto (88%)"
-              >
-                A-
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFontSizeOption('normal');
-                  setZoomScale(1.0);
-                }}
-                className={`px-2 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
-                  fontSizeOption === 'normal' && zoomScale === 1.0
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
-                    : 'text-slate-500 hover:text-slate-900'
-                }`}
-                title="Tamaño Normal (100%)"
-              >
-                A
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFontSizeOption('large');
-                  setZoomScale(1.15);
-                }}
-                className={`px-2 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
-                  fontSizeOption === 'large'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
-                    : 'text-slate-500 hover:text-slate-900'
-                }`}
-                title="Tamaño Grande (115%)"
-              >
-                A+
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFontSizeOption('xlarge');
-                  setZoomScale(1.30);
-                }}
-                className={`px-2 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
-                  fontSizeOption === 'xlarge'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
-                    : 'text-slate-500 hover:text-slate-900'
-                }`}
-                title="Tamaño Extra Grande (130%)"
-              >
-                A++
-              </button>
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFontSizeOption('compact');
+                    setZoomScale(0.88);
+                  }}
+                  className={`px-1.5 py-1 rounded text-[11px] font-bold cursor-pointer transition ${
+                    fontSizeOption === 'compact'
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="Tamaño Compacto (88%)"
+                >
+                  A-
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFontSizeOption('normal');
+                    setZoomScale(1.0);
+                  }}
+                  className={`px-1.5 py-1 rounded text-[11px] font-bold cursor-pointer transition ${
+                    fontSizeOption === 'normal' && zoomScale === 1.0
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="Tamaño Normal (100%)"
+                >
+                  A
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFontSizeOption('large');
+                    setZoomScale(1.15);
+                  }}
+                  className={`px-1.5 py-1 rounded text-[11px] font-bold cursor-pointer transition ${
+                    fontSizeOption === 'large'
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="Tamaño Grande (115%)"
+                >
+                  A+
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFontSizeOption('xlarge');
+                    setZoomScale(1.30);
+                  }}
+                  className={`px-1.5 py-1 rounded text-[11px] font-bold cursor-pointer transition ${
+                    fontSizeOption === 'xlarge'
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="Tamaño Extra Grande (130%)"
+                >
+                  A++
+                </button>
+              </div>
 
               <div className="h-3.5 w-px bg-slate-300 dark:bg-slate-700 my-auto mx-0.5" />
 
-              <button
-                type="button"
-                onClick={() => setZoomScale((z) => Math.max(0.75, Number((z - 0.05).toFixed(2))))}
-                className="p-1 rounded text-slate-500 hover:text-slate-900 hover:bg-white/50 transition cursor-pointer"
-                title="Reducir zoom (-5%)"
-              >
-                <Minus size={12} />
-              </button>
-              <span className="font-mono text-[10px] w-8 text-center font-bold text-slate-800 dark:text-slate-100 tabular-nums">
-                {Math.round(zoomScale * 100)}%
-              </span>
-              <button
-                type="button"
-                onClick={() => setZoomScale((z) => Math.min(1.4, Number((z + 0.05).toFixed(2))))}
-                className="p-1 rounded text-slate-500 hover:text-slate-900 hover:bg-white/50 transition cursor-pointer"
-                title="Aumentar zoom (+5%)"
-              >
-                <Plus size={12} />
-              </button>
+              {/* Controles manuales de Zoom (Slider + Input directo) */}
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setZoomScale((z) => Math.max(0.5, Number((z - 0.05).toFixed(2))))}
+                  className="p-1 rounded text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 transition cursor-pointer"
+                  title="Reducir zoom (-5%)"
+                  aria-label="Reducir zoom"
+                >
+                  <Minus size={11} />
+                </button>
+
+                <input
+                  type="range"
+                  min={50}
+                  max={160}
+                  step={1}
+                  value={Math.round(zoomScale * 100)}
+                  onChange={(e) => setZoomScale(Number((Number(e.target.value) / 100).toFixed(2)))}
+                  className="w-12 sm:w-16 accent-primary cursor-pointer h-1.5 bg-slate-300 dark:bg-slate-700 rounded-lg"
+                  title="Deslizador de zoom manual"
+                  aria-label="Deslizador de zoom manual"
+                />
+
+                <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1 py-0.5 shadow-2xs">
+                  <input
+                    type="number"
+                    min={40}
+                    max={200}
+                    step={1}
+                    value={Math.round(zoomScale * 100)}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (!isNaN(v) && v >= 40 && v <= 200) {
+                        setZoomScale(Number((v / 100).toFixed(2)));
+                      }
+                    }}
+                    className="w-9 text-center font-mono font-bold text-xs bg-transparent text-slate-900 dark:text-white tabular-nums focus:outline-none"
+                    title="Escribir porcentaje de zoom manual"
+                    aria-label="Escribir porcentaje de zoom manual"
+                  />
+                  <span className="text-[10px] text-slate-400 font-mono">%</span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setZoomScale((z) => Math.min(1.6, Number((z + 0.05).toFixed(2))))}
+                  className="p-1 rounded text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 transition cursor-pointer"
+                  title="Aumentar zoom (+5%)"
+                  aria-label="Aumentar zoom"
+                >
+                  <Plus size={11} />
+                </button>
+
+                {zoomScale !== 1.0 && (
+                  <button
+                    type="button"
+                    onClick={() => setZoomScale(1.0)}
+                    className="text-[10px] font-bold text-primary hover:underline px-1 transition cursor-pointer"
+                    title="Restablecer a 100%"
+                  >
+                    100%
+                  </button>
+                )}
+              </div>
             </div>
 
             <button

@@ -50,6 +50,7 @@ export const DEFAULT_INVOICE_SETTINGS: InvoiceSettings = {
   showNcf: true,
   copyText: '*** COPIA CLIENTE ***',
   fontSizeOption: 'normal',
+  zoomScale: 1.0,
   defaultCopies: 1,
 
   // Visibilidad granular

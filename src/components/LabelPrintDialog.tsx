@@ -134,13 +134,23 @@ export default function LabelPrintDialog({
   // Detección de incompatibilidades en el lote
   const incompatibleItems = printableList.filter((item) => !item.validation.valid);
 
+  const handleRotateNext = () => {
+    const current = config.rotation ?? (config.orientation === 'portrait' ? 90 : 0);
+    const nextRot = ((current + 90) % 360) as 0 | 90 | 180 | 270;
+    updateConfig({
+      rotation: nextRot,
+      orientation: nextRot === 90 || nextRot === 270 ? 'portrait' : 'landscape',
+    });
+  };
+
   const handlePrint = () => {
     if (products.length === 0) {
       toast.error('No hay productos para imprimir.');
       return;
     }
+    const currentRot = config.rotation ?? (config.orientation === 'portrait' ? 90 : 0);
     toast.success(`Enviando ${totalLabels} etiqueta(s) a la impresora...`);
-    printLabels(selectedSize, config.customWidthMm, config.customHeightMm, config.orientation);
+    printLabels(selectedSize, config.customWidthMm, config.customHeightMm, config.orientation, currentRot);
   };
 
   const handleDownloadPdf = async () => {
@@ -196,6 +206,7 @@ export default function LabelPrintDialog({
                     showBarcodeText={config.showBarcodeText}
                     showBusinessName={config.showBusinessName}
                     orientation={config.orientation}
+                    rotation={config.rotation ?? (config.orientation === 'portrait' ? 90 : 0)}
                     isPrintMode={true}
                   />
                 </div>
@@ -314,17 +325,29 @@ export default function LabelPrintDialog({
                   </div>
                 </div>
 
-                {/* Orientación: Horizontal (Apaisado) vs Vertical (Retrato) */}
+                {/* Orientación y Giro de Posición: Horizontal (0°) vs Vertical (Girado 90°) */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                    Orientación del Ticket / Etiqueta
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Orientación y Giro del Ticket
+                    </label>
                     <button
                       type="button"
-                      onClick={() => updateConfig({ orientation: 'landscape' })}
+                      onClick={handleRotateNext}
+                      className="text-[11px] font-bold text-primary hover:text-primary/80 flex items-center gap-1 transition-colors cursor-pointer"
+                      title="Girar 90° en sentido horario"
+                    >
+                      <RotateCw size={12} />
+                      Girar 90° ({(config.rotation ?? (config.orientation === 'portrait' ? 90 : 0))}°)
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => updateConfig({ orientation: 'landscape', rotation: 0 })}
                       className={`p-2.5 rounded-xl border flex items-center justify-center gap-2.5 text-xs font-bold transition cursor-pointer ${
-                        config.orientation === 'landscape'
+                        (config.rotation ?? (config.orientation === 'portrait' ? 90 : 0)) === 0
                           ? 'border-primary bg-primary/10 text-primary shadow-xs ring-1 ring-primary/40'
                           : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
                       }`}
@@ -333,15 +356,15 @@ export default function LabelPrintDialog({
                         <span className="text-[8px] font-mono leading-none">━</span>
                       </div>
                       <div className="text-left">
-                        <p className="leading-tight">Horizontal</p>
-                        <p className="text-[10px] font-normal text-muted-foreground">Apaisado / Código a lo ancho</p>
+                        <p className="leading-tight">Horizontal (0°)</p>
+                        <p className="text-[10px] font-normal text-muted-foreground">Posición apaisada normal</p>
                       </div>
                     </button>
                     <button
                       type="button"
-                      onClick={() => updateConfig({ orientation: 'portrait' })}
+                      onClick={() => updateConfig({ orientation: 'portrait', rotation: 90 })}
                       className={`p-2.5 rounded-xl border flex items-center justify-center gap-2.5 text-xs font-bold transition cursor-pointer ${
-                        config.orientation === 'portrait'
+                        (config.rotation ?? (config.orientation === 'portrait' ? 90 : 0)) === 90
                           ? 'border-primary bg-primary/10 text-primary shadow-xs ring-1 ring-primary/40'
                           : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
                       }`}
@@ -350,11 +373,46 @@ export default function LabelPrintDialog({
                         <span className="text-[8px] font-mono leading-none">┃</span>
                       </div>
                       <div className="text-left">
-                        <p className="leading-tight">Vertical</p>
-                        <p className="text-[10px] font-normal text-muted-foreground">Retrato / Código vertical</p>
+                        <p className="leading-tight">Vertical (Girado 90°)</p>
+                        <p className="text-[10px] font-normal text-muted-foreground">Posición girada 90°</p>
                       </div>
                     </button>
                   </div>
+
+                  {/* Micro-pills de ángulo exacto de giro */}
+                  <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/70 rounded-lg text-[11px] font-medium">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase px-1">Giro:</span>
+                    {([
+                      { deg: 0, label: '0° Normal' },
+                      { deg: 90, label: '90° Der.' },
+                      { deg: 180, label: '180° Inv.' },
+                      { deg: 270, label: '270° Izq.' },
+                    ] as const).map(({ deg, label }) => {
+                      const isActive = (config.rotation ?? (config.orientation === 'portrait' ? 90 : 0)) === deg;
+                      return (
+                        <button
+                          key={deg}
+                          type="button"
+                          onClick={() =>
+                            updateConfig({
+                              rotation: deg,
+                              orientation: deg === 90 || deg === 270 ? 'portrait' : 'landscape',
+                            })
+                          }
+                          className={`flex-1 py-1 px-1.5 rounded-md text-center transition cursor-pointer text-[10px] font-bold ${
+                            isActive
+                              ? 'bg-white dark:bg-slate-900 text-primary shadow-2xs font-extrabold'
+                              : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Gira la posición del ticket para adaptarlo a cómo sale el papel en tu impresora térmica.
+                  </p>
                 </div>
 
                 {/* Dimensiones personalizadas si elige "custom" */}
@@ -572,45 +630,97 @@ export default function LabelPrintDialog({
 
             {/* Columna Derecha: Previsualización a Escala Real */}
             <div className="lg:col-span-6 p-5 flex flex-col bg-slate-50/50 dark:bg-slate-900/50 overflow-hidden">
-              {/* Barra de herramientas del Preview */}
-              <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-200 dark:border-slate-800">
+              {/* Barra de herramientas del Preview con Giro y Zoom Manual */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 mb-3 border-b border-slate-200 dark:border-slate-800">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                    Vista Previa ({effectiveWidthMm} × {effectiveHeightMm} mm)
+                    Vista Previa (
+                    {(config.rotation ?? (config.orientation === 'portrait' ? 90 : 0)) === 90 ||
+                    (config.rotation ?? (config.orientation === 'portrait' ? 90 : 0)) === 270
+                      ? `${effectiveHeightMm} × ${effectiveWidthMm}`
+                      : `${effectiveWidthMm} × ${effectiveHeightMm}`}{' '}
+                    mm)
                   </span>
-                  <span className="text-[11px] text-slate-400 font-mono">
-                    Escala: {Math.round(scale * 100)}%
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary font-mono">
+                    {(config.rotation ?? (config.orientation === 'portrait' ? 90 : 0))}°
                   </span>
                 </div>
 
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-2">
+                  {/* Botón rápido para girar 90° */}
                   <button
                     type="button"
-                    onClick={() => setScale((s) => Math.max(0.6, s - 0.15))}
-                    className="p-1.5 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 rounded hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                    title="Reducir zoom"
-                    aria-label="Reducir zoom de vista previa"
+                    onClick={handleRotateNext}
+                    className="flex items-center gap-1 px-2 py-1 text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-750 transition-colors cursor-pointer shadow-2xs"
+                    title="Girar 90° en sentido horario"
                   >
-                    <ZoomOut size={15} />
+                    <RotateCw size={13} />
+                    <span>Girar</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setScale(1)}
-                    className="p-1.5 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 rounded hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                    title="Escala Real 100%"
-                    aria-label="Zoom al 100% escala real"
-                  >
-                    <Maximize2 size={15} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setScale((s) => Math.min(1.6, s + 0.15))}
-                    className="p-1.5 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 rounded hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                    title="Aumentar zoom"
-                    aria-label="Aumentar zoom de vista previa"
-                  >
-                    <ZoomIn size={15} />
-                  </button>
+
+                  <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block" />
+
+                  {/* Control manual de Zoom */}
+                  <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700/60">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase hidden sm:inline">Zoom:</span>
+                    <button
+                      type="button"
+                      onClick={() => setScale((s) => Math.max(0.5, Number((s - 0.1).toFixed(2))))}
+                      className="p-0.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 rounded cursor-pointer"
+                      title="Reducir zoom"
+                    >
+                      <ZoomOut size={13} />
+                    </button>
+
+                    <input
+                      type="range"
+                      min={50}
+                      max={180}
+                      step={1}
+                      value={Math.round(scale * 100)}
+                      onChange={(e) => setScale(Number(e.target.value) / 100)}
+                      className="w-14 sm:w-20 accent-primary cursor-pointer h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg"
+                      title="Deslizador de zoom manual"
+                      aria-label="Deslizador de zoom manual"
+                    />
+
+                    <div className="flex items-center">
+                      <input
+                        type="number"
+                        min={40}
+                        max={250}
+                        step={1}
+                        value={Math.round(scale * 100)}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          if (!isNaN(v) && v >= 40 && v <= 250) setScale(v / 100);
+                        }}
+                        className="w-10 text-center font-mono font-bold text-[11px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded px-0.5 py-0.5 tabular-nums focus:outline-none"
+                        aria-label="Porcentaje de zoom"
+                      />
+                      <span className="text-[10px] text-slate-400 font-mono ml-0.5">%</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setScale((s) => Math.min(2.0, Number((s + 0.1).toFixed(2))))}
+                      className="p-0.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 rounded cursor-pointer"
+                      title="Aumentar zoom"
+                    >
+                      <ZoomIn size={13} />
+                    </button>
+
+                    {scale !== 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setScale(1)}
+                        className="text-[10px] font-bold text-primary hover:underline ml-0.5 cursor-pointer"
+                        title="Restablecer a escala 100%"
+                      >
+                        100%
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -632,6 +742,7 @@ export default function LabelPrintDialog({
                       showBarcodeText={config.showBarcodeText}
                       showBusinessName={config.showBusinessName}
                       orientation={config.orientation}
+                      rotation={config.rotation ?? (config.orientation === 'portrait' ? 90 : 0)}
                       scale={scale}
                     />
                   </div>

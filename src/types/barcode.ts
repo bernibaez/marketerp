@@ -30,6 +30,8 @@ export interface LabelPrintConfig {
   businessName: string;
   currencySymbol: string;
   orientation: 'portrait' | 'landscape';
+  rotation?: 0 | 90 | 180 | 270;
+  previewScale?: number;
   copies: Record<string, number>;
   productFormats: Record<string, BarcodeFormat>;
   gridColumns: number;
@@ -101,6 +103,8 @@ export const DEFAULT_LABEL_CONFIG: LabelPrintConfig = {
   businessName: 'Mi Colmado / Supermercado ERP',
   currencySymbol: 'RD$',
   orientation: 'landscape',
+  rotation: 0,
+  previewScale: 1,
   copies: {},
   productFormats: {},
   gridColumns: 3,

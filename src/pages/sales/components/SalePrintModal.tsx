@@ -119,93 +119,141 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
               </button>
             </div>
 
-            {/* Ajuste de Tamaño / Letra / Zoom térmico */}
-            <div className="flex items-center gap-1 p-0.5 bg-secondary rounded-lg text-xs font-semibold border border-border">
+            {/* Ajuste de Tamaño / Letra / Zoom térmico manual */}
+            <div className="flex items-center gap-1.5 p-1 bg-secondary rounded-lg text-xs font-semibold border border-border">
               <span className="text-[10px] text-muted-foreground px-1 font-bold uppercase tracking-wider hidden sm:inline">
                 Letra:
               </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setFontSizeOption('compact');
-                  setZoomScale(0.88);
-                }}
-                className={`px-1.5 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
-                  fontSizeOption === 'compact'
-                    ? 'bg-card text-foreground font-bold shadow-2xs'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-                title="Tamaño Compacto (88%)"
-              >
-                A-
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFontSizeOption('normal');
-                  setZoomScale(1.0);
-                }}
-                className={`px-1.5 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
-                  fontSizeOption === 'normal' && zoomScale === 1.0
-                    ? 'bg-card text-foreground font-bold shadow-2xs'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-                title="Tamaño Normal (100%)"
-              >
-                A
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFontSizeOption('large');
-                  setZoomScale(1.15);
-                }}
-                className={`px-1.5 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
-                  fontSizeOption === 'large'
-                    ? 'bg-card text-foreground font-bold shadow-2xs'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-                title="Tamaño Grande (115%)"
-              >
-                A+
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFontSizeOption('xlarge');
-                  setZoomScale(1.30);
-                }}
-                className={`px-1.5 py-1 rounded-md transition-all text-[11px] font-bold cursor-pointer ${
-                  fontSizeOption === 'xlarge'
-                    ? 'bg-card text-foreground font-bold shadow-2xs'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-                title="Tamaño Extra Grande (130%)"
-              >
-                A++
-              </button>
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFontSizeOption('compact');
+                    setZoomScale(0.88);
+                  }}
+                  className={`px-1.5 py-1 rounded text-[11px] font-bold cursor-pointer transition ${
+                    fontSizeOption === 'compact'
+                      ? 'bg-card text-foreground shadow-2xs'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  title="Compacto (88%)"
+                >
+                  A-
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFontSizeOption('normal');
+                    setZoomScale(1.0);
+                  }}
+                  className={`px-1.5 py-1 rounded text-[11px] font-bold cursor-pointer transition ${
+                    fontSizeOption === 'normal' && zoomScale === 1.0
+                      ? 'bg-card text-foreground shadow-2xs'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  title="Normal (100%)"
+                >
+                  A
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFontSizeOption('large');
+                    setZoomScale(1.15);
+                  }}
+                  className={`px-1.5 py-1 rounded text-[11px] font-bold cursor-pointer transition ${
+                    fontSizeOption === 'large'
+                      ? 'bg-card text-foreground shadow-2xs'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  title="Grande (115%)"
+                >
+                  A+
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFontSizeOption('xlarge');
+                    setZoomScale(1.30);
+                  }}
+                  className={`px-1.5 py-1 rounded text-[11px] font-bold cursor-pointer transition ${
+                    fontSizeOption === 'xlarge'
+                      ? 'bg-card text-foreground shadow-2xs'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  title="Extra Grande (130%)"
+                >
+                  A++
+                </button>
+              </div>
 
               <div className="h-3.5 w-px bg-border my-auto mx-0.5" />
 
-              <button
-                type="button"
-                onClick={() => setZoomScale((z) => Math.max(0.75, Number((z - 0.05).toFixed(2))))}
-                className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-card transition cursor-pointer"
-                title="Reducir zoom (-5%)"
-              >
-                <Minus size={11} />
-              </button>
-              <span className="font-mono text-[10px] w-8 text-center font-bold text-foreground tabular-nums">
-                {Math.round(zoomScale * 100)}%
-              </span>
-              <button
-                type="button"
-                onClick={() => setZoomScale((z) => Math.min(1.4, Number((z + 0.05).toFixed(2))))}
-                className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-card transition cursor-pointer"
-                title="Aumentar zoom (+5%)"
-              >
-                <Plus size={11} />
-              </button>
+              {/* Controles manuales de Zoom (Slider + Input numérico directo + +/-) */}
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setZoomScale((z) => Math.max(0.5, Number((z - 0.05).toFixed(2))))}
+                  className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-card transition cursor-pointer"
+                  title="Reducir zoom (-5%)"
+                  aria-label="Reducir zoom"
+                >
+                  <Minus size={11} />
+                </button>
+
+                <input
+                  type="range"
+                  min={50}
+                  max={160}
+                  step={1}
+                  value={Math.round(zoomScale * 100)}
+                  onChange={(e) => setZoomScale(Number((Number(e.target.value) / 100).toFixed(2)))}
+                  className="w-12 sm:w-16 accent-primary cursor-pointer h-1.5 bg-muted rounded-lg"
+                  title="Deslizador continuo de zoom manual"
+                  aria-label="Deslizador continuo de zoom manual"
+                />
+
+                <div className="flex items-center bg-card border border-border rounded px-1 py-0.5">
+                  <input
+                    type="number"
+                    min={40}
+                    max={200}
+                    step={1}
+                    value={Math.round(zoomScale * 100)}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (!isNaN(v) && v >= 40 && v <= 200) {
+                        setZoomScale(Number((v / 100).toFixed(2)));
+                      }
+                    }}
+                    className="w-9 text-center font-mono font-bold text-xs bg-transparent tabular-nums focus:outline-none"
+                    title="Escribir porcentaje de zoom manual"
+                    aria-label="Escribir porcentaje de zoom manual"
+                  />
+                  <span className="text-[10px] text-muted-foreground font-mono">%</span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setZoomScale((z) => Math.min(1.6, Number((z + 0.05).toFixed(2))))}
+                  className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-card transition cursor-pointer"
+                  title="Aumentar zoom (+5%)"
+                  aria-label="Aumentar zoom"
+                >
+                  <Plus size={11} />
+                </button>
+
+                {zoomScale !== 1.0 && (
+                  <button
+                    type="button"
+                    onClick={() => setZoomScale(1.0)}
+                    className="text-[10px] font-bold text-primary hover:underline px-1 transition cursor-pointer"
+                    title="Restablecer a 100%"
+                  >
+                    100%
+                  </button>
+                )}
+              </div>
             </div>
 
             <button

@@ -201,6 +201,55 @@ export function InvoiceDesignForm({
               </button>
             </div>
           </div>
+
+          {/* Ajuste manual continuo de Zoom */}
+          <div className="pt-2">
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs text-slate-700 dark:text-slate-300 font-medium">
+                Zoom manual térmico predeterminado
+              </label>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={50}
+                  max={180}
+                  step={1}
+                  value={Math.round((settings.zoomScale ?? 1.0) * 100)}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (!isNaN(v) && v >= 40 && v <= 200) {
+                      onFieldChange('zoomScale', Number((v / 100).toFixed(2)));
+                    }
+                  }}
+                  className="w-12 text-center text-xs font-mono font-bold px-1 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                />
+                <span className="text-[11px] font-mono text-slate-500">%</span>
+                {(settings.zoomScale ?? 1.0) !== 1.0 && (
+                  <button
+                    type="button"
+                    onClick={() => onFieldChange('zoomScale', 1.0)}
+                    className="text-[10px] font-bold text-primary hover:underline ml-1 cursor-pointer"
+                  >
+                    100%
+                  </button>
+                )}
+              </div>
+            </div>
+            <input
+              type="range"
+              min={60}
+              max={160}
+              step={1}
+              value={Math.round((settings.zoomScale ?? 1.0) * 100)}
+              onChange={(e) => onFieldChange('zoomScale', Number((Number(e.target.value) / 100).toFixed(2)))}
+              className="w-full accent-primary cursor-pointer h-2 bg-slate-200 dark:bg-slate-700 rounded-lg"
+            />
+            <div className="flex justify-between text-[10px] text-slate-400 font-mono mt-0.5">
+              <span>60% (Compacto)</span>
+              <span>100% (Estándar)</span>
+              <span>160% (Grande)</span>
+            </div>
+          </div>
         </div>
       </div>
 

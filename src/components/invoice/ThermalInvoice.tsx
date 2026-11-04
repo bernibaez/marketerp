@@ -186,7 +186,7 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
         <h1
           className="font-sans font-black text-black uppercase tracking-tight text-center leading-tight mx-auto"
           style={{
-            fontSize: isNarrow ? '11.5px' : '13.5px',
+            fontSize: `${((isNarrow ? 11.5 : 13.5) * totalScale).toFixed(1)}px`,
             wordBreak: 'break-word',
             display: '-webkit-box',
             WebkitLineClamp: 2,
@@ -236,7 +236,7 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
       >
         <span
           className="font-sans font-bold uppercase tracking-wider text-black block"
-          style={{ fontSize: isNarrow ? '10px' : '11px' }}
+          style={{ fontSize: `${((isNarrow ? 10 : 11) * totalScale).toFixed(1)}px` }}
         >
           {receiptTitle}
         </span>
@@ -413,7 +413,7 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
                   >
                     <div className="font-bold leading-tight break-words">{desc}</div>
                     <div className="flex justify-between items-baseline">
-                      <span className="text-[7.5px] leading-none">
+                      <span className="leading-none" style={{ fontSize: `${(7.5 * totalScale).toFixed(1)}px` }}>
                         {qty} x {formatCurrency(price, currencySymbol)}
                       </span>
                       <span className="font-bold tabular-nums">
@@ -475,17 +475,19 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
         >
           {!isNarrow ? (
             <div className="flex justify-between items-center font-sans">
-              <span className="font-black text-sm tracking-wide">TOTAL</span>
-              <span className="font-black text-lg sm:text-xl tracking-tight tabular-nums">
+              <span className="font-black tracking-wide" style={{ fontSize: `${(13.5 * totalScale).toFixed(1)}px` }}>
+                TOTAL
+              </span>
+              <span className="font-black tracking-tight tabular-nums" style={{ fontSize: `${(19.5 * totalScale).toFixed(1)}px` }}>
                 {formatCurrency(totals.total, currencySymbol)}
               </span>
             </div>
           ) : (
             <div className="text-center font-sans">
-              <span className="block font-bold uppercase text-[8.5px] tracking-wider leading-none">
+              <span className="block font-bold uppercase tracking-wider leading-none" style={{ fontSize: `${(8.5 * totalScale).toFixed(1)}px` }}>
                 TOTAL A PAGAR
               </span>
-              <span className="block font-black text-base tracking-tight tabular-nums mt-0.5 leading-none">
+              <span className="block font-black tracking-tight tabular-nums mt-0.5 leading-none" style={{ fontSize: `${(16 * totalScale).toFixed(1)}px` }}>
                 {formatCurrency(totals.total, currencySymbol)}
               </span>
             </div>

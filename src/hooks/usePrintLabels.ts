@@ -51,7 +51,13 @@ export function usePrintLabels() {
    * Genera e inyecta dinámicamente la regla @page para que la impresora
    * corte el papel o ajuste el margen al tamaño exacto de la etiqueta elegida.
    */
-  const injectDynamicPageStyle = useCallback((size: LabelSize, customW: number, customH: number, orientation: 'portrait' | 'landscape') => {
+  const injectDynamicPageStyle = useCallback((
+    size: LabelSize,
+    customW: number,
+    customH: number,
+    orientation: 'portrait' | 'landscape',
+    rotation: 0 | 90 | 180 | 270 = 0
+  ) => {
     const existingStyle = document.getElementById('dynamic-label-print-style');
     if (existingStyle) {
       existingStyle.remove();
@@ -60,17 +66,13 @@ export function usePrintLabels() {
     const baseW = size.id === 'custom' ? customW : size.widthMm;
     const baseH = size.id === 'custom' ? customH : size.heightMm;
 
-    const isLandscape = orientation === 'landscape';
-    const widthMm = size.isContinuous
-      ? baseW
-      : isLandscape
-        ? Math.max(baseW, baseH)
-        : Math.min(baseW, baseH);
-    const heightMm = size.isContinuous
-      ? (isLandscape ? Math.min(baseW, baseH) : Math.max(baseW, baseH, 60))
-      : isLandscape
-        ? Math.min(baseW, baseH)
-        : Math.max(baseW, baseH);
+    const natW = size.isContinuous ? baseW : Math.max(baseW, baseH);
+    const natH = size.isContinuous ? baseH : Math.min(baseW, baseH);
+
+    const isRotated = rotation === 90 || rotation === 270;
+    const widthMm = isRotated && !size.isContinuous ? natH : natW;
+    const heightMm = isRotated && !size.isContinuous ? natW : natH;
+    const pageOrientation = isRotated ? 'portrait' : (orientation === 'landscape' ? 'landscape' : 'portrait');
 
     const styleEl = document.createElement('style');
     styleEl.id = 'dynamic-label-print-style';
@@ -157,7 +159,7 @@ export function usePrintLabels() {
       // Etiqueta individual estándar (ej: 50x30mm o 40x25mm)
       styleEl.innerHTML = `
         @page {
-          size: ${widthMm}mm ${heightMm}mm ${isLandscape ? 'landscape' : 'portrait'};
+          size: ${widthMm}mm ${heightMm}mm ${pageOrientation};
           margin: 0;
         }
         @media print {
@@ -174,9 +176,15 @@ export function usePrintLabels() {
           .label-print-single-item {
             width: ${widthMm}mm !important;
             height: ${heightMm}mm !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
             break-inside: avoid !important;
             page-break-inside: avoid !important;
             page-break-after: always !important;
+            overflow: hidden !important;
+            margin: 0 !important;
+            padding: 0 !important;
           }
         }
       `;
@@ -186,9 +194,15 @@ export function usePrintLabels() {
   }, []);
 
   const printLabels = useCallback(
-    (size: LabelSize, customW: number, customH: number, orientation: 'portrait' | 'landscape') => {
+    (
+      size: LabelSize,
+      customW: number,
+      customH: number,
+      orientation: 'portrait' | 'landscape',
+      rotation: 0 | 90 | 180 | 270 = 0
+    ) => {
       document.body.setAttribute('data-printing', 'true');
-      injectDynamicPageStyle(size, customW, customH, orientation);
+      injectDynamicPageStyle(size, customW, customH, orientation, rotation);
 
       const handleAfterPrint = () => {
         window.removeEventListener('afterprint', handleAfterPrint);

@@ -18,6 +18,7 @@ export interface ProductLabelProps {
   showBarcodeText?: boolean;
   showBusinessName?: boolean;
   orientation?: 'portrait' | 'landscape';
+  rotation?: 0 | 90 | 180 | 270;
   isPrintMode?: boolean;
   scale?: number; // Factor de escala para pantalla (1.0 = escala real a ~3.78 px por mm)
   className?: string;
@@ -36,47 +37,68 @@ export default function ProductLabel({
   showSku = true,
   showBarcodeText = true,
   showBusinessName = true,
-  orientation = 'portrait',
+  orientation = 'landscape',
+  rotation,
   isPrintMode = false,
   scale = 1,
   className = '',
 }: ProductLabelProps) {
-  // Dimensiones en milímetros con soporte real Horizontal (ancho > alto) vs Vertical (alto > ancho)
+  // Rotación efectiva: prioridad a prop rotation (0, 90, 180, 270), fallback a orientation (portrait => 90, landscape => 0)
+  const effectiveRotation: 0 | 90 | 180 | 270 =
+    rotation !== undefined
+      ? rotation
+      : orientation === 'portrait'
+        ? 90
+        : 0;
+
+  const isRotated90or270 = effectiveRotation === 90 || effectiveRotation === 270;
+
+  // Dimensiones base naturales de la etiqueta antes de girar (ej. 50mm ancho x 30mm alto)
   const baseWidth = size.id === 'custom' ? customWidthMm : size.widthMm;
   const baseHeight = size.id === 'custom' ? customHeightMm : size.heightMm;
 
-  const isLandscape = orientation === 'landscape';
-  const widthMm = size.isContinuous
+  // En etiquetas individuales estándar (50x30, 40x25), el diseño nativo es ancho (max) x alto (min)
+  const naturalWidthMm = size.isContinuous
     ? baseWidth
-    : isLandscape
-      ? Math.max(baseWidth, baseHeight)
-      : Math.min(baseWidth, baseHeight);
-  const heightMm = size.isContinuous
-    ? (isLandscape ? Math.min(baseWidth, baseHeight) : Math.max(baseWidth, baseHeight, 60))
-    : isLandscape
-      ? Math.min(baseWidth, baseHeight)
-      : Math.max(baseWidth, baseHeight);
+    : Math.max(baseWidth, baseHeight);
+  const naturalHeightMm = size.isContinuous
+    ? Math.min(baseWidth, baseHeight)
+    : Math.min(baseWidth, baseHeight);
+
+  // Dimensiones exteriores del contenedor según si está girado 90°/270° o no
+  const outerWidthMm = isRotated90or270 && !size.isContinuous
+    ? naturalHeightMm
+    : naturalWidthMm;
+  const outerHeightMm = isRotated90or270 && !size.isContinuous
+    ? naturalWidthMm
+    : naturalHeightMm;
 
   // Código a renderizar (prioriza código de barras, luego sku, luego id)
   const rawCode = (product.barcode || product.sku || product.id || '').trim();
-  const code = normalizeBarcode(format, rawCode);
 
-  // Alerta de desbordamiento en etiquetas pequeñas
-  const isOverflowing = isBarcodeOverflowing(format, rawCode, widthMm);
+  // Alerta de desbordamiento en etiquetas pequeñas según el ancho nativo donde se dibuja el código
+  const isOverflowing = isBarcodeOverflowing(format, rawCode, naturalWidthMm);
 
-  // Dimensiones dinámicas del código de barras proporcionales al alto y ancho de la etiqueta
+  // Dimensiones dinámicas del código de barras proporcionales al alto y ancho nativo
   const barcodeHeight = Math.max(
     28,
-    Math.min(heightMm * 0.9, heightMm < 30 ? 30 : heightMm < 40 ? 40 : 50)
+    Math.min(naturalHeightMm * 0.9, naturalHeightMm < 30 ? 30 : naturalHeightMm < 40 ? 40 : 50)
   );
 
   const barcodeModuleWidth =
-    widthMm < 45 ? 1.4 : widthMm < 60 ? 1.7 : widthMm < 75 ? 2.0 : 2.2;
+    naturalWidthMm < 45 ? 1.4 : naturalWidthMm < 60 ? 1.7 : naturalWidthMm < 75 ? 2.0 : 2.2;
 
   // 1 mm ≈ 3.7795 px a 96 DPI estándar de pantalla
   const pxPerMm = 3.78 * scale;
-  const widthPx = Math.round(widthMm * pxPerMm);
-  const minHeightPx = Math.round(heightMm * pxPerMm);
+  const naturalWidthPx = Math.round(naturalWidthMm * pxPerMm);
+  const naturalHeightPx = Math.round(naturalHeightMm * pxPerMm);
+
+  const outerWidthPx = isRotated90or270 && !size.isContinuous
+    ? naturalHeightPx
+    : naturalWidthPx;
+  const outerHeightPx = isRotated90or270 && !size.isContinuous
+    ? naturalWidthPx
+    : naturalHeightPx;
 
   // Separar parte entera y decimales del precio para jerarquía visual óptima (salePrice o price de fallback)
   const numericPrice = Number(product.salePrice ?? (product as unknown as { price?: number }).price ?? 0);
@@ -85,43 +107,14 @@ export default function ProductLabel({
     maximumFractionDigits: 2,
   });
 
-  // Estilos físicos para impresión (@media print) vs visualización previa
-  const printInlineStyle: React.CSSProperties = isPrintMode
-    ? {
-      width: `${widthMm}mm`,
-      minHeight: `${heightMm}mm`,
-      maxWidth: `${widthMm}mm`,
-      boxSizing: 'border-box',
-      backgroundColor: '#ffffff',
-      color: '#000000',
-      padding: '1.2mm',
-      margin: '0 auto',
-      breakInside: 'avoid',
-      pageBreakInside: 'avoid',
-      WebkitPrintColorAdjust: 'exact',
-      printColorAdjust: 'exact',
-      fontFamily: 'Inter, Arial, Helvetica, sans-serif',
-    }
-    : {
-      width: `${widthPx}px`,
-      minHeight: `${minHeightPx}px`,
-      boxSizing: 'border-box',
-      backgroundColor: '#ffffff',
-      color: '#000000',
-      fontFamily: 'Inter, Arial, Helvetica, sans-serif',
-    };
-
-  return (
-    <div
-      className={`relative flex flex-col justify-between text-center bg-white text-black border border-slate-300 rounded-sm overflow-hidden select-none transition-shadow ${isPrintMode ? 'border-none p-0 shadow-none' : 'shadow-xs p-2'
-        } ${className}`}
-      style={printInlineStyle}
-    >
+  // Contenido interno de la etiqueta
+  const labelContent = (
+    <>
       {/* Alerta visible en pantalla si el código es demasiado largo para el ancho físico */}
       {!isPrintMode && isOverflowing && (
         <div
           className="absolute top-0.5 right-0.5 bg-amber-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px] font-bold z-10"
-          title={`Atención: El código puede desbordar los ${widthMm}mm de esta etiqueta.`}
+          title={`Atención: El código puede desbordar los ${naturalWidthMm}mm de esta etiqueta.`}
         >
           !
         </div>
@@ -147,7 +140,7 @@ export default function ProductLabel({
           title={product.name}
           style={{
             color: '#000000',
-            fontSize: isPrintMode ? (heightMm < 30 ? '7.5pt' : '9pt') : undefined,
+            fontSize: isPrintMode ? (naturalHeightMm < 30 ? '7.5pt' : '9pt') : undefined,
             lineHeight: isPrintMode ? '1.15' : undefined,
           }}
         >
@@ -162,7 +155,7 @@ export default function ProductLabel({
             className="text-[9px] sm:text-[10px] font-bold mr-0.5 mt-0.5 tracking-tight align-top"
             style={{
               color: '#111111',
-              fontSize: isPrintMode ? (heightMm < 30 ? '7pt' : '8pt') : undefined,
+              fontSize: isPrintMode ? (naturalHeightMm < 30 ? '7pt' : '8pt') : undefined,
             }}
           >
             {currencySymbol}
@@ -172,10 +165,10 @@ export default function ProductLabel({
             style={{
               color: '#000000',
               fontSize: isPrintMode
-                ? heightMm < 30
+                ? naturalHeightMm < 30
                   ? '13pt'
                   : '18pt'
-                : heightMm < 30
+                : naturalHeightMm < 30
                   ? '16px'
                   : '22px',
             }}
@@ -193,7 +186,7 @@ export default function ProductLabel({
           width={barcodeModuleWidth}
           height={barcodeHeight}
           displayValue={showBarcodeText}
-          fontSize={isPrintMode ? (heightMm < 30 ? 7 : 8) : (heightMm < 30 ? 8 : 10)}
+          fontSize={isPrintMode ? (naturalHeightMm < 30 ? 7 : 8) : (naturalHeightMm < 30 ? 8 : 10)}
           margin={0}
           lineColor="#000000"
           background="transparent"
@@ -212,6 +205,83 @@ export default function ProductLabel({
           {product.unit && <span className="truncate uppercase font-bold text-slate-600">{product.unit}</span>}
         </div>
       )}
+    </>
+  );
+
+  // Renderizado para impresión (@media print)
+  if (isPrintMode) {
+    return (
+      <div
+        className="product-label-print-wrapper"
+        style={{
+          width: `${outerWidthMm}mm`,
+          height: `${outerHeightMm}mm`,
+          maxWidth: `${outerWidthMm}mm`,
+          maxHeight: `${outerHeightMm}mm`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
+          boxSizing: 'border-box',
+          breakInside: 'avoid',
+          pageBreakInside: 'avoid',
+          margin: '0 auto',
+        }}
+      >
+        <div
+          className="product-label-print-inner relative flex flex-col justify-between text-center bg-white text-black"
+          style={{
+            width: `${naturalWidthMm}mm`,
+            height: `${naturalHeightMm}mm`,
+            maxWidth: `${naturalWidthMm}mm`,
+            maxHeight: `${naturalHeightMm}mm`,
+            transform: effectiveRotation !== 0 ? `rotate(${effectiveRotation}deg)` : undefined,
+            transformOrigin: 'center center',
+            flexShrink: 0,
+            boxSizing: 'border-box',
+            backgroundColor: '#ffffff',
+            color: '#000000',
+            padding: '1.2mm',
+            WebkitPrintColorAdjust: 'exact',
+            printColorAdjust: 'exact',
+            fontFamily: 'Inter, Arial, Helvetica, sans-serif',
+          }}
+        >
+          {labelContent}
+        </div>
+      </div>
+    );
+  }
+
+  // Renderizado en pantalla para previsualización interactiva con soporte de giro en vivo
+  return (
+    <div
+      className={`product-label-preview-wrapper relative flex items-center justify-center overflow-hidden transition-all ${className}`}
+      style={{
+        width: `${outerWidthPx}px`,
+        height: `${outerHeightPx}px`,
+        minWidth: `${outerWidthPx}px`,
+        minHeight: `${outerHeightPx}px`,
+      }}
+    >
+      <div
+        className="relative flex flex-col justify-between text-center bg-white text-black border border-slate-300 rounded-sm select-none transition-transform shadow-xs p-2"
+        style={{
+          width: `${naturalWidthPx}px`,
+          height: `${naturalHeightPx}px`,
+          minWidth: `${naturalWidthPx}px`,
+          minHeight: `${naturalHeightPx}px`,
+          transform: effectiveRotation !== 0 ? `rotate(${effectiveRotation}deg)` : undefined,
+          transformOrigin: 'center center',
+          flexShrink: 0,
+          boxSizing: 'border-box',
+          backgroundColor: '#ffffff',
+          color: '#000000',
+          fontFamily: 'Inter, Arial, Helvetica, sans-serif',
+        }}
+      >
+        {labelContent}
+      </div>
     </div>
   );
 }
