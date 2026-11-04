@@ -245,3 +245,4 @@ export function calculateInvoiceTotals(
     totalArticulos: Math.round((totalArticulosAcc + Number.EPSILON) * 100) / 100,
   };
 }
+

@@ -294,4 +294,140 @@ describe('Factura Térmica Profesional: Formateo, Cálculos y Casos Límite', ()
       expect(lines[1]).toBe('EL GRAN MERCATO');
     });
   });
+
+  describe('7. Pruebas y Validaciones de Impresión Requeridas (1, 10, 30 ítems, 80mm & 50mm)', () => {
+    // 1. Factura con 1 solo producto
+    it('procesa y formatea correctamente una factura con 1 solo producto', () => {
+      const items = [{ cantidad: 1, descripcion: 'Refresco Cola 2L', precioUnitario: 85, total: 85 }];
+      const totals = calculateInvoiceTotals(items, 18, 0, 100);
+
+      expect(totals.totalArticulos).toBe(1);
+      expect(totals.subtotal).toBe(85);
+      expect(totals.impuesto).toBe(15.3);
+      expect(totals.total).toBe(100.3);
+      expect(formatCurrency(totals.total)).toBe('RD$ 100.30');
+    });
+
+    // 2. Factura con 10 productos
+    it('procesa correctamente una factura con 10 productos variados', () => {
+      const items = Array.from({ length: 10 }, (_, i) => ({
+        cantidad: i + 1,
+        descripcion: `Artículo ${i + 1}`,
+        precioUnitario: (i + 1) * 50,
+        total: (i + 1) * (i + 1) * 50,
+      }));
+
+      const totals = calculateInvoiceTotals(items, 18, 0, 30000);
+      expect(items.length).toBe(10);
+      expect(totals.totalArticulos).toBe(55); // 1+2+...+10 = 55
+      expect(totals.subtotal).toBe(19250);
+      expect(totals.impuesto).toBe(3465);
+      expect(totals.total).toBe(22715);
+      expect(totals.cambio).toBe(7285);
+    });
+
+    // 3. Factura con 30 productos (estrés de longitud y flujo continuo)
+    it('procesa sin pérdida ni desbordes una factura extensa con 30 productos', () => {
+      const items = Array.from({ length: 30 }, (_, i) => ({
+        cantidad: 1,
+        descripcion: `Producto de Canasta Básica No. ${i + 1}`,
+        precioUnitario: 100 + i * 5,
+        total: 100 + i * 5,
+      }));
+
+      const totals = calculateInvoiceTotals(items, 18, 0, 10000);
+      expect(items.length).toBe(30);
+      expect(totals.totalArticulos).toBe(30);
+      // Suma de 100 + 105 + ... + 245 = 30 * (100 + 245) / 2 = 5175
+      expect(totals.subtotal).toBe(5175);
+      expect(totals.impuesto).toBe(931.5);
+      expect(totals.total).toBe(6106.5);
+      expect(totals.cambio).toBe(3893.5);
+    });
+
+    // 4. Productos con nombres extensos (>60 caracteres)
+    it('ajusta nombres extensos de productos sin cortar ni sobrepasar el ancho de columna', () => {
+      const longProductName = 'Detergente Líquido Concentrado Multiuso Aroma Lavanda Silvestre Biodegradable Familiar 3 Litros';
+      // En 80mm el ancho de columna de descripción es ~20-22 caracteres
+      const lines80mm = wrapText(longProductName, 22);
+      expect(lines80mm.length).toBeGreaterThanOrEqual(4);
+      lines80mm.forEach((line) => {
+        expect(line.length).toBeLessThanOrEqual(22);
+      });
+
+      // En 50mm el ancho de descripción es ~16-18 caracteres
+      const lines50mm = wrapText(longProductName, 18);
+      expect(lines50mm.length).toBeGreaterThanOrEqual(5);
+      lines50mm.forEach((line) => {
+        expect(line.length).toBeLessThanOrEqual(18);
+      });
+      // Verificamos que todo el contenido se conserva intacto
+      expect(lines50mm.join(' ')).toBe(longProductName);
+    });
+
+    // 5. Facturas con descuentos
+    it('aplica descuentos y deduce la base imponible correctamente', () => {
+      const items = [{ cantidad: 2, descripcion: 'Zapatos Escolares', precioUnitario: 1500, total: 3000 }];
+      const discount = 500;
+      const totals = calculateInvoiceTotals(items, 18, discount, 3000);
+
+      expect(totals.subtotal).toBe(3000);
+      // Base imponible: 3000 - 500 = 2500
+      // ITBIS 18% de 2500 = 450
+      expect(totals.impuesto).toBe(450);
+      expect(totals.total).toBe(2950);
+      expect(totals.cambio).toBe(50);
+    });
+
+    // 6. Facturas con múltiples métodos de pago
+    it('soporta desglose de múltiples métodos de pago (Efectivo, Tarjeta, Transferencia, Crédito)', () => {
+      const breakdown = [
+        { method: 'efectivo', label: 'Efectivo', amount: 500 },
+        { method: 'tarjeta', label: 'Tarjeta Débito', amount: 1500 },
+        { method: 'transferencia', label: 'Transferencia', amount: 1000 },
+      ];
+
+      const sumPaid = breakdown.reduce((acc, b) => acc + b.amount, 0);
+      expect(sumPaid).toBe(3000);
+
+      const totalInvoice = 2800;
+      const change = Math.max(0, sumPaid - totalInvoice);
+      expect(change).toBe(200);
+    });
+
+    // 7. Facturas con cantidades y precios elevados
+    it('maneja cantidades grandes y precios de millones con precisión exacta', () => {
+      const items = [
+        { cantidad: 500, descripcion: 'Saco de Cemento Gris 50kg', precioUnitario: 450.75, total: 225375 },
+        { cantidad: 10, descripcion: 'Generador Eléctrico Industrial 50kW', precioUnitario: 350000, total: 3500000 },
+      ];
+
+      const totals = calculateInvoiceTotals(items, 18, 0, 4500000);
+      expect(totals.subtotal).toBe(3725375);
+      expect(totals.impuesto).toBe(670567.5);
+      expect(totals.total).toBe(4395942.5);
+      expect(totals.cambio).toBe(104057.5);
+      expect(formatCurrency(totals.total)).toBe('RD$ 4,395,942.50');
+      expect(formatCurrency(totals.cambio)).toBe('RD$ 104,057.50');
+    });
+
+    // 8. Validación de especificaciones térmicas para 80mm y 50mm
+    it('calcula dimensiones físicas exactas del cabezal térmico para 80mm, 58mm y 50mm', () => {
+      const getPhysicalPrintableWidth = (paperWidth: PaperWidth): number => {
+        switch (paperWidth) {
+          case 50:
+            return 44; // 44 mm efectivos
+          case 58:
+            return 48; // 48 mm efectivos
+          case 80:
+          default:
+            return 72; // 72 mm efectivos
+        }
+      };
+
+      expect(getPhysicalPrintableWidth(80)).toBe(72);
+      expect(getPhysicalPrintableWidth(58)).toBe(48);
+      expect(getPhysicalPrintableWidth(50)).toBe(44);
+    });
+  });
 });

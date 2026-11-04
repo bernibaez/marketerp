@@ -57,12 +57,12 @@ export default function ProductLabel({
 
   // Dimensiones dinámicas del código de barras proporcionales al alto y ancho de la etiqueta
   const barcodeHeight = Math.max(
-    18,
-    Math.min(heightMm * 0.9, heightMm < 30 ? 20 : heightMm < 40 ? 28 : 36)
+    28,
+    Math.min(heightMm * 0.9, heightMm < 30 ? 30 : heightMm < 40 ? 40 : 50)
   );
 
   const barcodeModuleWidth =
-    widthMm < 45 ? 1.0 : widthMm < 60 ? 1.25 : widthMm < 75 ? 1.5 : 1.75;
+    widthMm < 45 ? 1.4 : widthMm < 60 ? 1.7 : widthMm < 75 ? 2.0 : 2.2;
 
   // 1 mm ≈ 3.7795 px a 96 DPI estándar de pantalla
   const pxPerMm = 3.78 * scale;

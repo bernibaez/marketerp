@@ -32,11 +32,11 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-hidden print:p-0 print:bg-white print:static"
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-hidden print:p-0 print:bg-white print:static print:overflow-visible print:h-auto print:max-h-none print:inset-auto"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[92vh] my-auto overflow-hidden print:max-h-none print:shadow-none print:border-none print:w-full print:p-0"
+        className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[92vh] my-auto overflow-hidden print:max-h-none print:shadow-none print:border-none print:w-full print:p-0 print:overflow-visible print:h-auto print:my-0 print:static"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header (Fixed at top) */}
@@ -56,6 +56,17 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
           </div>
           <div className="flex items-center gap-2.5">
             <div className="flex p-0.5 bg-secondary rounded-lg text-xs font-semibold border border-border">
+              <button
+                type="button"
+                onClick={() => setPrintFormat('ticket_50mm')}
+                className={`px-2 py-1 rounded-md transition-all flex items-center gap-1 cursor-pointer ${
+                  printFormat === 'ticket_50mm'
+                    ? 'bg-card text-foreground font-bold shadow-2xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Receipt size={12} /> 50mm
+              </button>
               <button
                 type="button"
                 onClick={() => setPrintFormat('ticket_58mm')}
@@ -101,7 +112,7 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
         </div>
 
         {/* Body (Scrollable invoice preview) */}
-        <div className="flex-1 overflow-y-auto p-5 min-h-0 printable-document scrollbar-thin">
+        <div className="flex-1 overflow-y-auto p-5 min-h-0 printable-document scrollbar-thin print:overflow-visible print:h-auto print:max-h-none print:p-0 print:m-0 print:min-h-0">
           {loadingPrintDetail ? (
             <div className="py-12 text-center text-sm text-muted-foreground">
               Cargando información de impresión...

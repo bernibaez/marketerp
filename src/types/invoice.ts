@@ -1,7 +1,7 @@
 export type PaperWidth = 50 | 58 | 80;
 export type FontSizeOption = 'normal' | 'large';
 
-export type PrintFormat = 'ticket_80mm' | 'ticket_58mm' | 'full_page' | 'half_page';
+export type PrintFormat = 'ticket_80mm' | 'ticket_58mm' | 'ticket_50mm' | 'full_page' | 'half_page';
 export type TemplateStyle = 'modern' | 'classic' | 'minimal' | 'bold';
 export type FontFamily = 'courier' | 'sans' | 'mono' | 'condensed' | 'consolas' | 'serif';
 export type FontSize = 'compact' | 'normal' | 'large';

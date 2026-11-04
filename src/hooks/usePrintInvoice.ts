@@ -25,65 +25,103 @@ export function usePrintInvoice(defaultOptions?: PrintInvoiceOptions) {
       existing.remove();
     }
 
+    const printableMm = width === 50 ? 44 : width === 58 ? 48 : 72;
+
     const styleEl = document.createElement('style');
     styleEl.id = DYNAMIC_STYLE_ID;
     styleEl.innerHTML = `
       @media print {
         @page {
-          size: ${width}mm auto;
+          size: auto;
           margin: 0 !important;
         }
 
         html, body {
-          width: ${width}mm !important;
+          width: 100% !important;
           margin: 0 !important;
           padding: 0 !important;
           background: #ffffff !important;
           color: #000000 !important;
           overflow: visible !important;
+          height: auto !important;
+          min-height: 0 !important;
+          max-height: none !important;
+          position: static !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
         }
 
-        /* Ocultar toda la interfaz que no pertenezca a la factura térmica */
-        header, aside, nav, .sidebar, .topbar, button, .no-print, [role="dialog"] > div:first-child:not(.printable-document):not(.thermal-invoice-host) {
+        /* Desconectar #root cuando se imprime una factura térmica para no generar páginas vacías previas (problema Página 9) */
+        body:has(#mercato-thermal-print-portal) > *:not(#mercato-thermal-print-portal),
+        body:has(> .printable-document) > #root,
+        body:has(> .dialog-inline-host) > #root,
+        body:has(> [role="dialog"]) > #root,
+        body:has(.thermal-invoice-printable) > #root,
+        body:has(.thermal-invoice-host) > #root {
+          display: none !important;
+          height: 0 !important;
+          min-height: 0 !important;
+          max-height: 0 !important;
+          overflow: hidden !important;
+          position: absolute !important;
+          top: -99999px !important;
+          left: -99999px !important;
+        }
+
+        /* Ocultar elementos de interfaz no imprimibles */
+        header, aside, nav, .sidebar, .topbar, button, .no-print, .print\\:hidden {
           display: none !important;
         }
 
-        body * {
-          visibility: hidden;
-        }
-
-        /* Hacer visibles solo el contenedor térmico y sus hijos */
-        .thermal-invoice-host,
-        .thermal-invoice-host *,
-        .thermal-invoice-printable,
-        .thermal-invoice-printable * {
-          visibility: visible !important;
-        }
-
-        .thermal-invoice-host {
-          position: absolute !important;
-          left: 0 !important;
-          top: 0 !important;
-          width: ${width}mm !important;
+        /* Contenedores de modales overlay */
+        .dialog-inline-host,
+        .dialog-inline-host > div,
+        .modal-panel,
+        [role="dialog"] {
+          background: #ffffff !important;
+          color: #000000 !important;
+          height: auto !important;
+          min-height: 0 !important;
+          max-height: none !important;
+          overflow: visible !important;
+          position: static !important;
+          inset: auto !important;
+          transform: none !important;
           margin: 0 !important;
           padding: 0 !important;
-          background: #ffffff !important;
+          border: none !important;
+          box-shadow: none !important;
         }
 
+        /* Contenedores térmicos ajustados al cabezal físico real */
+        .thermal-invoice-host,
         .thermal-invoice-printable {
-          position: relative !important;
+          position: static !important;
           display: block !important;
-          width: ${width}mm !important;
-          max-width: ${width}mm !important;
+          width: ${printableMm}mm !important;
+          max-width: ${printableMm}mm !important;
+          min-width: ${printableMm}mm !important;
           margin: 0 auto !important;
+          padding: 0 !important;
           background: #ffffff !important;
           color: #000000 !important;
           box-shadow: none !important;
           border: none !important;
+          overflow: visible !important;
+          height: auto !important;
+          min-height: 0 !important;
+          max-height: none !important;
+          break-inside: auto !important;
+          page-break-inside: auto !important;
+        }
+
+        /* Proteger ítems y encabezados de partición indeseada */
+        .thermal-invoice-item,
+        .thermal-invoice-header,
+        .thermal-invoice-totals,
+        .thermal-invoice-footer {
           break-inside: avoid !important;
           page-break-inside: avoid !important;
-          -webkit-print-color-adjust: exact !important;
-          print-color-adjust: exact !important;
         }
 
         .thermal-invoice-copy-break {
@@ -156,3 +194,4 @@ export function usePrintInvoice(defaultOptions?: PrintInvoiceOptions) {
 }
 
 export default usePrintInvoice;
+

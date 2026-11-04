@@ -97,8 +97,8 @@ export function usePrintLabels() {
       // Formato térmico continuo (ej. 58mm o 80mm)
       styleEl.innerHTML = `
         @page {
-          size: ${widthMm}mm auto;
-          margin: 0;
+          size: auto;
+          margin: 0 !important;
         }
         @media print {
           html, body {

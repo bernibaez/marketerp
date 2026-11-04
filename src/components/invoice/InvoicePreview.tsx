@@ -122,3 +122,4 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({
 };
 
 export default InvoicePreview;
+

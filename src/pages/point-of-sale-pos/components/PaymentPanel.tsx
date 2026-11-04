@@ -854,7 +854,7 @@ export default function PaymentPanel({
 
       {/* DOCUMENTO OFICIAL PARA IMPRESIÓN DIRECTA CON WINDOW.PRINT() */}
       {printInvoiceData && typeof document !== 'undefined' && createPortal(
-        <div className="hidden print:block printable-document">
+        <div className="hidden print:block printable-document print:overflow-visible print:h-auto print:max-h-none print:m-0 print:p-0">
           <PrintableInvoice invoiceData={printInvoiceData} />
         </div>,
         document.body

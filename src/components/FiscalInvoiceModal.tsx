@@ -54,10 +54,10 @@ export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceMo
   };
 
   const modalContent = (
-    <div className="dialog-inline-host !z-[9999] print:p-0 print:bg-white print:static">
+    <div className="dialog-inline-host !z-[9999] print:p-0 print:bg-white print:static print:overflow-visible print:h-auto print:max-h-none print:inset-auto">
       <div
         ref={modalRef}
-        className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-800 overflow-hidden flex flex-col max-h-[95vh] print:max-h-none print:shadow-none print:border-none print:w-full text-slate-800 dark:text-slate-200"
+        className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-100 dark:border-slate-800 overflow-hidden flex flex-col max-h-[95vh] print:max-h-none print:shadow-none print:border-none print:w-full print:overflow-visible print:h-auto print:p-0 print:my-0 text-slate-800 dark:text-slate-200"
       >
         {/* Top Bar Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/50 print:hidden">
@@ -91,6 +91,18 @@ export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceMo
           <div className="flex items-center gap-3 self-end sm:self-center">
             {/* View Format Switcher */}
             <div className="flex p-1 bg-slate-200/60 dark:bg-slate-800 rounded-xl text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setViewFormat('ticket_50mm')}
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                  viewFormat === 'ticket_50mm'
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                <Receipt size={14} />
+                <span>50mm</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setViewFormat('ticket_58mm')}
@@ -140,7 +152,7 @@ export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceMo
         </div>
 
         {/* Modal Body / Printable Invoice Display */}
-        <div className="p-6 sm:p-8 overflow-y-auto print:p-0 print:text-black">
+        <div className="p-6 sm:p-8 overflow-y-auto print:p-0 print:overflow-visible print:h-auto print:max-h-none print:min-h-0 print:text-black">
           <PrintableInvoice
             invoiceData={{
               invoiceNumber: invoice.numero_factura || invoice.ncf || invoice.id,

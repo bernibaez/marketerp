@@ -26,11 +26,11 @@ export const InvoiceBarcode: React.FC<InvoiceBarcodeProps> = ({
 
     try {
       // Dimensiones de módulo según estándar térmico de 203 DPI:
-      // En 80 mm: >= 0.5 mm (~1.9px a 96dpi, 4 dots a 203dpi)
-      // En 50 mm / 58 mm: >= 0.375 mm (~1.4px a 96dpi, 3 dots a 203dpi)
+      // En 80 mm: módulo de 2.0px (~0.53mm) y 46px de altura para lectura láser/óptica óptima
+      // En 50 mm / 58 mm: módulo de 1.5px (~0.40mm) y 36px de altura
       const isNarrow = width === 50 || width === 58;
-      const moduleWidth = isNarrow ? 1.4 : 1.9;
-      const barHeight = isNarrow ? 32 : 40;
+      const moduleWidth = isNarrow ? 1.5 : 2.0;
+      const barHeight = isNarrow ? 36 : 46;
 
       JsBarcode(svgRef.current, cleanValue, {
         format: 'CODE128',
@@ -84,3 +84,4 @@ export const InvoiceBarcode: React.FC<InvoiceBarcodeProps> = ({
 };
 
 export default InvoiceBarcode;
+

@@ -138,17 +138,23 @@ export default function PrintableInvoice({
   };
 
   const activeFormat: PrintFormat = formatOverride ?? settings.printFormat;
-  const isTicket = activeFormat === 'ticket_80mm' || activeFormat === 'ticket_58mm';
+  const isTicket =
+    activeFormat === 'ticket_80mm' ||
+    activeFormat === 'ticket_58mm' ||
+    activeFormat === 'ticket_50mm';
   const isFiscal = invoiceData.isFiscal || Boolean(invoiceData.ncf);
   const accent = settings.accentColor || '#0f766e';
 
-  // Si formatOverride fuerza 58mm u 80mm distinto al guardado, adaptamos el ancho salvo que sea el mismo formato configurado
+  // Si formatOverride fuerza 50mm, 58mm u 80mm distinto al guardado, adaptamos el ancho salvo que sea el mismo formato configurado
   const widthMm =
     formatOverride && formatOverride !== settings.printFormat
-      ? formatOverride === 'ticket_58mm'
-        ? 58
-        : 80
-      : settings.customWidthMm || (activeFormat === 'ticket_58mm' ? 58 : 80);
+      ? formatOverride === 'ticket_50mm'
+        ? 50
+        : formatOverride === 'ticket_58mm'
+          ? 58
+          : 80
+      : settings.customWidthMm ||
+        (activeFormat === 'ticket_50mm' ? 50 : activeFormat === 'ticket_58mm' ? 58 : 80);
 
   const previewWidthPx = isTicket
     ? Math.min(460, Math.max(190, Math.round(widthMm * 3.78)))

@@ -351,43 +351,22 @@
 }
 
 /* ==========================================================================
-   GLOBAL PRINT STYLES FOR CLEAN INVOICE PRINTING
-   Oculta la interfaz innecesaria de la app y renderiza con nitidez 
-   la factura o comprobante impreso sin dejar páginas en blanco.
+   GLOBAL PRINT STYLES FOR CLEAN THERMAL INVOICE PRINTING (MERCATO ERP)
+   - Soluciona definitivamente el problema de la "Página 9" eliminando #root del flujo.
+   - Elimina cortes de papel ajustando anchos físicos exactos (80mm = 72mm, 50mm = 44mm, 58mm = 48mm).
+   - Altura 100% dinámica para rollos continuos (sin cortes en facturas largas de 10, 20 o 30 productos).
    ========================================================================== */
 @media print {
   @page {
     size: auto;
-    margin: 3mm;
+    margin: 0 !important;
   }
 
-  .print-format-58mm {
-    width: 48mm !important;
-    max-width: 48mm !important;
-    margin: 0 auto !important;
-    padding: 0 !important;
-  }
-
-  .print-format-80mm {
-    width: 72mm !important;
-    max-width: 72mm !important;
-    margin: 0 auto !important;
-    padding: 0 !important;
-  }
-
-  .print-format-half {
-    width: 140mm !important;
-    max-width: 140mm !important;
-    margin: 0 auto !important;
-  }
-
+  /* Reset global de documento para impresión limpia */
   html,
-  body,
-  #root,
-  .dialog-inline-host,
-  .dialog-inline-host > div,
-  .modal-panel,
-  [role="dialog"] {
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
     background: #ffffff !important;
     color: #000000 !important;
     height: auto !important;
@@ -395,11 +374,36 @@
     max-height: none !important;
     overflow: visible !important;
     position: static !important;
-    inset: auto !important;
-    transform: none !important;
+    width: 100% !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
-  /* Ocultar elementos de navegación y UI que nunca deben aparecer en una impresión */
+  /* ========================================================================
+     ELIMINACIÓN RADICAL DE PÁGINAS EN BLANCO (PROBLEMA PÁGINA 9 EN CHROME)
+     Cuando se imprime cualquier comprobante o modal montado en portal sobre document.body:
+     Desconectamos por completo #root del árbol de renderizado usando display: none.
+     Esto evita que los elementos invisibles de la aplicación ocupen altura y generen
+     páginas vacías 1 a 8 antes del recibo.
+     ======================================================================== */
+  body:has(#mercato-thermal-print-portal) > *:not(#mercato-thermal-print-portal),
+  body:has(> .printable-document) > #root,
+  body:has(> .dialog-inline-host) > #root,
+  body:has(> [role="dialog"]) > #root,
+  body:has(> div:has(.thermal-invoice-printable)) > #root,
+  body:has(> div:has(.printable-invoice-container)) > #root,
+  body:has(> .label-print-sheet) > #root {
+    display: none !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    position: absolute !important;
+    top: -99999px !important;
+    left: -99999px !important;
+  }
+
+  /* Ocultar interfaz residual */
   header,
   aside,
   nav,
@@ -415,44 +419,90 @@
     display: none !important;
   }
 
-  /* Si hay un contenedor de documento formal o factura presente */
-  body:has(.printable-document),
-  body:has(.printable-invoice-container),
-  body:has(.printable-area),
-  body:has(.thermal-invoice-printable),
-  body:has(.thermal-invoice-host) {
+  /* Contenedores de modales y diálogos cuando se imprimen directamente */
+  .dialog-inline-host,
+  .dialog-inline-host > div,
+  .modal-panel,
+  [role="dialog"] {
+    background: #ffffff !important;
+    color: #000000 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /* ZONA DE IMPRESIÓN DEDICADA (#mercato-thermal-print-portal) */
+  #mercato-thermal-print-portal {
+    display: block !important;
+    position: static !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
     overflow: visible !important;
     background: #ffffff !important;
+    color: #000000 !important;
   }
 
-  body:has(.printable-document) *,
-  body:has(.printable-invoice-container) *,
-  body:has(.printable-area) *,
-  body:has(.thermal-invoice-printable) *,
-  body:has(.thermal-invoice-host) * {
-    visibility: hidden;
+  /* ANCHOS FÍSICOS ESTRICTOS PARA IMPRESORAS TÉRMICAS (CABEZAL FÍSICO REAL) */
+  .print-format-50mm,
+  .thermal-print-50mm,
+  .thermal-width-50mm {
+    width: 44mm !important;
+    max-width: 44mm !important;
+    min-width: 44mm !important;
+    margin: 0 auto !important;
+    padding: 0 1.5mm !important;
+    box-sizing: border-box !important;
+    overflow: visible !important;
   }
 
+  .print-format-58mm,
+  .thermal-print-58mm,
+  .thermal-width-58mm {
+    width: 48mm !important;
+    max-width: 48mm !important;
+    min-width: 48mm !important;
+    margin: 0 auto !important;
+    padding: 0 2mm !important;
+    box-sizing: border-box !important;
+    overflow: visible !important;
+  }
+
+  .print-format-80mm,
+  .thermal-print-80mm,
+  .thermal-width-80mm {
+    width: 72mm !important;
+    max-width: 72mm !important;
+    min-width: 72mm !important;
+    margin: 0 auto !important;
+    padding: 0 2mm !important;
+    box-sizing: border-box !important;
+    overflow: visible !important;
+  }
+
+  .print-format-half {
+    width: 140mm !important;
+    max-width: 140mm !important;
+    margin: 0 auto !important;
+  }
+
+  /* Contenedores de factura y documentos imprimibles */
   .printable-invoice-container,
-  .printable-invoice-container *,
   .printable-area,
-  .printable-area *,
   .printable-document,
-  .printable-document *,
   .thermal-invoice-printable,
-  .thermal-invoice-printable *,
-  .thermal-invoice-host,
-  .thermal-invoice-host * {
-    visibility: visible !important;
-  }
-
-  .printable-invoice-container,
-  .printable-area,
-  .printable-document {
+  .thermal-invoice-host {
     position: static !important;
     display: block !important;
-    width: 100% !important;
-    max-width: 100% !important;
     height: auto !important;
     min-height: 0 !important;
     max-height: none !important;
@@ -464,25 +514,39 @@
     box-shadow: none !important;
     border-radius: 0 !important;
     overflow: visible !important;
-    z-index: auto !important;
     break-inside: auto !important;
     page-break-inside: auto !important;
     break-after: auto !important;
     page-break-after: auto !important;
   }
 
-  .printable-invoice-item {
+  /* Evitar saltos de página partidos en medio de ítems o totales individuales */
+  .printable-invoice-item,
+  .thermal-invoice-item,
+  .thermal-invoice-header,
+  .thermal-invoice-totals,
+  .thermal-invoice-footer {
     break-inside: avoid !important;
     page-break-inside: avoid !important;
   }
 
-  /* Hoja de etiquetas: fuera de pantalla en UI, visible al imprimir */
+  .thermal-invoice-copy-break {
+    page-break-after: always !important;
+    break-after: page !important;
+    height: 10px !important;
+    border-bottom: 2px dashed #000000 !important;
+    margin: 10px 0 !important;
+  }
+
+  /* Hoja de etiquetas de código de barras */
   .label-print-sheet {
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
-    width: auto !important;
-    max-width: 100% !important;
+    position: static !important;
+    display: block !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
     visibility: visible !important;
   }
 
@@ -510,6 +574,9 @@
     top: 0 !important;
     width: 80mm;
     pointer-events: none;
+  }
+  #mercato-thermal-print-portal {
+    display: none !important;
   }
 }
 
