@@ -29,7 +29,7 @@ export default function ProductLabel({
   size,
   customWidthMm = 50,
   customHeightMm = 30,
-  businessName = 'Mi Colmado / Supermercado ERP',
+  businessName = '',
   currencySymbol = 'RD$',
   showName = true,
   showPrice = true,
@@ -79,34 +79,33 @@ export default function ProductLabel({
   // Estilos físicos para impresión (@media print) vs visualización previa
   const printInlineStyle: React.CSSProperties = isPrintMode
     ? {
-        width: `${widthMm}mm`,
-        minHeight: `${heightMm}mm`,
-        maxWidth: `${widthMm}mm`,
-        boxSizing: 'border-box',
-        backgroundColor: '#ffffff',
-        color: '#000000',
-        padding: '1.2mm',
-        margin: '0 auto',
-        breakInside: 'avoid',
-        pageBreakInside: 'avoid',
-        WebkitPrintColorAdjust: 'exact',
-        printColorAdjust: 'exact',
-        fontFamily: 'Inter, Arial, Helvetica, sans-serif',
-      }
+      width: `${widthMm}mm`,
+      minHeight: `${heightMm}mm`,
+      maxWidth: `${widthMm}mm`,
+      boxSizing: 'border-box',
+      backgroundColor: '#ffffff',
+      color: '#000000',
+      padding: '1.2mm',
+      margin: '0 auto',
+      breakInside: 'avoid',
+      pageBreakInside: 'avoid',
+      WebkitPrintColorAdjust: 'exact',
+      printColorAdjust: 'exact',
+      fontFamily: 'Inter, Arial, Helvetica, sans-serif',
+    }
     : {
-        width: `${widthPx}px`,
-        minHeight: `${minHeightPx}px`,
-        boxSizing: 'border-box',
-        backgroundColor: '#ffffff',
-        color: '#000000',
-        fontFamily: 'Inter, Arial, Helvetica, sans-serif',
-      };
+      width: `${widthPx}px`,
+      minHeight: `${minHeightPx}px`,
+      boxSizing: 'border-box',
+      backgroundColor: '#ffffff',
+      color: '#000000',
+      fontFamily: 'Inter, Arial, Helvetica, sans-serif',
+    };
 
   return (
     <div
-      className={`relative flex flex-col justify-between text-center bg-white text-black border border-slate-300 rounded-sm overflow-hidden select-none transition-shadow ${
-        isPrintMode ? 'border-none p-0 shadow-none' : 'shadow-xs p-2'
-      } ${className}`}
+      className={`relative flex flex-col justify-between text-center bg-white text-black border border-slate-300 rounded-sm overflow-hidden select-none transition-shadow ${isPrintMode ? 'border-none p-0 shadow-none' : 'shadow-xs p-2'
+        } ${className}`}
       style={printInlineStyle}
     >
       {/* Alerta visible en pantalla si el código es demasiado largo para el ancho físico */}
