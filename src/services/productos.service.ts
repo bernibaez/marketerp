@@ -88,6 +88,7 @@ const EXTENDED_PRODUCTO_COLUMNS = [
   'max_weight',
   'generate_scale_barcode',
   'is_weight_product',
+  'composite_items',
 ] as const;
 
 /** Columnas que PostgREST reportó ausentes en este proyecto (cache de sesión). */
@@ -261,6 +262,7 @@ export function productoAUi(p: Producto): Product {
     producto_base_id: (p as any).producto_base_id ?? null,
     factor_conversion: (p as any).factor_conversion ?? 1,
     unidad_base: (p as any).unidad_base ?? null,
+    composite_items: (p as any).composite_items ?? undefined,
   };
 }
 
@@ -318,6 +320,7 @@ export function uiAProductoInsert(p: Omit<Product, 'id' | 'stockStatus'> & { id?
         }
       : {}),
     ...(p.unidad_base ? { unidad_base: p.unidad_base } : {}),
+    ...(p.composite_items ? { composite_items: p.composite_items } : {}),
   };
 }
 
@@ -364,6 +367,7 @@ function demoAsProductos(): Producto[] {
       producto_base_id: p.producto_base_id ?? null,
       factor_conversion: Number(p.factor_conversion ?? 1),
       unidad_base: p.unidad_base,
+      composite_items: (p as any).composite_items ?? undefined,
     };
   });
 }
@@ -403,6 +407,7 @@ function localAsProductos(): Producto[] {
       producto_base_id: p.producto_base_id ?? null,
       factor_conversion: Number(p.factor_conversion ?? 1),
       unidad_base: p.unidad_base,
+      composite_items: (p as any).composite_items ?? undefined,
     };
   });
 }
@@ -439,17 +444,42 @@ export function applyPresentationConversions(
     for (const p of entry.data) index(p);
   }
   for (const p of extraCatalog) index(p);
+  try {
+    for (const p of getStoredProducts()) index(p as any);
+  } catch {}
   for (const p of products) index(p);
 
   return products.map((p) => {
+    // 1. Paquetes compuestos (Six Pack Mixto, combos con múltiples productos)
+    const compositeItems = (p as any).composite_items;
+    if (Array.isArray(compositeItems) && compositeItems.length > 0) {
+      const compStocks = compositeItems.map((ci: any) => {
+        const compId = ci.product_id || ci.productId;
+        const compProd = byId.get(compId) || bySku.get(String(ci.sku || '').toLowerCase().trim());
+        const q = Math.max(1, Number(ci.quantity || 1));
+        return compProd ? Math.floor(Number(compProd.stock_actual || 0) / q) : 0;
+      });
+      const derivedStock = compStocks.length > 0 ? Math.min(...compStocks) : 0;
+      return {
+        ...p,
+        stock_actual: derivedStock,
+      };
+    }
+
     let baseProd: Producto | undefined;
     let factor = Number(p.factor_conversion || 1);
+    const unitLower = (p.unidad || '').toLowerCase();
+    const nameLower = (p.nombre || '').toLowerCase();
+    const isSixPack = unitLower.includes('six') || nameLower.includes('six');
+
+    if (isSixPack && factor <= 1) {
+      factor = 6;
+    }
 
     if (p.producto_base_id) {
       baseProd = byId.get(p.producto_base_id);
     }
 
-    const nameLower = (p.nombre || '').toLowerCase();
     const skuClean = (p.sku || '').toLowerCase().trim();
 
     if (!baseProd) {
@@ -462,10 +492,18 @@ export function applyPresentationConversions(
       } else if (skuClean === '0875' || nameLower === 'huevo 1 carton') {
         baseProd = bySku.get('0874') || [...byId.values()].find((x) => x.nombre.toLowerCase() === 'huevo medio carton');
         factor = 2;
+      } else if (isSixPack) {
+        // Buscar producto base por coincidencia de nombre (ej: "Six Pack Cerveza Modelo" -> "Cerveza Modelo")
+        const baseNameCandidate = nameLower.replace(/six\s*pack/gi, '').replace(/sixpack/gi, '').trim();
+        if (baseNameCandidate.length >= 3) {
+          baseProd = [...byId.values()].find(
+            (x) => x.id !== p.id && x.nombre.toLowerCase().includes(baseNameCandidate) && !x.nombre.toLowerCase().includes('six')
+          );
+        }
       }
     }
 
-    if (baseProd && factor > 1) {
+    if (baseProd && factor > 0) {
       return {
         ...p,
         producto_base_id: baseProd.id,
@@ -480,10 +518,32 @@ export function applyPresentationConversions(
 }
 
 export async function resolveSingleProductPresentation(prod: Producto, sbClient?: any): Promise<Producto> {
+  const compositeItems = (prod as any).composite_items;
+  if (Array.isArray(compositeItems) && compositeItems.length > 0) {
+    const catalog = getStoredProducts();
+    const compStocks = compositeItems.map((ci: any) => {
+      const compId = ci.product_id || ci.productId;
+      const compProd = catalog.find((x) => x.id === compId || x.sku === ci.sku);
+      const q = Math.max(1, Number(ci.quantity || 1));
+      return compProd ? Math.floor(Number(compProd.currentStock || 0) / q) : 0;
+    });
+    const derivedStock = compStocks.length > 0 ? Math.min(...compStocks) : 0;
+    return {
+      ...prod,
+      stock_actual: derivedStock,
+    };
+  }
+
   const nameLower = (prod.nombre || '').toLowerCase();
+  const unitLower = (prod.unidad || '').toLowerCase();
   const skuClean = (prod.sku || '').toLowerCase().trim();
+  const isSixPack = unitLower.includes('six') || nameLower.includes('six');
   let baseId = (prod as any).producto_base_id;
   let factor = Number((prod as any).factor_conversion || 1);
+
+  if (isSixPack && factor <= 1) {
+    factor = 6;
+  }
 
   if (!baseId) {
     if (skuClean === '23653' || nameLower.includes('fardo de agua pureza sana')) {
@@ -492,22 +552,52 @@ export async function resolveSingleProductPresentation(prod: Producto, sbClient?
       factor = 2;
     } else if (skuClean === '0875' || nameLower === 'huevo 1 carton') {
       factor = 2;
+    } else if (isSixPack) {
+      const baseCandidate = nameLower.replace(/six\s*pack/gi, '').replace(/sixpack/gi, '').trim();
+      if (baseCandidate.length >= 3) {
+        for (const entry of masterCatalogCache.values()) {
+          const match = entry.data.find(
+            (x) => x.id !== prod.id && x.nombre.toLowerCase().includes(baseCandidate) && !x.nombre.toLowerCase().includes('six')
+          );
+          if (match) {
+            baseId = match.id;
+            break;
+          }
+        }
+        if (!baseId) {
+          const stored = getStoredProducts().find(
+            (x) => x.id !== prod.id && x.name.toLowerCase().includes(baseCandidate) && !x.name.toLowerCase().includes('six')
+          );
+          if (stored) {
+            baseId = stored.id;
+          }
+        }
+      }
     }
   }
 
-  if (factor > 1) {
-    if (baseId) {
-      for (const entry of masterCatalogCache.values()) {
-        const b = entry.data.find((x) => x.id === baseId);
-        if (b) {
-          return {
-            ...prod,
-            producto_base_id: baseId,
-            factor_conversion: factor,
-            stock_actual: Math.floor(Number(b.stock_actual || 0) / factor),
-          } as Producto;
-        }
+  if (baseId) {
+    for (const entry of masterCatalogCache.values()) {
+      const b = entry.data.find((x) => x.id === baseId);
+      if (b) {
+        return {
+          ...prod,
+          producto_base_id: baseId,
+          factor_conversion: factor,
+          stock_actual: Math.floor(Number(b.stock_actual || 0) / factor),
+        } as Producto;
       }
+    }
+
+    const localBase = getStoredProducts().find((x) => x.id === baseId);
+    if (localBase) {
+      return {
+        ...prod,
+        producto_base_id: baseId,
+        factor_conversion: factor,
+        unidad_base: localBase.unit || 'unidad',
+        stock_actual: Math.floor(Number(localBase.currentStock || 0) / factor),
+      } as Producto;
     }
 
     if (sbClient) {
@@ -956,9 +1046,27 @@ export async function actualizarProducto(id: string, datos: Partial<Producto>): 
           ? Number(datos.factor_conversion)
           : base.factor_conversion,
       unidad_base: datos.unidad_base !== undefined ? datos.unidad_base : base.unidad_base,
+      composite_items: (datos as any).composite_items !== undefined ? (datos as any).composite_items : (base as any).composite_items,
     };
+    if (Array.isArray(uiNext.composite_items) && uiNext.composite_items.length > 0) {
+      const compStocks = uiNext.composite_items.map((ci: any) => {
+        const cp = products.find((x) => x.id === ci.product_id || x.sku === ci.sku);
+        const q = Math.max(1, Number(ci.quantity || 1));
+        return cp ? Math.floor(Number(cp.currentStock || 0) / q) : 0;
+      });
+      if (compStocks.length > 0) {
+        uiNext.currentStock = Math.min(...compStocks);
+      }
+    } else if (uiNext.producto_base_id) {
+      const baseProd = products.find((x) => x.id === uiNext.producto_base_id);
+      const factor = Number(uiNext.factor_conversion || 1) > 0 ? Number(uiNext.factor_conversion) : (uiNext.unit?.toLowerCase().includes('six') ? 6 : 1);
+      if (baseProd) {
+        uiNext.currentStock = Math.floor(Number(baseProd.currentStock || 0) / factor);
+      }
+    }
     if (uiNext.currentStock <= 0) uiNext.stockStatus = 'out';
     else if (uiNext.currentStock <= uiNext.minStock) uiNext.stockStatus = 'low';
+    else uiNext.stockStatus = 'normal';
     const nextList = [...products];
     nextList[idx] = uiNext;
     saveStoredProducts(nextList);

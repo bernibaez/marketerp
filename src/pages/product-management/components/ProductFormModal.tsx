@@ -245,7 +245,9 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
         setConversionFactorText(
           product.factor_conversion && product.factor_conversion > 0
             ? String(product.factor_conversion)
-            : ''
+            : (isPackUnitItem(product.unit) && product.unit.toLowerCase().includes('six')) || (product.name && product.name.toLowerCase().includes('six'))
+              ? '6'
+              : ''
         );
         setCompositeItems([]);
       }
@@ -359,11 +361,9 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
   const onSubmit = (data: FormValues) => {
     const cost = Number(data.costPrice);
     const sale = Number(data.salePrice);
-    const stock = isEdit && product ? product.currentStock : Number(data.currentStock);
+    const inputStock = Number(data.currentStock) || 0;
+    const stock = isEdit && product ? (inputStock > 0 ? inputStock : product.currentStock) : inputStock;
     const minStk = Number(data.minStock);
-
-    const stockStatus: Product['stockStatus'] =
-      stock === 0 ? 'out' : stock < minStk ? 'low' : 'normal';
 
     const isWeight = weightState.saleType === 'weight' || weightState.saleType === 'both';
     const isScaleProduct = weightState.generateScaleBarcode;
@@ -472,18 +472,22 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
     let computedStock = stock;
     if (isPresentation) {
       if (packMode === 'single' && baseProductId && selectedBaseProduct) {
-        computedStock = Math.floor(selectedBaseProduct.currentStock / conversionFactor);
+        const factor = conversionFactor > 0 ? conversionFactor : 1;
+        computedStock = Math.floor(Number(selectedBaseProduct.currentStock || 0) / factor);
       } else if (packMode === 'composite' && compositeItems.length > 0) {
         computedStock = Math.min(
           ...compositeItems.map((ci) => {
-            const p = allProducts?.find((prod) => prod.id === ci.product_id);
+            const p = allProducts?.find((prod) => prod.id === ci.product_id) || combinedBaseProducts?.find((prod) => prod.id === ci.product_id);
             const q = Math.max(1, ci.quantity);
-            return p ? Math.floor(p.currentStock / q) : 0;
+            return p ? Math.floor(Number(p.currentStock || 0) / q) : 0;
           })
         );
         if (!Number.isFinite(computedStock) || computedStock < 0) computedStock = 0;
       }
     }
+
+    const finalStockStatus: Product['stockStatus'] =
+      computedStock <= 0 ? 'out' : computedStock <= minStk ? 'low' : 'normal';
 
     const saved: Product = {
       id: product?.id ?? `prod-${Date.now()}`,
@@ -500,7 +504,7 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
       tax: Number(data.tax),
       minStock: minStk,
       currentStock: computedStock,
-      stockStatus,
+      stockStatus: finalStockStatus,
       saleType: weightState.saleType,
       weightUnit: weightState.weightUnit,
       pricePerWeight: sale,
@@ -510,11 +514,11 @@ export default function ProductFormModal({ open, onClose, product, allProducts =
       generateScaleBarcode: weightState.generateScaleBarcode,
       isWeightProduct: isWeight,
       producto_base_id: isPresentation && packMode === 'single' && baseProductId ? baseProductId : null,
-      factor_conversion: isPresentation && packMode === 'single' && baseProductId ? conversionFactor : 1,
+      factor_conversion: isPresentation && packMode === 'single' && baseProductId ? conversionFactor : (selectedUnit.toLowerCase().includes('six') ? 6 : 1),
       unidad_base: isPresentation && packMode === 'single' && selectedBaseProduct ? selectedBaseProduct.unit : undefined,
       composite_items: isPresentation && packMode === 'composite' && compositeItems.length > 0
         ? compositeItems.map((ci) => ({ product_id: ci.product_id, product_name: ci.product_name, quantity: ci.quantity }))
-        : undefined,
+        : (product?.composite_items && isPresentation ? product.composite_items : undefined),
     };
 
     // System Audit Event
@@ -1670,22 +1674,20 @@ return (
             label={isWeighted ? `Stock Actual (${weightUnitShort})` : "Stock Actual"}
             name="currentStock"
             error={errors.currentStock?.message}
-            required={!isEdit && !(isPresentation && (baseProductId || (packMode === 'composite' && compositeItems.length > 0)))}
+            required={!(isPresentation && (baseProductId || (packMode === 'composite' && compositeItems.length > 0)))}
             hint={
               isPresentation && packMode === 'single' && selectedBaseProduct
                 ? `Calculado dinámicamente desde ${selectedBaseProduct.name} (~${Math.floor(selectedBaseProduct.currentStock / conversionFactor)} ${selectedUnit}s disponibles)`
                 : isPresentation && packMode === 'composite' && compositeItems.length > 0
                   ? `Calculado dinámicamente según componentes (~${compositeStockAvail} ${selectedUnit}s disponibles)`
-                  : isEdit
-                    ? 'No editable aquí — usa Ajustes de Stock para cambiar existencias'
-                    : (isWeighted ? `Cantidad de ${weightUnitShort} actualmente en inventario` : 'Cantidad actual en inventario')
+                  : (isWeighted ? `Cantidad de ${weightUnitShort} actualmente en inventario` : 'Cantidad actual en inventario')
             }
           >
             <input
               id="currentStock"
               type="number"
               min={0}
-              disabled={isEdit || (isPresentation && (!!baseProductId || (packMode === 'composite' && compositeItems.length > 0)))}
+              disabled={isPresentation && (!!baseProductId || (packMode === 'composite' && compositeItems.length > 0))}
               value={
                 isPresentation && packMode === 'single' && selectedBaseProduct
                   ? Math.floor(selectedBaseProduct.currentStock / conversionFactor)
@@ -1694,10 +1696,10 @@ return (
                     : undefined
               }
               {...register('currentStock', {
-                required: isEdit || (isPresentation && (baseProductId || (packMode === 'composite' && compositeItems.length > 0))) ? false : 'El stock actual es obligatorio',
+                required: isPresentation && (baseProductId || (packMode === 'composite' && compositeItems.length > 0)) ? false : 'El stock actual es obligatorio',
                 min: { value: 0, message: 'No puede ser negativo' },
               })}
-              className={`input-field tabular-nums ${(isEdit || (isPresentation && (baseProductId || (packMode === 'composite' && compositeItems.length > 0)))) ? 'opacity-60 cursor-not-allowed' : ''}`}
+              className={`input-field tabular-nums ${(isPresentation && (baseProductId || (packMode === 'composite' && compositeItems.length > 0))) ? 'opacity-60 cursor-not-allowed' : ''}`}
               placeholder="0"
             />
           </FormField>

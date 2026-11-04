@@ -4,6 +4,7 @@ import { DELETE_SKU } from '@/lib/posStore';
 import type { NCFType } from '@/lib/ncfStore';
 import type { CartItem, Customer } from '../components/POSTerminal';
 import { calculateCartTotals } from '@/lib/cartCalculations';
+import { getStoredProducts } from '@/lib/productStore';
 
 export function usePOSCart() {
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -134,13 +135,62 @@ export function usePOSCart() {
         return;
       }
 
-      // 2. Validar que el producto no esté agotado
-      if (
-        (product.currentStock !== undefined && product.currentStock <= 0) ||
-        (product.stock !== undefined && product.stock <= 0) ||
-        product.outOfStock ||
-        product.stockStatus === 'out'
-      ) {
+      // 2. Validar existencias reales (soporte dinámico para Six Packs, empaques y combos)
+      let effectiveStock =
+        product.stock !== undefined
+          ? Number(product.stock)
+          : product.currentStock !== undefined
+            ? Number(product.currentStock)
+            : undefined;
+
+      const pUnitLower = (product.unit || '').toLowerCase();
+      const pNameLower = (product.name || '').toLowerCase();
+      const isSixPackOrPresentation =
+        Boolean((product as any).producto_base_id) ||
+        (Array.isArray((product as any).composite_items) && (product as any).composite_items.length > 0) ||
+        pUnitLower.includes('six') ||
+        pNameLower.includes('six');
+
+      if ((effectiveStock === undefined || effectiveStock <= 0) && isSixPackOrPresentation) {
+        try {
+          const catalog = getStoredProducts();
+          const baseId = (product as any).producto_base_id;
+          const compositeItems = (product as any).composite_items;
+          if (baseId) {
+            const base = catalog.find((x) => x.id === baseId);
+            const factor = Number((product as any).factor_conversion || 1) > 0 ? Number((product as any).factor_conversion) : 6;
+            if (base && Number(base.currentStock || 0) >= factor) {
+              effectiveStock = Math.floor(Number(base.currentStock) / factor);
+            }
+          } else if (Array.isArray(compositeItems) && compositeItems.length > 0) {
+            const compStocks = compositeItems.map((ci: any) => {
+              const cp = catalog.find((x) => x.id === (ci.product_id || ci.productId));
+              const q = Math.max(1, Number(ci.quantity || 1));
+              return cp ? Math.floor(Number(cp.currentStock || 0) / q) : 0;
+            });
+            if (compStocks.length > 0) {
+              effectiveStock = Math.min(...compStocks);
+            }
+          } else if (isSixPackOrPresentation) {
+            const baseName = pNameLower.replace(/six\s*pack/gi, '').replace(/sixpack/gi, '').trim();
+            if (baseName.length >= 3) {
+              const base = catalog.find(
+                (x) => x.id !== (product as any).productId && x.id !== (product as any).id && x.name.toLowerCase().includes(baseName) && !x.name.toLowerCase().includes('six')
+              );
+              if (base && Number(base.currentStock || 0) >= 6) {
+                effectiveStock = Math.floor(Number(base.currentStock) / 6);
+              }
+            }
+          }
+        } catch {}
+      }
+
+      const isActuallyOut =
+        effectiveStock !== undefined
+          ? effectiveStock <= 0
+          : product.outOfStock || product.stockStatus === 'out';
+
+      if (isActuallyOut) {
         toast.error(`Producto sin existencias: "${product.name}"`);
         return;
       }

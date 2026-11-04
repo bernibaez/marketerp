@@ -101,6 +101,7 @@ export function useProductos(params: ProductosFiltro = {}) {
         producto_base_id: product.producto_base_id,
         factor_conversion: product.factor_conversion,
         unidad_base: product.unidad_base,
+        composite_items: product.composite_items,
         id,
       });
       await actualizarProducto(id, patch);

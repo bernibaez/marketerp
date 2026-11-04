@@ -55,6 +55,12 @@ export interface CartItem {
   comboId?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   comboItems?: any[];
+  stock?: number;
+  currentStock?: number;
+  producto_base_id?: string | null;
+  factor_conversion?: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  composite_items?: any[];
   isCustomPrice?: boolean;
   originalPrice?: number;
   priceChangeReason?: string;

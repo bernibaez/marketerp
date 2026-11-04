@@ -565,6 +565,40 @@ export function usePOSScanner({
           ? (p.unit && !['unidad', 'ud', 'und', 'unidades'].includes(p.unit.toLowerCase()) ? p.unit : (p.weightUnit || 'lb'))
           : (p.unit || 'ud');
 
+        let effectiveStock = Number(p.currentStock ?? 0);
+        const pUnitLower = (p.unit || '').toLowerCase();
+        const pNameLower = (p.name || '').toLowerCase();
+        const isSixPack = pUnitLower.includes('six') || pNameLower.includes('six');
+
+        if (p.producto_base_id) {
+          const base = productosUi.find((x) => x.id === p.producto_base_id);
+          const factor = Number(p.factor_conversion || 1) > 0 ? Number(p.factor_conversion) : (isSixPack ? 6 : 1);
+          if (base) {
+            const derived = Math.floor(Number(base.currentStock || 0) / factor);
+            if (derived > effectiveStock) effectiveStock = derived;
+          }
+        } else if (Array.isArray(p.composite_items) && p.composite_items.length > 0) {
+          const compStocks = p.composite_items.map((ci: any) => {
+            const cp = productosUi.find((x) => x.id === ci.product_id);
+            const q = Math.max(1, Number(ci.quantity || 1));
+            return cp ? Math.floor(Number(cp.currentStock || 0) / q) : 0;
+          });
+          if (compStocks.length > 0) {
+            const derived = Math.min(...compStocks);
+            if (derived > effectiveStock) effectiveStock = derived;
+          }
+        } else if (isSixPack && effectiveStock <= 0) {
+          const baseName = pNameLower.replace(/six\s*pack/gi, '').replace(/sixpack/gi, '').trim();
+          if (baseName.length >= 3) {
+            const base = productosUi.find(
+              (x) => x.id !== p.id && x.name.toLowerCase().includes(baseName) && !x.name.toLowerCase().includes('six')
+            );
+            if (base && Number(base.currentStock || 0) >= 6) {
+              effectiveStock = Math.floor(Number(base.currentStock) / 6);
+            }
+          }
+        }
+
         return {
           id: p.id,
           sku: p.sku,
@@ -573,15 +607,18 @@ export function usePOSScanner({
           price: p.salePrice,
           wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
           cost: p.costPrice,
-          stock: p.currentStock,
+          stock: effectiveStock,
           unit: resolvedUnit,
           tax: p.tax,
           image: p.image,
           status: p.status || 'active',
-          outOfStock: p.stockStatus === 'out' || p.currentStock <= 0,
+          outOfStock: effectiveStock <= 0,
           plu: p.plu || '',
           isWeighted: isWeight,
           saleType: p.saleType,
+          producto_base_id: p.producto_base_id,
+          factor_conversion: p.factor_conversion,
+          composite_items: p.composite_items,
         };
       });
 

@@ -31,6 +31,14 @@ interface Product {
   isWeighted?: boolean;
   saleType?: SaleType;
   weightUnit?: WeightUnit;
+  producto_base_id?: string | null;
+  factor_conversion?: number;
+  unidad_base?: string;
+  composite_items?: Array<{
+    product_id: string;
+    product_name?: string;
+    quantity: number;
+  }>;
 }
 
 interface ProductPanelProps {
@@ -96,6 +104,42 @@ export default function ProductPanel({
           ? (p.unit && !['unidad', 'ud', 'und', 'unidades'].includes(p.unit.toLowerCase()) ? p.unit : (p.weightUnit || 'lb'))
           : (p.unit || 'Und');
 
+        let effectiveStock = Number(p.currentStock ?? 0);
+        const pUnitLower = (p.unit || '').toLowerCase();
+        const pNameLower = (p.name || '').toLowerCase();
+        const isSixPack = pUnitLower.includes('six') || pNameLower.includes('six');
+
+        if (p.producto_base_id) {
+          const base = effectiveProductosUi.find((x) => x.id === p.producto_base_id);
+          const factor = Number(p.factor_conversion || 1) > 0 ? Number(p.factor_conversion) : (isSixPack ? 6 : 1);
+          if (base) {
+            const derived = Math.floor(Number(base.currentStock || 0) / factor);
+            if (derived > effectiveStock) effectiveStock = derived;
+          }
+        } else if (Array.isArray(p.composite_items) && p.composite_items.length > 0) {
+          const compStocks = p.composite_items.map((ci: any) => {
+            const cp = effectiveProductosUi.find((x) => x.id === ci.product_id);
+            const q = Math.max(1, Number(ci.quantity || 1));
+            return cp ? Math.floor(Number(cp.currentStock || 0) / q) : 0;
+          });
+          if (compStocks.length > 0) {
+            const derived = Math.min(...compStocks);
+            if (derived > effectiveStock) effectiveStock = derived;
+          }
+        } else if (isSixPack && effectiveStock <= 0) {
+          const baseName = pNameLower.replace(/six\s*pack/gi, '').replace(/sixpack/gi, '').trim();
+          if (baseName.length >= 3) {
+            const base = effectiveProductosUi.find(
+              (x) => x.id !== p.id && x.name.toLowerCase().includes(baseName) && !x.name.toLowerCase().includes('six')
+            );
+            if (base && Number(base.currentStock || 0) >= 6) {
+              effectiveStock = Math.floor(Number(base.currentStock) / 6);
+            }
+          }
+        }
+
+        const isOutOfStock = effectiveStock <= 0;
+
         return {
           id: p.id,
           sku: p.sku,
@@ -106,16 +150,20 @@ export default function ProductPanel({
           price: p.salePrice,
           wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : undefined,
           cost: p.costPrice,
-          stock: p.currentStock,
+          stock: effectiveStock,
           unit: resolvedUnit,
           tax: p.tax,
           image: p.image,
-          lowStock: p.stockStatus === 'low',
-          outOfStock: p.stockStatus === 'out' || p.currentStock <= 0,
+          lowStock: !isOutOfStock && effectiveStock <= (p.minStock ?? 5),
+          outOfStock: isOutOfStock,
           status: p.status,
           isWeighted: isWeight,
           saleType: p.saleType ?? (isWeight ? 'weight' : 'unit'),
           weightUnit: p.weightUnit ?? 'lb',
+          producto_base_id: p.producto_base_id,
+          factor_conversion: p.factor_conversion,
+          unidad_base: p.unidad_base,
+          composite_items: p.composite_items,
         };
       });
 
@@ -136,6 +184,32 @@ export default function ProductPanel({
           ? (ip.unit && !['unidad', 'ud', 'und', 'unidades'].includes(ip.unit.toLowerCase()) ? ip.unit : (ip.weightUnit || 'lb'))
           : (ip.unit || 'Und');
 
+        let effectiveStock = Number(ip.currentStock ?? 0);
+        const pUnitLower = (ip.unit || '').toLowerCase();
+        const pNameLower = (ip.name || '').toLowerCase();
+        const isSixPack = pUnitLower.includes('six') || pNameLower.includes('six');
+
+        if (ip.producto_base_id) {
+          const base = initialProducts.find((x) => x.id === ip.producto_base_id);
+          const factor = Number(ip.factor_conversion || 1) > 0 ? Number(ip.factor_conversion) : (isSixPack ? 6 : 1);
+          if (base) {
+            const derived = Math.floor(Number(base.currentStock || 0) / factor);
+            if (derived > effectiveStock) effectiveStock = derived;
+          }
+        } else if (Array.isArray(ip.composite_items) && ip.composite_items.length > 0) {
+          const compStocks = ip.composite_items.map((ci: any) => {
+            const cp = initialProducts.find((x) => x.id === ci.product_id);
+            const q = Math.max(1, Number(ci.quantity || 1));
+            return cp ? Math.floor(Number(cp.currentStock || 0) / q) : 0;
+          });
+          if (compStocks.length > 0) {
+            const derived = Math.min(...compStocks);
+            if (derived > effectiveStock) effectiveStock = derived;
+          }
+        }
+
+        const isOutOfStock = effectiveStock <= 0;
+
         return {
           id: ip.id,
           sku: ip.sku,
@@ -146,16 +220,20 @@ export default function ProductPanel({
           price: ip.salePrice,
           wholesalePrice: ip.wholesalePrice ? Number(ip.wholesalePrice) : undefined,
           cost: ip.costPrice,
-          stock: ip.currentStock,
+          stock: effectiveStock,
           unit: resolvedUnit,
           tax: ip.tax,
           image: ip.image,
-          lowStock: ip.stockStatus === 'low',
-          outOfStock: ip.stockStatus === 'out' || ip.currentStock <= 0,
+          lowStock: !isOutOfStock && effectiveStock <= (ip.minStock ?? 5),
+          outOfStock: isOutOfStock,
           status: ip.status,
           isWeighted: isWeight,
           saleType: ip.saleType ?? (isWeight ? 'weight' : 'unit'),
           weightUnit: ip.weightUnit ?? 'lb',
+          producto_base_id: ip.producto_base_id,
+          factor_conversion: ip.factor_conversion,
+          unidad_base: ip.unidad_base,
+          composite_items: ip.composite_items,
         };
       });
 
@@ -202,7 +280,7 @@ export default function ProductPanel({
       return;
     }
 
-    if (p.outOfStock || p.stock <= 0) {
+    if (p.outOfStock && (p.stock === undefined || p.stock <= 0)) {
       toast.error(`Producto sin existencias: ${p.name}`);
       return;
     }
@@ -227,6 +305,11 @@ export default function ProductPanel({
       image: p.image,
       unit: p.unit,
       isWeighted: false,
+      stock: p.stock,
+      currentStock: p.stock,
+      producto_base_id: p.producto_base_id,
+      factor_conversion: p.factor_conversion,
+      composite_items: p.composite_items,
     });
   };
 
