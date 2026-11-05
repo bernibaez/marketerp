@@ -27,9 +27,7 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(() =>
-    isSupabaseConfigured() ? null : getStoredUser()
-  );
+  const [user, setUser] = useState<AuthUser | null>(() => getStoredUser());
   const [isLoading, setIsLoading] = useState(isSupabaseConfigured());
 
   useEffect(() => {
@@ -48,13 +46,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.warn('[auth] Permisos no cargados:', permErr);
         }
         if (!cancelled) {
-          setUser(sessionUser);
-          storeUser(sessionUser);
+          if (sessionUser) {
+            setUser(sessionUser);
+            storeUser(sessionUser);
+          } else {
+            // Si Supabase no devolvió usuario (por ejemplo desconexión momentánea),
+            // verificar si tenemos un usuario válido en almacenamiento local antes de limpiar
+            const localUser = getStoredUser();
+            if (localUser) {
+              setUser(localUser);
+            } else {
+              setUser(null);
+              storeUser(null);
+            }
+          }
         }
-      } catch {
+      } catch (err) {
+        console.warn('[auth] Excepción en hidratación de sesión:', err);
         if (!cancelled) {
-          setUser(null);
-          storeUser(null);
+          const localUser = getStoredUser();
+          if (localUser) {
+            setUser(localUser);
+          } else {
+            setUser(null);
+            storeUser(null);
+          }
         }
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -73,9 +89,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        const sessionUser = await obtenerSesionActual();
-        setUser(sessionUser);
-        storeUser(sessionUser);
+        try {
+          const sessionUser = await obtenerSesionActual();
+          if (sessionUser) {
+            setUser(sessionUser);
+            storeUser(sessionUser);
+          }
+        } catch (err) {
+          console.warn('[auth] Error en actualización silenciosa de token, preservando sesión activa:', err);
+        }
       }
     });
 

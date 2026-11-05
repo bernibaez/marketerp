@@ -177,36 +177,14 @@ export function useCashRegisters() {
           };
         }
 
-        // Buscar el último cierre de esta caja para mostrar el último cajero real o "Sin turno activo"
-        const ultimoCierre = cierres.find((c) => keys.has(String(c.caja_id)));
-        const ultimoUser = ultimoCierre?.cajero_id
-          ? usuarios.find((u) => u.id === ultimoCierre.cajero_id)
-          : undefined;
-        const ultimoLocal = ultimoCierre
-          ? localClosures.find((lc) => lc.id === ultimoCierre.id)
-          : undefined;
-        const rawUltimoNombre = (ultimoCierre as (CierreCaja & { cajero_nombre?: string }) | undefined)
-          ?.cajero_nombre;
-
-        const lastCashierName =
-          ultimoUser?.nombre_completo ||
-          rawUltimoNombre ||
-          ultimoLocal?.userName ||
-          ventasCajaHoy[0]?.cajero_nombre ||
-          'Disponible / Sin turno activo';
-        const lastCashierRole = ultimoUser
-          ? ROL_DB_A_UI[ultimoUser.rol] || 'Cajero'
-          : ultimoCierre
-            ? 'Cajero'
-            : 'Sin asignar';
-
+        // Si la caja está cerrada, debe figurar disponible y sin cajero asignado
         return {
           id: cajaId,
           ...ids,
           label: caja.nombre,
-          cashier: lastCashierName,
-          cashierId: ultimoCierre?.cajero_id || undefined,
-          role: lastCashierRole,
+          cashier: 'Disponible',
+          cashierId: undefined,
+          role: 'Disponible',
           isAdminBox: false,
           open: false,
           openedAt: '—',

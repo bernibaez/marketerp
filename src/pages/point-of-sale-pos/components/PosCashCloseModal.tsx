@@ -32,8 +32,15 @@ export default function PosCashCloseModal({
     ? registers
     : registers.filter((c) => !c.isAdminBox);
 
+  const userOpenBox = availableRegisters.find(
+    (c) =>
+      c.open &&
+      ((c.cashierId && user?.id && String(c.cashierId) === String(user.id)) ||
+        (c.cashier && user?.name && c.cashier.trim().toLowerCase() === user.name.trim().toLowerCase()))
+  );
   const resolvedMatch = findCashRegister(availableRegisters, initialCajaId) || findCashRegister(registers, initialCajaId);
   const resolvedInitial =
+    userOpenBox?.id ||
     resolvedMatch?.id ||
     availableRegisters[0]?.id ||
     registers[0]?.id ||

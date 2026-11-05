@@ -133,9 +133,13 @@ export default function POSTerminal() {
   useEffect(() => {
     if (registers.length === 0) return;
 
-    // 1. Si este usuario ya tiene una caja abierta registrada a su nombre, seleccionarla automáticamente
+    // 1. Si este usuario ya tiene una caja abierta registrada a su nombre o ID, seleccionarla y recuperarla automáticamente
     const userOpenRegister = registers.find(
-      (c) => c.open && c.cashierId && user?.id && c.cashierId === user.id && (isAdminUser || !c.isAdminBox)
+      (c) =>
+        c.open &&
+        (isAdminUser || !c.isAdminBox) &&
+        ((c.cashierId && user?.id && String(c.cashierId) === String(user.id)) ||
+          (c.cashier && user?.name && c.cashier.trim().toLowerCase() === user.name.trim().toLowerCase()))
     );
     if (userOpenRegister) {
       if (activeCashId !== userOpenRegister.id) {
@@ -160,36 +164,57 @@ export default function POSTerminal() {
     // Evitar asignar una caja que ya esté abierta por otro usuario
     if (!isAdminUser) {
       const current = findCashRegister(registers, activeCashId);
-      const isOccupiedByOther = Boolean(current?.open && current?.cashierId && user?.id && current.cashierId !== user.id);
+      const isOccupiedByOther = Boolean(
+        current?.open &&
+          current?.cashierId &&
+          user?.id &&
+          String(current.cashierId) !== String(user.id) &&
+          (!user?.name || !current.cashier || current.cashier.toLowerCase() !== user.name.toLowerCase())
+      );
       if (!current || current.isAdminBox || isOccupiedByOther) {
         // Buscar la primera caja disponible (cerrada) o que ya pertenezca al usuario actual
-        const availableBox = registers.find(
-          (c) => !c.isAdminBox && (!c.open || (c.cashierId && c.cashierId === user?.id))
-        ) || registers.find((c) => !c.isAdminBox) || registers[0];
+        const availableBox =
+          registers.find(
+            (c) =>
+              !c.isAdminBox &&
+              (!c.open ||
+                (c.cashierId && String(c.cashierId) === String(user?.id)) ||
+                (c.cashier && user?.name && c.cashier.toLowerCase() === user.name.toLowerCase()))
+          ) ||
+          registers.find((c) => !c.isAdminBox && !c.open) ||
+          registers.find((c) => !c.isAdminBox) ||
+          registers[0];
         if (availableBox && availableBox.id !== activeCashId) {
           setActiveCashId(availableBox.id);
           return;
         }
       }
     }
-  }, [isAdminUser, registers, activeCashId, user?.id]);
+  }, [isAdminUser, registers, activeCashId, user?.id, user?.name]);
 
   const activeCashSession = findCashRegister(registers, activeCashId);
   const activeCash = activeCashSession || getCashRegister(activeCashId);
+
+  // Determinar si la sesión de la caja activa pertenece al usuario actual
+  const isMyOpenSession = Boolean(
+    activeCashSession?.open &&
+      ((activeCashSession.cashierId && user?.id && String(activeCashSession.cashierId) === String(user.id)) ||
+        (user?.name &&
+          activeCashSession.cashier &&
+          activeCashSession.cashier.trim().toLowerCase() === user.name.trim().toLowerCase()))
+  );
 
   // Para cajero regular: si la caja activa pertenece a otro cajero, no se considera abierta para el usuario actual
   const isCajaBelongingToOtherCashier =
     !isAdminUser &&
     Boolean(activeCashSession?.open) &&
-    Boolean(activeCashSession?.cashierId) &&
-    Boolean(user?.id) &&
-    activeCashSession?.cashierId !== user?.id &&
+    !isMyOpenSession &&
     !shiftOpenedLocally;
 
   const cashIsOpen =
     !shiftClosedLocally &&
     !isCajaBelongingToOtherCashier &&
-    (Boolean(activeCashSession?.open) || shiftOpenedLocally);
+    (isMyOpenSession || shiftOpenedLocally || (isAdminUser && Boolean(activeCashSession?.open)));
   const isRemoteAdmin = isAdminUser && !activeCash.isAdminBox;
 
   // 4. Held Sales Hook

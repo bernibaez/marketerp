@@ -28,7 +28,9 @@ export function saveLocalMovimientoCaja(mov: MovimientoCaja & { cajero_nombre?: 
   localStorage.setItem(LOCAL_MOVIMIENTOS_KEY, JSON.stringify([mov, ...current]));
 }
 
-export async function registrarMovimientoCaja(datos: NuevoMovimientoCajaInput): Promise<MovimientoCaja> {
+export async function registrarMovimientoCaja(
+  datos: NuevoMovimientoCajaInput
+): Promise<MovimientoCaja & { cajero_nombre?: string }> {
   const now = new Date().toISOString();
   const id = `mov-${Date.now()}`;
   const codigo = `MOV-${Date.now().toString().slice(-6)}`;
@@ -52,7 +54,7 @@ export async function registrarMovimientoCaja(datos: NuevoMovimientoCajaInput): 
   const sb = tryGetSupabase();
   if (sb && isSupabaseConfigured()) {
     try {
-      await sb.from('movimientos_caja').insert({
+      const payload: Record<string, any> = {
         codigo,
         caja_id: datos.caja_id,
         cierre_id: datos.cierre_id ?? null,
@@ -61,7 +63,15 @@ export async function registrarMovimientoCaja(datos: NuevoMovimientoCajaInput): 
         monto: datos.monto,
         concepto: datos.concepto,
         categoria: datos.categoria ?? null,
-      });
+      };
+      if (datos.cajero_nombre) {
+        payload.cajero_nombre = datos.cajero_nombre;
+      }
+      const { error: insErr } = await sb.from('movimientos_caja').insert(payload);
+      if (insErr && (insErr.message?.includes('cajero_nombre') || insErr.code === '42703')) {
+        delete payload.cajero_nombre;
+        await sb.from('movimientos_caja').insert(payload);
+      }
     } catch {
       // Fallback a local storage
     }
@@ -75,16 +85,15 @@ export async function obtenerMovimientosCaja(cierreId?: string, cajaId?: string)
   const sb = tryGetSupabase();
 
   const filterItem = (m: MovimientoCaja) => {
-    if (cierreId && m.cierre_id) {
+    if (cierreId) {
       if (m.cierre_id === cierreId) return true;
+      if (!m.cierre_id && cajaId && String(m.caja_id) === String(cajaId)) return true;
+      return false;
     }
-    if (cajaId && m.caja_id) {
-      if (m.caja_id === cajaId) return true;
+    if (cajaId) {
+      return String(m.caja_id) === String(cajaId);
     }
-    if (!cierreId && !cajaId) return true;
-    // Si no tiene cierre_id pero la caja coincide, pertenece al turno de esa caja
-    if (cierreId && !m.cierre_id && cajaId && m.caja_id === cajaId) return true;
-    return false;
+    return true;
   };
 
   if (!sb || !isSupabaseConfigured()) {

@@ -66,20 +66,28 @@ export default function PosCashOpenModal({
     : registers.filter((c) => !c.isAdminBox);
 
   const userOpenBox = availableRegisters.find(
-    (c) => c.open && c.cashierId && user?.id && c.cashierId === user.id
+    (c) =>
+      c.open &&
+      ((c.cashierId && user?.id && String(c.cashierId) === String(user.id)) ||
+        (c.cashier && user?.name && c.cashier.trim().toLowerCase() === user.name.trim().toLowerCase()))
   );
   const firstFreeBox = availableRegisters.find(
-    (c) => !c.open || (c.cashierId && user?.id && c.cashierId === user.id)
+    (c) =>
+      !c.open ||
+      (c.cashierId && user?.id && String(c.cashierId) === String(user.id)) ||
+      (c.cashier && user?.name && c.cashier.trim().toLowerCase() === user.name.trim().toLowerCase())
   );
   const resolvedMatch =
     findCashRegister(availableRegisters, initialCajaId) ||
     findCashRegister(registers, initialCajaId);
   const initialIsOccupiedByOther = Boolean(
-    resolvedMatch?.open && resolvedMatch?.cashierId && user?.id && resolvedMatch.cashierId !== user.id
+    resolvedMatch?.open &&
+      ((resolvedMatch.cashierId && user?.id && String(resolvedMatch.cashierId) !== String(user.id)) ||
+        (!user?.id && resolvedMatch.cashier && user?.name && resolvedMatch.cashier.trim().toLowerCase() !== user.name.trim().toLowerCase()))
   );
   const resolvedInitial =
-    (!initialIsOccupiedByOther && resolvedMatch?.id) ||
     userOpenBox?.id ||
+    (!initialIsOccupiedByOther && resolvedMatch?.id) ||
     firstFreeBox?.id ||
     availableRegisters[0]?.id ||
     '2';
