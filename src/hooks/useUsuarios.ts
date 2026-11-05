@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   actualizarPerfil,
   alternarActivoUsuario,
+  cambiarPasswordUsuario,
   crearUsuario,
   eliminarUsuario,
   obtenerUsuarios,
@@ -81,5 +82,12 @@ export function useUsuarios(busqueda = '') {
     [refetch]
   );
 
-  return { usuarios, loading, error, refetch, crear, actualizar, alternarActivo, eliminar };
+  const cambiarPassword = useCallback(
+    async (id: string, nuevaPassword: string, correo?: string) => {
+      await cambiarPasswordUsuario(id, nuevaPassword, correo);
+    },
+    []
+  );
+
+  return { usuarios, loading, error, refetch, crear, actualizar, alternarActivo, eliminar, cambiarPassword };
 }

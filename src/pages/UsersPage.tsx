@@ -19,12 +19,14 @@ import type { AgenteComercial, Perfil, Rol, RolDb } from '@/types/database';
 import { toast } from '@/lib/toast';
 import { isSupabaseConfigured } from '@/services/clienteSupabase';
 import { getDefaultRolePermissions } from '@/lib/permissionsCatalog';
+import { cambiarPasswordUsuario } from '@/services/usuarios.service';
 import { UsersTable } from './users/components/UsersTable';
 import { RolesTable } from './users/components/RolesTable';
 import { AgentsTable } from './users/components/AgentsTable';
 import { UserInlineForm } from './users/components/UserInlineForm';
 import { UserDetailModal } from './users/components/UserDetailModal';
 import { AgentDetailModal } from './users/components/AgentDetailModal';
+import { ChangePasswordModal } from './users/components/ChangePasswordModal';
 
 type Tab = 'users' | 'roles' | 'agents';
 
@@ -34,6 +36,7 @@ export default function UsersPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingUser, setEditingUser] = useState<Perfil | null>(null);
   const [viewingUser, setViewingUser] = useState<Perfil | null>(null);
+  const [passwordUser, setPasswordUser] = useState<Perfil | null>(null);
   const [viewingAgent, setViewingAgent] = useState<AgenteComercial | null>(null);
   const [editingAgent, setEditingAgent] = useState<AgenteComercial | null>(null);
   const [editingRole, setEditingRole] = useState<Rol | null>(null);
@@ -245,7 +248,19 @@ export default function UsersPage() {
           telefono: formTelefono.trim() || null,
           rol: finalRolCode,
         });
-        toast.success('Usuario actualizado');
+
+        if (formPassword.trim()) {
+          if (formPassword.trim().length < 6) {
+            toast.error('La contraseña debe tener al menos 6 caracteres');
+            setSaving(false);
+            return;
+          }
+          await cambiarPasswordUsuario(editingUser.id, formPassword.trim(), editingUser.correo);
+          toast.success('Usuario y contraseña actualizados exitosamente');
+        } else {
+          toast.success('Usuario actualizado');
+        }
+
         setShowForm(false);
         resetForm();
       } catch (e) {
@@ -449,6 +464,7 @@ export default function UsersPage() {
                 loading={loading}
                 onView={(u) => setViewingUser(u)}
                 onEdit={(u) => openEditUser(u)}
+                onChangePassword={(u) => setPasswordUser(u)}
                 onDelete={(u) => void handleDeleteUser(u)}
                 onToggleActive={async (u) => {
                   try {
@@ -496,11 +512,21 @@ export default function UsersPage() {
         )}
       </div>
 
-      <UserDetailModal user={viewingUser} roles={roles} onClose={() => setViewingUser(null)} />
+      <UserDetailModal
+        user={viewingUser}
+        roles={roles}
+        onClose={() => setViewingUser(null)}
+        onChangePassword={(u) => setPasswordUser(u)}
+      />
       <AgentDetailModal
         agent={viewingAgent}
         onClose={() => setViewingAgent(null)}
         onEdit={(a) => openEditAgent(a)}
+      />
+      <ChangePasswordModal
+        user={passwordUser}
+        open={!!passwordUser}
+        onClose={() => setPasswordUser(null)}
       />
     </AppLayout>
   );

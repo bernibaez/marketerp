@@ -1,5 +1,5 @@
 import React from 'react';
-import { Eye, Edit2, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Eye, Edit2, Trash2, ToggleLeft, ToggleRight, KeyRound } from 'lucide-react';
 import type { Perfil, Rol } from '@/types/database';
 import { ROL_DB_A_UI } from '@/services/auth.service';
 import { InlineLoader, TableRowSkeleton } from '@/components/ui/LoadingSkeleton';
@@ -12,6 +12,7 @@ interface UsersTableProps {
   onEdit: (user: Perfil) => void;
   onDelete: (user: Perfil) => void;
   onToggleActive: (user: Perfil) => void;
+  onChangePassword?: (user: Perfil) => void;
 }
 
 export function UsersTable({
@@ -22,6 +23,7 @@ export function UsersTable({
   onEdit,
   onDelete,
   onToggleActive,
+  onChangePassword,
 }: UsersTableProps) {
   return (
     <div className="card overflow-hidden">
@@ -99,6 +101,16 @@ export function UsersTable({
                       >
                         <Eye size={14} />
                       </button>
+                      {onChangePassword && (
+                        <button
+                          type="button"
+                          className="p-1.5 rounded-lg hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+                          title="Cambiar contraseña"
+                          onClick={() => onChangePassword(user)}
+                        >
+                          <KeyRound size={14} />
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors cursor-pointer"

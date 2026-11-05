@@ -8,6 +8,7 @@ import {
   TrendingUp,
   AlertTriangle,
   Activity,
+  RefreshCw,
 } from 'lucide-react';
 import { useDashboard } from '@/hooks/useDashboard';
 import { Skeleton } from '@/components/ui/LoadingSkeleton';
@@ -18,19 +19,19 @@ function fmt(n: number) {
 
 export default function DashboardBentoGrid() {
   const [periodo, setPeriodo] = useState<'hoy' | 'semana' | 'mes'>('hoy');
-  const { metricas, alertas, loading } = useDashboard(periodo);
+  const { metricas, alertas, loading, refetch } = useDashboard(periodo);
 
   const m = metricas;
 
   // Calculos para métricas
   const ventasTotal = m?.ventas_total ?? 0;
   const ventasCount = m?.ventas_count ?? 0;
-  const ticketPromedio = m?.ticket_promedio ?? 0;
-  const gananciaBruta = m?.ganancia_bruta ?? 0;
+  const ticketPromedio = ventasCount > 0 ? (m?.ticket_promedio ?? 0) : 0;
+  const gananciaBruta = ventasCount > 0 ? (m?.ganancia_bruta ?? 0) : 0;
   const stockBajoCount = alertas?.length ?? (m?.productos_stock_bajo ?? 0);
   const agotadosCount = alertas?.filter((a) => a.stock_actual <= 0).length ?? 0;
 
-  const margenPct = ventasTotal > 0 ? (gananciaBruta / ventasTotal) * 100 : 16.7;
+  const margenPct = ventasTotal > 0 ? (gananciaBruta / ventasTotal) * 100 : 0;
 
   const periodoLabel =
     periodo === 'hoy' ? 'de hoy' : periodo === 'semana' ? 'de la semana' : 'del mes';
@@ -83,6 +84,14 @@ export default function DashboardBentoGrid() {
             }`}
           >
             Este mes
+          </button>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            title="Refrescar métricas ahora"
+            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-all cursor-pointer ml-1"
+          >
+            <RefreshCw size={13} className={loading ? 'animate-spin text-emerald-600' : ''} />
           </button>
         </div>
       </div>

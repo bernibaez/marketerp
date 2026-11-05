@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import {
   Menu, Search, Bell, Sun, Moon, ChevronDown, X, Settings, LogOut, User, Users,
-  Store, RotateCcw, Lock, ShoppingCart, Package, ArrowLeftRight, Sliders, Scale, DollarSign, BarChart2, ShieldCheck, UserCheck, ShoppingBag, HandCoins, Wallet, Briefcase
+  Store, RotateCcw, Lock, ShoppingCart, Package, ArrowLeftRight, Sliders, Scale, DollarSign, BarChart2, ShieldCheck, UserCheck, ShoppingBag, HandCoins, Wallet, Briefcase, KeyRound
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/context/AuthContext';
+import { ChangePasswordModal } from '@/pages/users/components/ChangePasswordModal';
 
 interface TopbarProps {
   onToggleSidebar: () => void;
@@ -205,6 +206,7 @@ export default function Topbar({
   const { user, logout } = useAuth();
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
   const [searchValue, setSearchValue] = useState('');
   const [notifications, setNotifications] = useState<AppNotification[]>(INITIAL_NOTIFICATIONS);
 
@@ -425,6 +427,17 @@ export default function Topbar({
                   {item.label}
                 </Link>
               ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setProfileOpen(false);
+                  setShowChangePassword(true);
+                }}
+                className="w-full flex items-center gap-3.5 px-5 py-3 text-base font-semibold text-foreground/80 hover:bg-secondary hover:text-foreground transition-colors cursor-pointer text-left"
+              >
+                <span className="text-primary"><KeyRound size={18} /></span>
+                Cambiar Contraseña
+              </button>
               <div className="border-t border-border/80">
                 <button
                   type="button"
@@ -447,6 +460,12 @@ export default function Topbar({
           )}
         </div>
       </div>
+
+      <ChangePasswordModal
+        user={user ? { id: user.id, name: user.name, email: user.email } : null}
+        open={showChangePassword}
+        onClose={() => setShowChangePassword(false)}
+      />
     </header>
   );
 }

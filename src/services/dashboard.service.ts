@@ -17,24 +17,26 @@ export const emptyMetricas = (periodo: MetricasDashboard['periodo']): MetricasDa
 
 export function getRangoFechasPeriodo(periodo: 'hoy' | 'semana' | 'mes'): { desde: Date; hasta: Date } {
   const now = new Date();
-  const hasta = new Date(now);
 
   if (periodo === 'hoy') {
-    // 00:00:00.000 del día local en la zona horaria del usuario (evita truncados UTC a las 8 p.m.)
+    // 00:00:00.000 a 23:59:59.999 del día local en la zona horaria del usuario (evita truncados UTC a las 8 p.m.)
     const desde = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const hasta = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
     return { desde, hasta };
   }
 
   if (periodo === 'semana') {
-    // Lunes de la semana actual
+    // Lunes 00:00:00.000 de la semana actual hasta domingo 23:59:59.999
     const day = now.getDay();
     const diff = (day + 6) % 7;
     const desde = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diff, 0, 0, 0, 0);
+    const hasta = new Date(desde.getFullYear(), desde.getMonth(), desde.getDate() + 6, 23, 59, 59, 999);
     return { desde, hasta };
   }
 
-  // 'mes': Primer día del mes actual a las 00:00:00
+  // 'mes': Primer día del mes actual a las 00:00:00 hasta el último día del mes
   const desde = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const hasta = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
   return { desde, hasta };
 }
 
@@ -68,11 +70,13 @@ export async function obtenerMetricasDashboard(
   const sb = tryGetSupabase();
   const { desde, hasta } = getRangoFechasPeriodo(periodo);
   const desdeIso = desde.toISOString();
+  const hastaIso = hasta.toISOString();
 
   let remoteRows: any[] = [];
+  let directQuerySucceeded = false;
   let rpcData: Partial<MetricasDashboard> | null = null;
 
-  // 1. Intentar llamar al RPC optimizado de Supabase
+  // 1. Intentar llamar al RPC optimizado de Supabase con p_desde exacto
   if (sb) {
     try {
       let rpc = sb.rpc('obtener_metricas_dashboard', { p_periodo: periodo, p_desde: desdeIso });
@@ -82,19 +86,10 @@ export async function obtenerMetricasDashboard(
         rpcData = data as MetricasDashboard;
       }
     } catch {
-      try {
-        let rpc = sb.rpc('obtener_metricas_dashboard', { p_periodo: periodo });
-        if (signal) rpc = rpc.abortSignal(signal);
-        const { data, error } = await rpc;
-        if (!error && data) {
-          rpcData = data as MetricasDashboard;
-        }
-      } catch {
-        // Fallback a consulta directa
-      }
+      // Ignorar fallback
     }
 
-    // 2. Consultar directamente ventas para garantizar inclusión de ventas diurnas y estados variados
+    // 2. Consultar directamente ventas para garantizar inclusión estricta de la fecha local
     try {
       let query = sb
         .from('ventas')
@@ -102,11 +97,13 @@ export async function obtenerMetricasDashboard(
           'id, numero_factura, monto_total, subtotal, monto_impuesto, monto_descuento, costo_total, monto_efectivo, monto_tarjeta, monto_transferencia, monto_credito, monto_pagado, estado, creado_en'
         )
         .gte('creado_en', desdeIso)
+        .lte('creado_en', hastaIso)
         .neq('estado', 'anulada');
       if (signal) query = query.abortSignal(signal);
       const { data, error } = await query;
       if (!error && Array.isArray(data)) {
         remoteRows = data;
+        directQuerySucceeded = true;
       }
     } catch {
       // Ignorar error de consulta
@@ -121,12 +118,12 @@ export async function obtenerMetricasDashboard(
     localList = [];
   }
 
-  // 4. Consolidar ventas únicas
+  // 4. Consolidar ventas únicas dentro del rango exacto
   const remoteIds = new Set(remoteRows.map((r) => String(r.id)));
   const mergedVentas: any[] = [...remoteRows];
 
   const desdeMs = desde.getTime();
-  const hastaMs = hasta.getTime() + 1000;
+  const hastaMs = hasta.getTime();
 
   for (const lv of localList) {
     if (remoteIds.has(String(lv.id))) continue;
@@ -154,11 +151,28 @@ export async function obtenerMetricasDashboard(
   calcVentasTotal = Math.round(calcVentasTotal * 100) / 100;
   calcCostoTotal = Math.round(calcCostoTotal * 100) / 100;
 
-  // Si el RPC contiene más ventas o montos consolidados, tomar el mayor
-  const finalVentasTotal = Math.max(calcVentasTotal, Number(rpcData?.ventas_total || 0));
-  const finalVentasCount = Math.max(calcVentasCount, Number(rpcData?.ventas_count || 0));
-  const finalCostoTotal = Math.max(calcCostoTotal, Number(rpcData?.costo_total || 0));
-  const finalGananciaBruta = Math.round((finalVentasTotal - finalCostoTotal) * 100) / 100;
+  // Lógica de asignación de métricas:
+  // Si la consulta directa o local se procesó y NO hubo ventas registradas (calcVentasCount === 0),
+  // las ventas totales y métricas deben ser 0 estrictamente.
+  // Nunca se debe heredar el monto de ayer por un RPC desfasado de zona horaria o caché.
+  let finalVentasTotal = calcVentasTotal;
+  let finalVentasCount = calcVentasCount;
+  let finalCostoTotal = calcCostoTotal;
+
+  if (!directQuerySucceeded && sb && rpcData) {
+    // Solo si la consulta directa no pudo ejecutarse (error de red/permiso)
+    finalVentasTotal = Number(rpcData.ventas_total || 0);
+    finalVentasCount = Number(rpcData.ventas_count || 0);
+    finalCostoTotal = Number(rpcData.costo_total || 0);
+  }
+
+  if (finalVentasCount === 0) {
+    finalVentasTotal = 0;
+    finalCostoTotal = 0;
+  }
+
+  const finalGananciaBruta =
+    finalVentasCount > 0 ? Math.round((finalVentasTotal - finalCostoTotal) * 100) / 100 : 0;
   const finalTicketPromedio =
     finalVentasCount > 0 ? Math.round((finalVentasTotal / finalVentasCount) * 100) / 100 : 0;
 

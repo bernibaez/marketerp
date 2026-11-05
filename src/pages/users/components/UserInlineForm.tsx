@@ -176,16 +176,23 @@ export function UserInlineForm({
           </div>
         )}
 
-        {tab === 'users' && !editingUser && (
+        {tab === 'users' && (
           <div>
-            <label className="block font-bold mb-1 text-foreground">Contraseña de Acceso</label>
+            <label className="block font-bold mb-1 text-foreground">
+              {editingUser ? 'Nueva Contraseña (opcional)' : 'Contraseña de Acceso'}
+            </label>
             <input
               className="input-field w-full"
-              placeholder="••••••••"
+              placeholder={editingUser ? '•••••••• (dejar en blanco para conservar actual)' : '••••••••'}
               type="password"
               value={formPassword}
               onChange={(e) => setFormPassword(e.target.value)}
             />
+            {editingUser && (
+              <span className="text-[10px] text-muted-foreground mt-0.5 block">
+                Escribe una contraseña solo si deseas cambiarla (mínimo 6 caracteres).
+              </span>
+            )}
           </div>
         )}
 

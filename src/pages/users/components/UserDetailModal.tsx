@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users } from 'lucide-react';
+import { Users, KeyRound } from 'lucide-react';
 import ModalShell from '@/components/ui/ModalShell';
 import type { Perfil, Rol } from '@/types/database';
 import { ROL_DB_A_UI } from '@/services/auth.service';
@@ -8,9 +8,10 @@ interface UserDetailModalProps {
   user: Perfil | null;
   roles: Rol[];
   onClose: () => void;
+  onChangePassword?: (user: Perfil) => void;
 }
 
-export function UserDetailModal({ user, roles, onClose }: UserDetailModalProps) {
+export function UserDetailModal({ user, roles, onClose, onChangePassword }: UserDetailModalProps) {
   return (
     <ModalShell open={!!user} onClose={onClose} size="md" className="p-6">
       {user && (
@@ -62,8 +63,21 @@ export function UserDetailModal({ user, roles, onClose }: UserDetailModalProps) 
               )}
             </div>
           </div>
-          <div className="flex justify-end mt-6">
-            <button type="button" className="btn-primary cursor-pointer" onClick={onClose}>
+          <div className="flex justify-end gap-2 mt-6">
+            {onChangePassword && (
+              <button
+                type="button"
+                className="btn-secondary flex items-center gap-1.5 cursor-pointer text-xs"
+                onClick={() => {
+                  onClose();
+                  onChangePassword(user);
+                }}
+              >
+                <KeyRound size={14} className="text-primary" />
+                <span>Cambiar Contraseña</span>
+              </button>
+            )}
+            <button type="button" className="btn-primary cursor-pointer text-xs" onClick={onClose}>
               Cerrar
             </button>
           </div>

@@ -1,6 +1,6 @@
 import { tryGetSupabase } from './clienteSupabase';
 import { PERFIL_COLUMNS, type Perfil, type RolDb } from '@/types/database';
-import { AUTH_ACCOUNTS } from '@/lib/auth';
+import { AUTH_ACCOUNTS, saveStoredUserPassword } from '@/lib/auth';
 import { ROL_DB_A_UI } from './auth.service';
 import { isUuid } from './roles.service';
 
@@ -113,6 +113,7 @@ export async function crearUsuario(payload: CrearUsuarioPayload): Promise<string
       actualizado_en: new Date().toISOString(),
     };
     saveLocalPerfiles([...list, nuevo]);
+    saveStoredUserPassword(newId, payload.correo, payload.password);
     return newId;
   }
 
@@ -186,4 +187,67 @@ export async function alternarActivoUsuario(id: string, activo: boolean): Promis
 /** Soft-delete: desactiva el usuario (no borra auth.users). */
 export async function eliminarUsuario(id: string): Promise<void> {
   await actualizarPerfil(id, { activo: false });
+}
+
+/**
+ * Cambia la contraseña de un usuario en el sistema.
+ * Soporta actualización en Supabase (usuario propio vía updateUser, o terceros vía RPC cambiar_password_usuario)
+ * y persistencia en almacén local / usuarios de demostración.
+ */
+export async function cambiarPasswordUsuario(
+  id: string,
+  nuevaPassword: string,
+  correo?: string
+): Promise<void> {
+  const trimmed = nuevaPassword.trim();
+  if (!trimmed || trimmed.length < 6) {
+    throw new Error('La nueva contraseña debe tener al menos 6 caracteres');
+  }
+
+  // 1. Guardar en almacenamiento local para asegurar funcionamiento offline y cuentas demo
+  saveStoredUserPassword(id, correo || '', trimmed);
+
+  const sb = tryGetSupabase();
+  if (!sb || !isUuid(id)) {
+    return;
+  }
+
+  // 2. Si el usuario actual es quien cambia su propia contraseña en Supabase
+  try {
+    const { data: sessionData } = await sb.auth.getSession();
+    const currentUid = sessionData.session?.user?.id;
+    if (currentUid && currentUid === id) {
+      const { error } = await sb.auth.updateUser({ password: trimmed });
+      if (error) throw errorSupabaseUsuario(error);
+      return;
+    }
+  } catch (e) {
+    if (e instanceof Error && !e.message.includes('not authenticated')) {
+      // Si falló específicamente la actualización de auth propio
+      throw errorSupabaseUsuario(e);
+    }
+  }
+
+  // 3. Si un administrador cambia la contraseña de otro usuario mediante RPC en Supabase
+  try {
+    const { error } = await sb.rpc('cambiar_password_usuario', {
+      p_user_id: id,
+      p_nueva_password: trimmed,
+    });
+    if (error) {
+      if (
+        error.message?.includes('function') ||
+        error.message?.includes('does not exist') ||
+        (error as any).code === '42883'
+      ) {
+        console.warn(
+          'Para cambiar contraseñas de otros usuarios en Supabase debes ejecutar la migración 028_cambiar_password_usuario.sql'
+        );
+      } else {
+        throw errorSupabaseUsuario(error);
+      }
+    }
+  } catch (err) {
+    throw errorSupabaseUsuario(err);
+  }
 }

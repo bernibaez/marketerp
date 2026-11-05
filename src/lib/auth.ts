@@ -142,7 +142,33 @@ export function getRoleHome(role: UserRole): string {
 }
 
 const STORAGE_KEY = 'mercato_auth_user';
+const LOCAL_PASSWORDS_KEY = 'mercato_user_passwords';
 
+export function getStoredUserPassword(id?: string, email?: string, username?: string): string | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_PASSWORDS_KEY);
+    if (!raw) return null;
+    const map = JSON.parse(raw) as Record<string, string>;
+    if (id && map[id]) return map[id];
+    if (email && map[email.toLowerCase()]) return map[email.toLowerCase()];
+    if (username && map[username.toLowerCase()]) return map[username.toLowerCase()];
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveStoredUserPassword(id: string, email: string, password: string): void {
+  try {
+    const raw = localStorage.getItem(LOCAL_PASSWORDS_KEY);
+    const map: Record<string, string> = raw ? JSON.parse(raw) : {};
+    if (id) map[id] = password;
+    if (email) map[email.toLowerCase()] = password;
+    localStorage.setItem(LOCAL_PASSWORDS_KEY, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
+}
 
 function toPublicUser(account: AuthAccount): AuthUser {
   const { password: _, ...user } = account;
@@ -173,15 +199,62 @@ export function authenticate(
   username: string,
   password: string
 ): { ok: true; user: AuthUser } | { ok: false; error: string } {
+  const input = username.trim().toLowerCase();
   const account = AUTH_ACCOUNTS.find(
     (a) =>
-      a.username.toLowerCase() === username.trim().toLowerCase() ||
-      a.email.toLowerCase() === username.trim().toLowerCase()
+      a.username.toLowerCase() === input ||
+      a.email.toLowerCase() === input
   );
-  if (!account) return { ok: false, error: 'Usuario o contraseña incorrectos' };
-  if (account.password !== password) return { ok: false, error: 'Usuario o contraseña incorrectos' };
-  if (account.status !== 'active') return { ok: false, error: 'Esta cuenta está desactivada' };
-  return { ok: true, user: toPublicUser(account) };
+
+  if (account) {
+    const customPassword = getStoredUserPassword(account.id, account.email, account.username);
+    const expectedPassword = customPassword ?? account.password;
+    if (expectedPassword !== password) return { ok: false, error: 'Usuario o contraseña incorrectos' };
+    if (account.status !== 'active') return { ok: false, error: 'Esta cuenta está desactivada' };
+    return { ok: true, user: toPublicUser(account) };
+  }
+
+  // Comprobar usuarios creados localmente en localStorage
+  try {
+    const rawPerfiles = localStorage.getItem('mercato_local_perfiles');
+    if (rawPerfiles) {
+      const perfiles = JSON.parse(rawPerfiles) as Array<{
+        id: string;
+        correo: string;
+        nombre_completo: string;
+        rol: string;
+        activo: boolean;
+      }>;
+      const found = perfiles.find(
+        (p) =>
+          p.correo.toLowerCase() === input ||
+          p.correo.toLowerCase().split('@')[0] === input
+      );
+      if (found) {
+        if (!found.activo) return { ok: false, error: 'Esta cuenta está desactivada' };
+        const storedPass = getStoredUserPassword(found.id, found.correo);
+        if (storedPass && storedPass === password) {
+          return {
+            ok: true,
+            user: {
+              id: found.id,
+              username: found.correo.split('@')[0],
+              name: found.nombre_completo,
+              email: found.correo,
+              role: (found.rol === 'admin' ? 'Administrador' : found.rol === 'cajero' ? 'Cajero' : 'Vendedor') as UserRole,
+              status: 'active',
+              phone: '',
+              initials: found.nombre_completo.slice(0, 2).toUpperCase(),
+            },
+          };
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return { ok: false, error: 'Usuario o contraseña incorrectos' };
 }
 
 export function authenticateByCode(
