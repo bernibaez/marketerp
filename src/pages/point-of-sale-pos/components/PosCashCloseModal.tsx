@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Lock, DollarSign, Monitor, CheckCircle2, AlertTriangle, Calculator, FileText, ArrowUpRight, ArrowDownRight, CreditCard, Undo2 } from 'lucide-react';
+import { X, Lock, CheckCircle2, AlertTriangle, ChevronDown } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/context/AuthContext';
 import { findCashRegister } from '@/lib/cashRegisters';
@@ -40,7 +40,6 @@ export default function PosCashCloseModal({
     '2';
 
   const [selectedCajaId, setSelectedCajaId] = useState(resolvedInitial);
-  const [selectedCajeroId, setSelectedCajeroId] = useState<string>(user?.id || '');
 
   const [summary, setSummary] = useState<ResumenCajaAbierta>({
     caja_id: resolvedInitial,
@@ -66,7 +65,16 @@ export default function PosCashCloseModal({
 
   const selectedCaja =
     findCashRegister(availableRegisters, selectedCajaId) || availableRegisters[0] || registers[0];
-  const selectedUser = isAdmin ? dbUsers.find((u) => u.id === selectedCajeroId) : null;
+
+  const getRegisterDisplayLabel = (reg: { id: string; label: string }) => {
+    if (reg.label.includes('—')) return reg.label;
+    const shortBox = reg.label.includes('Caja #')
+      ? reg.label.split(' - ')[0].trim()
+      : `Caja #${reg.id}`;
+    const userName = user?.name ? user.name.toUpperCase() : '';
+    const prefix = userName && !reg.label.toUpperCase().includes(userName) ? `${userName} ` : '';
+    return `${prefix}${shortBox} — (${shortBox})`;
+  };
 
   useEffect(() => {
     let alive = true;
@@ -183,234 +191,199 @@ export default function PosCashCloseModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg bg-card rounded-3xl border border-border shadow-2xl p-6 space-y-5 animate-in zoom-in-95 duration-150 overflow-hidden max-h-[90vh] overflow-y-auto"
+        className="w-full max-w-[460px] bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-2xl p-7 sm:p-8 animate-in zoom-in-95 duration-150 overflow-hidden max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border/80 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center justify-center">
-              <Lock size={22} />
-            </div>
-            <div>
-              <h3 className="font-extrabold text-foreground text-lg leading-tight">
-                Cierre de Turno / Arqueo de Caja
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                Cálculo de arqueo real basado en ventas, entradas, retiros y devoluciones
-              </p>
-            </div>
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <h3 className="text-xl sm:text-[22px] font-bold text-slate-900 dark:text-white tracking-tight">
+              Cierre de turno
+            </h3>
+            <p className="text-xs sm:text-[13px] text-slate-500 dark:text-slate-400 mt-1 leading-normal">
+              Arqueo de caja basado en ventas, entradas, retiros y devoluciones.
+            </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition p-1 rounded-lg cursor-pointer"
+            aria-label="Cerrar modal"
           >
-            <X size={18} />
+            <X size={20} />
           </button>
         </div>
 
-        <form onSubmit={handleCloseRegister} className="space-y-4">
-          {/* Usuario Responsable del Cierre */}
-          <div className="p-3 bg-secondary/40 rounded-2xl border border-border flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-black text-sm flex items-center justify-center flex-shrink-0 border border-amber-500/30">
-                {(user?.name || 'U').charAt(0).toUpperCase()}
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-black text-foreground truncate">{user?.name || 'Usuario'}</p>
-                <p className="text-[11px] text-muted-foreground truncate">
-                  {user?.role || 'Cajero'} {user?.username ? `• @${user.username}` : ''}
-                </p>
-              </div>
-            </div>
-            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">
-              Cierre de Turno
-            </span>
-          </div>
-
-          {/* Select Register */}
-          <div>
-            <label className="text-xs font-bold text-foreground mb-1 block">
-              Caja a Cerrar
-            </label>
-            {isAdmin ? (
-              <div className="relative">
-                <Monitor size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <select
-                  value={selectedCajaId}
-                  onChange={(e) => setSelectedCajaId(e.target.value)}
-                  className="input-field pl-10 h-11 text-xs font-bold w-full cursor-pointer"
-                >
-                  {availableRegisters.map((reg) => (
-                    <option key={reg.id} value={reg.id}>
-                      {reg.label} — (Caja #{reg.id})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : (
-              <div className="p-3 bg-secondary/50 rounded-xl border border-border flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold">
-                  <Monitor size={16} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-black text-foreground truncate">{selectedCaja.label}</p>
-                  <p className="text-[10px] text-muted-foreground">Tu registradora activa asignada</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Real Breakdown Financial Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-            <div className="p-2.5 bg-secondary/40 rounded-xl border border-border/60">
-              <span className="text-[10px] font-bold text-muted-foreground uppercase block">Fondo Inicial</span>
-              <span className="text-xs font-extrabold text-foreground tabular-nums">
-                RD$ {summary.monto_apertura.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-
-            <div className="p-2.5 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
-              <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase block flex items-center gap-1">
-                <ArrowUpRight size={12} /> Ventas Efectivo
-              </span>
-              <span className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400 tabular-nums">
-                +RD$ {summary.total_efectivo.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-
-            <div className="p-2.5 bg-blue-500/10 rounded-xl border border-blue-500/20">
-              <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase block flex items-center gap-1">
-                <ArrowUpRight size={12} /> Entradas Ef.
-              </span>
-              <span className="text-xs font-extrabold text-blue-600 dark:text-blue-400 tabular-nums">
-                +RD$ {summary.total_entradas.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-
-            <div className="p-2.5 bg-amber-500/10 rounded-xl border border-amber-500/20">
-              <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase block flex items-center gap-1">
-                <ArrowDownRight size={12} /> Retiros / Gastos
-              </span>
-              <span className="text-xs font-extrabold text-amber-600 dark:text-amber-400 tabular-nums">
-                -RD$ {summary.total_retiros.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-
-            <div className="p-2.5 bg-rose-500/10 rounded-xl border border-rose-500/20">
-              <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase block flex items-center gap-1">
-                <Undo2 size={12} /> Devoluciones
-              </span>
-              <span className="text-xs font-extrabold text-rose-600 dark:text-rose-400 tabular-nums">
-                -RD$ {summary.total_devoluciones.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-
-            <div className="p-2.5 bg-primary/10 rounded-xl border border-primary/20">
-              <span className="text-[10px] font-bold text-primary uppercase block flex items-center gap-1">
-                <CreditCard size={12} /> Tarjeta/Transf
-              </span>
-              <span className="text-xs font-extrabold text-primary tabular-nums">
-                RD$ {(summary.total_tarjeta + summary.total_transferencia).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-          </div>
-
-          {/* Expected Total Badge */}
-          <div className="p-3.5 bg-secondary/70 rounded-2xl border border-border flex items-center justify-between">
-            <div>
-              <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">
-                Efectivo Esperado en Caja
-              </span>
-              <span className="text-[10px] text-muted-foreground">
-                (Fondo + Ventas Ef. + Entradas - Retiros - Devoluciones)
-              </span>
-            </div>
-            <span className="text-xl font-black text-foreground tabular-nums">
-              {fetchingSummary ? 'Calculando...' : `RD$ ${summary.monto_esperado.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`}
-            </span>
-          </div>
-
-          {/* Real Counted Input */}
-          <div>
-            <label className="text-xs font-bold text-foreground mb-1 block flex items-center justify-between">
-              <span>Efectivo Físico Contado (RD$) <span className="text-rose-500">*</span></span>
-              <span className="text-[11px] text-muted-foreground font-medium">Billetes y monedas contados</span>
+        <form onSubmit={handleCloseRegister}>
+          {/* Caja a cerrar */}
+          <div className="space-y-1.5 mb-5">
+            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+              Caja a cerrar
             </label>
             <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base font-black text-muted-foreground pointer-events-none">
+              <select
+                value={selectedCajaId}
+                onChange={(e) => setSelectedCajaId(e.target.value)}
+                disabled={!isAdmin && availableRegisters.length <= 1}
+                className="w-full appearance-none bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 pr-10 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer disabled:cursor-default"
+              >
+                {availableRegisters.map((reg) => (
+                  <option key={reg.id} value={reg.id}>
+                    {getRegisterDisplayLabel(reg)}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={16}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+              />
+            </div>
+          </div>
+
+          {/* Desglose Financiero Limpio */}
+          <div className="space-y-3 mb-4 text-[13.5px]">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-400">Fondo inicial</span>
+              <span className="font-semibold text-slate-900 dark:text-white tabular-nums">
+                RD$ {summary.monto_apertura.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-400">Ventas en efectivo</span>
+              <span className="font-semibold text-slate-900 dark:text-white tabular-nums">
+                + RD$ {summary.total_efectivo.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-400">Entradas en efectivo</span>
+              <span className="font-semibold text-slate-900 dark:text-white tabular-nums">
+                + RD$ {summary.total_entradas.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-400">Retiros y gastos</span>
+              <span className="font-semibold text-slate-900 dark:text-white tabular-nums">
+                - RD$ {summary.total_retiros.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-400">Devoluciones</span>
+              <span className="font-semibold text-slate-900 dark:text-white tabular-nums">
+                - RD$ {summary.total_devoluciones.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+          </div>
+
+          {/* Bloque Destacado: Efectivo esperado en caja */}
+          <div className="bg-[#F8FAFC] dark:bg-slate-800/60 rounded-2xl p-4 sm:p-5 flex items-center justify-between mt-3 mb-2 border border-slate-100 dark:border-slate-800">
+            <span className="text-sm font-bold text-slate-900 dark:text-white">
+              Efectivo esperado en caja
+            </span>
+            <span className="text-2xl font-black text-slate-900 dark:text-white tabular-nums">
+              {fetchingSummary
+                ? 'Calculando...'
+                : `RD$ ${summary.monto_esperado.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-5">
+            Tarjeta y transferencias: RD$ {(summary.total_tarjeta + summary.total_transferencia).toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · No se incluyen en el conteo de efectivo.
+          </p>
+
+          {/* Input: Efectivo contado */}
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                Efectivo contado
+              </label>
+              <span className="text-xs text-slate-400 dark:text-slate-500">
+                Billetes y monedas
+              </span>
+            </div>
+
+            <div className="relative border border-slate-300 dark:border-slate-700 focus-within:border-slate-900 dark:focus-within:border-slate-300 rounded-xl px-4 py-3 bg-white dark:bg-slate-900 flex items-center transition">
+              <span className="text-slate-500 dark:text-slate-400 font-semibold text-base mr-3 select-none">
                 RD$
               </span>
               <input
                 type="number"
                 min={0}
-                step="0.01"
+                step="any"
                 value={montoRealInput}
                 onChange={(e) => setMontoRealInput(e.target.value)}
                 required
-                className="input-field pl-14 h-14 text-2xl font-black tabular-nums border-2 border-primary/40 focus:border-primary text-foreground"
+                className="w-full text-2xl font-bold text-slate-900 dark:text-white bg-transparent border-none outline-none p-0 focus:ring-0 tabular-nums"
+                placeholder="0"
+                autoFocus
               />
             </div>
+
+            {/* Fila de Cuadre / Sobrante / Faltante */}
+            {diferencia === 0 ? (
+              <div className="flex items-center justify-between text-xs font-medium text-emerald-600 dark:text-emerald-400 mt-2">
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 size={15} />
+                  <span>Cuadre exacto</span>
+                </div>
+                <span className="font-semibold tabular-nums">RD$ 0.00</span>
+              </div>
+            ) : diferencia > 0 ? (
+              <div className="flex items-center justify-between text-xs font-medium text-amber-600 dark:text-amber-400 mt-2">
+                <div className="flex items-center gap-1.5">
+                  <AlertTriangle size={15} />
+                  <span>Sobrante en caja</span>
+                </div>
+                <span className="font-semibold tabular-nums">
+                  + RD$ {diferencia.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between text-xs font-medium text-rose-600 dark:text-rose-400 mt-2">
+                <div className="flex items-center gap-1.5">
+                  <AlertTriangle size={15} />
+                  <span>Faltante en caja</span>
+                </div>
+                <span className="font-semibold tabular-nums">
+                  - RD$ {Math.abs(diferencia).toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+            )}
           </div>
 
-          {/* Difference Indicator Badge */}
-          <div className={`p-3.5 rounded-xl border flex items-center justify-between text-xs font-extrabold ${
-            diferencia === 0
-              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-              : diferencia > 0
-                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
-                : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
-          }`}>
-            <div className="flex items-center gap-2">
-              {diferencia === 0 ? (
-                <CheckCircle2 size={18} />
-              ) : (
-                <AlertTriangle size={18} />
-              )}
-              <span>
-                {diferencia === 0
-                  ? 'Cierre Perfecto — Cuadre Exacto'
-                  : diferencia > 0
-                    ? 'Sobrante en Caja'
-                    : 'Faltante en Caja'}
-              </span>
-            </div>
-            <span className="text-sm font-black tabular-nums">
-              {diferencia >= 0 ? `+RD$ ${diferencia.toFixed(2)}` : `-RD$ ${Math.abs(diferencia).toFixed(2)}`}
-            </span>
-          </div>
-
-          {/* Notes */}
-          <div>
-            <label className="text-xs font-bold text-muted-foreground mb-1 block">
-              Observaciones del Cierre (Opcional)
+          {/* Observaciones (opcional) */}
+          <div className="mb-6">
+            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">
+              Observaciones (opcional)
             </label>
             <input
               type="text"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Ej. Cuadre perfecto sin novedades..."
-              className="input-field h-10 text-xs font-medium"
+              placeholder="Ej. Cuadre perfecto sin novedades"
+              className="w-full h-11 px-4 text-xs sm:text-sm font-medium rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
             />
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/80">
+          {/* Botones de acción */}
+          <div className="flex items-center justify-end gap-3 pt-2">
             <button
               type="button"
               onClick={onClose}
-              className="btn-secondary text-xs font-bold px-4 py-2.5"
+              className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition cursor-pointer"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={loading || fetchingSummary}
-              className="btn-primary bg-amber-600 hover:bg-amber-700 text-white text-xs font-black px-6 py-2.5 rounded-xl shadow-xs flex items-center gap-2 disabled:opacity-50"
+              className="px-5 py-2.5 rounded-xl bg-[#111827] hover:bg-[#1f2937] active:scale-[0.98] text-white text-sm font-semibold flex items-center gap-2 shadow-xs transition disabled:opacity-50 cursor-pointer"
             >
-              <Lock size={16} />
-              {loading ? 'Procesando Cierre...' : 'Confirmar Cierre de Caja'}
+              <Lock size={15} />
+              <span>{loading ? 'Cerrando...' : 'Confirmar cierre'}</span>
             </button>
           </div>
         </form>
