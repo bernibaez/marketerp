@@ -65,8 +65,8 @@ export const DEFAULT_INVOICE_SETTINGS: InvoiceSettings = {
   showFooter: true,
 
   // Textos y avisos
-  footerMessage: '¡Gracias por su compra! Conserve este comprobante para cualquier reclamación.',
-  termsAndConditions: 'Cambios permitidos dentro de los 15 días posteriores con factura original.',
+  footerMessage: '¡Gracias por preferirnos! Conserve este comprobante para cualquier reclamación.',
+  termsAndConditions: 'Cambios permitidos dentro de los 15 días posteriores a la compra con factura original en buen estado.',
   dgiiNotice: 'Documento autorizado por la DGII conforme a la Ley 11-92.',
 
   // Formato & Dimensiones manuales

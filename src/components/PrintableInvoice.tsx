@@ -336,6 +336,8 @@ export default function PrintableInvoice({
       cambio: invoiceData.change ?? 0,
       discount: invoiceData.discount,
       paymentMethod: invoiceData.paymentMethod,
+      registerNumber: invoiceData.registerNumber,
+      expirationDate: invoiceData.expirationDate,
     };
 
     return (

@@ -87,6 +87,18 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
     return formatTime(data.hora || data.issueTime);
   }, [data.hora, data.issueTime]);
 
+  // Línea de contacto formateada limpia (RNC · Tel)
+  const contactLine = useMemo(() => {
+    const parts: string[] = [];
+    if (settings.showCompanyRnc && settings.companyRnc) {
+      parts.push(`RNC: ${settings.companyRnc}`);
+    }
+    if (settings.showCompanyPhone && settings.companyPhone) {
+      parts.push(`Tel: ${settings.companyPhone}`);
+    }
+    return parts.join(' · ');
+  }, [settings.showCompanyRnc, settings.companyRnc, settings.showCompanyPhone, settings.companyPhone]);
+
   // Dimensiones físicas del cabezal térmico real:
   // 80mm: 72mm imprimible
   // 58mm: 48mm imprimible
@@ -131,13 +143,14 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
     if (data.ncf && data.ncf.startsWith('B01')) return 'FACTURA DE CRÉDITO FISCAL';
     if (data.ncf && data.ncf.startsWith('B02')) return 'FACTURA DE CONSUMO';
     if (data.ncf) return 'COMPROBANTE FISCAL';
-    return 'FACTURA DE CONSUMO';
+    return 'COMPROBANTE DE VENTA';
   }, [data.ncf, data.ncfTypeName]);
 
   const invoiceNumber = data.numero || data.invoiceNumber || '000000';
   const cashierName = data.cajero || data.cashier;
   const customerName = data.cliente || data.customerName;
   const ncfValue = data.ncf || settings.ncfSequence;
+  const registerDisplay = data.registerNumber || 'Caja #01';
 
   // Tipografía seleccionada: respeta settings.fontFamily o utiliza la del estilo visual
   const fontFamilyStyle = useMemo(() => {
@@ -175,9 +188,40 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
     }
   }, [settings.fontFamily, styleVariant]);
 
-  // Espaciado vertical adaptable: si hay pocos productos o modo compacto, se reducen márgenes
-  const sectionGapClass = shouldSavePaper ? 'my-0.5' : 'my-1.5';
-  const lineSpacingClass = shouldSavePaper ? 'space-y-0' : 'space-y-0.5';
+  // Espaciado vertical adaptable según modo de rollo y cantidad de ítems
+  const sectionGapClass = shouldSavePaper ? 'my-0.5' : 'my-1';
+  const lineSpacingClass = shouldSavePaper ? 'space-y-0.5' : 'space-y-0.5';
+
+  // Renderizador de líneas divisorias según estilo de plantilla y configuración
+  const renderDivider = (extraClass = 'my-1') => {
+    if (styleVariant === 'supermercado') {
+      return (
+        <div
+          className={`text-center font-mono text-black overflow-hidden select-none ${extraClass}`}
+          style={{ fontSize: microFontSize }}
+        >
+          * * * * * * * * * * * * * * * * * * * * * * * * *
+        </div>
+      );
+    }
+    if (styleVariant === 'elegante') {
+      return (
+        <div className={`flex items-center gap-1 ${extraClass}`}>
+          <div className="flex-1 border-b border-black" />
+          <span className="text-[10px] leading-none">✦</span>
+          <div className="flex-1 border-b border-black" />
+        </div>
+      );
+    }
+    if (styleVariant === 'moderno') {
+      return <div className={`border-b-2 border-black ${extraClass}`} />;
+    }
+    if (styleVariant === 'minimalista') {
+      return <div className={`border-b border-black/80 ${extraClass}`} />;
+    }
+    // Clásico y Compacto (Mockup del usuario): Línea punteada sutil y nítida
+    return <div className={`border-t border-dashed border-black/60 w-full ${extraClass}`} />;
+  };
 
   return (
     <div
@@ -207,24 +251,23 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
       }}
     >
       {/* ========================================================
-          1. ENCABEZADO SEGÚN ESTILO
+          1. ENCABEZADO DE EMPRESA Y COMPROBANTE
           ======================================================== */}
       <div className={`thermal-invoice-header ${styleVariant === 'minimalista' ? 'text-left' : 'text-center'}`}>
-        {/* MODERNO: Banner en bloque negro superior */}
+        {/* MODERNO: Franja negra sólida superior */}
         {styleVariant === 'moderno' && (
           <div className="bg-black text-white px-2 py-2 mb-1.5 text-center -mx-1">
             <h1
               className="font-black uppercase tracking-wider leading-tight text-white"
               style={{ fontSize: `${(12.5 * totalScale).toFixed(1)}px` }}
             >
-              {settings.companyName || 'MINI MARKET LA ESQUINA'}
+              {settings.companyName || 'SUPERMERCADO MERCATO'}
             </h1>
-            <p
-              className="text-slate-200 tracking-widest uppercase mt-0.5"
-              style={{ fontSize: microFontSize }}
-            >
-              {settings.customSlogan || 'COLMADO · SUPERMERCADO'}
-            </p>
+            {settings.showSlogan && settings.customSlogan && (
+              <p className="text-slate-200 tracking-widest uppercase mt-0.5" style={{ fontSize: microFontSize }}>
+                {settings.customSlogan}
+              </p>
+            )}
           </div>
         )}
 
@@ -237,22 +280,22 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
           </div>
         )}
 
-        {/* CLÁSICO: Logotipo o círculo con inicial */}
-        {styleVariant === 'clasico' && settings.showLogo && (
-          <div className="flex justify-center mb-1">
+        {/* LOGOTIPO O ICONO COMERCIAL (Mockup con badge redondeado) */}
+        {settings.showLogo && styleVariant !== 'moderno' && (
+          <div className={`flex ${styleVariant === 'minimalista' ? 'justify-start' : 'justify-center'} mb-1.5`}>
             {effectiveLogoUrl ? (
               <img
                 src={effectiveLogoUrl}
                 alt="Logo"
-                className="object-contain max-h-11 max-w-[85%] filter grayscale contrast-200"
+                className="object-contain max-h-12 max-w-[85%] filter grayscale contrast-200"
               />
             ) : (
               <div
-                className="rounded-full bg-black text-white font-sans font-black flex items-center justify-center shadow-xs"
+                className="rounded-2xl bg-emerald-800 text-white font-black flex items-center justify-center shadow-xs"
                 style={{
-                  width: `${(28 * totalScale).toFixed(0)}px`,
-                  height: `${(28 * totalScale).toFixed(0)}px`,
-                  fontSize: `${(13 * totalScale).toFixed(0)}px`,
+                  width: `${(32 * totalScale).toFixed(0)}px`,
+                  height: `${(32 * totalScale).toFixed(0)}px`,
+                  fontSize: `${(15 * totalScale).toFixed(0)}px`,
                 }}
               >
                 {(settings.companyName || 'M').trim().charAt(0).toUpperCase()}
@@ -261,7 +304,7 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
           </div>
         )}
 
-        {/* SUPERMERCADO: Recuadro con borde alrededor del nombre */}
+        {/* NOMBRE DE LA EMPRESA */}
         {styleVariant === 'supermercado' ? (
           <div className="border-2 border-black p-1 my-1 text-center font-mono font-black">
             <h1
@@ -273,243 +316,179 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
           </div>
         ) : styleVariant !== 'moderno' ? (
           <h1
-            className={`font-black uppercase leading-tight ${
+            className={`font-black uppercase leading-tight text-black ${
               styleVariant === 'elegante'
-                ? 'tracking-[0.15em] font-serif'
+                ? 'tracking-[0.12em] font-serif'
                 : styleVariant === 'minimalista'
                 ? 'tracking-normal text-left font-sans'
-                : 'tracking-tight'
+                : 'tracking-tight text-center'
             }`}
-            style={{ fontSize: `${(12 * totalScale).toFixed(1)}px` }}
+            style={{ fontSize: `${(12.5 * totalScale).toFixed(1)}px` }}
           >
-            {settings.companyName || 'MINI MARKET LA ESQUINA'}
+            {settings.companyName || 'LICORES CHICHA'}
           </h1>
         ) : null}
 
-        {/* Eslogan secundario (si no es moderno ni está en modo ultra-ahorro de papel para 1 ítem) */}
-        {settings.showSlogan && settings.customSlogan && styleVariant !== 'moderno' && (!shouldSavePaper || itemCount > 1) && (
+        {/* LÍNEA DE CONTACTO: RNC · Tel (Separados por punto en 1 sola línea) */}
+        {contactLine ? (
           <p
-            className={`text-black leading-tight ${
-              styleVariant === 'elegante' ? 'italic font-serif' : ''
-            }`}
+            className={`leading-tight mt-0.5 text-black font-mono ${styleVariant === 'minimalista' ? 'text-left' : 'text-center'}`}
+            style={{ fontSize: smallFontSize }}
+          >
+            {contactLine}
+          </p>
+        ) : null}
+
+        {/* DIRECCIÓN FÍSICA */}
+        {settings.showCompanyAddress && settings.companyAddress && (
+          <p
+            className={`leading-tight mt-0.5 text-black ${styleVariant === 'minimalista' ? 'text-left' : 'text-center'}`}
+            style={{ fontSize: smallFontSize }}
+          >
+            {settings.companyAddress}
+          </p>
+        )}
+
+        {/* ESLOGAN COMERCIAL OPCIONAL */}
+        {settings.showSlogan && settings.customSlogan && styleVariant !== 'moderno' && (
+          <p
+            className={`italic leading-tight mt-0.5 text-slate-700 ${styleVariant === 'minimalista' ? 'text-left' : 'text-center'}`}
             style={{ fontSize: microFontSize }}
           >
             {settings.customSlogan}
           </p>
         )}
 
-        {/* Datos fiscales y contacto */}
-        <div className={`mt-0.5 ${lineSpacingClass}`} style={{ fontSize: smallFontSize }}>
-          {/* COMPACTO: RNC y Teléfono en una sola línea para ahorrar papel */}
-          {styleVariant === 'compacto' ? (
-            <>
-              {settings.showCompanyAddress && settings.companyAddress && (
-                <p className="truncate leading-tight">{settings.companyAddress}</p>
-              )}
-              <p className="leading-tight">
-                {settings.showCompanyRnc && settings.companyRnc && `RNC ${settings.companyRnc}`}
-                {settings.showCompanyPhone && settings.companyPhone && `  ·  Tel ${settings.companyPhone}`}
-              </p>
-            </>
-          ) : (
-            <>
-              {settings.showCompanyRnc && settings.companyRnc && (
-                <p className="font-mono leading-tight">RNC: {settings.companyRnc}</p>
-              )}
-              {settings.showCompanyAddress && settings.companyAddress && (
-                <p className="leading-tight">{settings.companyAddress}</p>
-              )}
-              {settings.showCompanyPhone && settings.companyPhone && (
-                <p className="leading-tight">Tel: {settings.companyPhone}</p>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Divisor superior según estilo */}
-      {styleVariant === 'supermercado' ? (
-        <div className="text-center font-mono my-0.5 text-black overflow-hidden select-none" style={{ fontSize: microFontSize }}>
-          * * * * * * * * * * * * * * * * * * * * * * * * *
-        </div>
-      ) : styleVariant === 'elegante' ? (
-        <div className="flex items-center gap-1 my-1">
-          <div className="flex-1 border-b border-black" />
-          <span className="text-[10px] leading-none">✦</span>
-          <div className="flex-1 border-b border-black" />
-        </div>
-      ) : styleVariant === 'moderno' ? (
-        <div className="my-1 border-b border-black" />
-      ) : styleVariant === 'minimalista' ? (
-        <div className="my-1 border-b-2 border-black" />
-      ) : (
-        <div className="my-1 border-b border-dashed border-black" />
-      )}
-
-      {/* ========================================================
-          2. TÍTULO Y NÚMERO DE FACTURA / NCF
-          ======================================================== */}
-      {styleVariant === 'minimalista' ? (
-        <div className="mb-1 text-left">
-          <span
-            className="block font-black font-sans uppercase tracking-tight leading-none text-black"
-            style={{ fontSize: `${(15 * totalScale).toFixed(1)}px` }}
-          >
-            Factura
-          </span>
-        </div>
-      ) : styleVariant === 'moderno' ? (
-        <div className="border-2 border-black p-1 my-1 text-center font-sans font-black">
-          <span className="tracking-wider uppercase" style={{ fontSize: `${(10.5 * totalScale).toFixed(1)}px` }}>
-            FACTURA Nº {invoiceNumber}
-          </span>
-        </div>
-      ) : styleVariant === 'elegante' ? (
-        <div className="text-center my-0.5">
-          <span
-            className="font-serif italic font-bold text-black"
-            style={{ fontSize: `${(11 * totalScale).toFixed(1)}px` }}
-          >
-            {receiptTitle}
-          </span>
-        </div>
-      ) : styleVariant === 'supermercado' ? (
-        <div className="text-center font-mono font-black my-0.5">
-          <span className="tracking-wider" style={{ fontSize: `${(10.5 * totalScale).toFixed(1)}px` }}>
-            {receiptTitle}
-          </span>
-        </div>
-      ) : (
-        <div className="text-center font-mono font-bold my-0.5">
-          <span className="tracking-wide uppercase" style={{ fontSize: `${(10.5 * totalScale).toFixed(1)}px` }}>
-            {receiptTitle}
-          </span>
-        </div>
-      )}
-
-      {/* Divisor post-título */}
-      {styleVariant === 'supermercado' ? (
-        <div className="text-center font-mono my-0.5 text-black overflow-hidden select-none" style={{ fontSize: microFontSize }}>
-          * * * * * * * * * * * * * * * * * * * * * * * * *
-        </div>
-      ) : styleVariant === 'elegante' ? (
-        <div className="flex items-center gap-1 my-1">
-          <div className="flex-1 border-b border-black" />
-          <span className="text-[10px] leading-none">✦</span>
-          <div className="flex-1 border-b border-black" />
-        </div>
-      ) : null}
-
-      {/* ========================================================
-          3. METADATOS DE VENTA (NCF, Factura, Fecha, Hora, Cajero, Cliente)
-          ======================================================== */}
-      <div className={`${lineSpacingClass} my-0.5`} style={{ fontSize: smallFontSize }}>
-        {/* COMPACTO: En 2 columnas directas para ahorrar papel */}
-        {styleVariant === 'compacto' ? (
-          <>
-            <div className="flex justify-between items-baseline">
-              <span>Fact. {invoiceNumber}</span>
-              <span>{formattedDate} {formattedTime}</span>
-            </div>
-            {(settings.showNcf && ncfValue) || (settings.showCashier && cashierName) ? (
-              <div className="flex justify-between items-baseline font-bold">
-                <span>{settings.showNcf && ncfValue ? `NCF ${ncfValue}` : ''}</span>
-                <span>{settings.showCashier && cashierName ? cashierName : ''}</span>
-              </div>
-            ) : null}
-            {settings.showCustomer && customerName && (
-              <div className="flex justify-between items-baseline">
-                <span className="truncate max-w-[90%]">Cliente: {customerName}</span>
-              </div>
-            )}
-          </>
+        {/* TÍTULO DEL COMPROBANTE (COMPROBANTE DE VENTA / FACTURA DE CONSUMO) */}
+        {styleVariant === 'minimalista' ? (
+          <div className="mt-1 text-left">
+            <span
+              className="block font-black font-sans uppercase tracking-tight leading-none text-black"
+              style={{ fontSize: `${(14 * totalScale).toFixed(1)}px` }}
+            >
+              Factura
+            </span>
+          </div>
         ) : (
-          <>
-            {settings.showNcf && ncfValue && (
-              <div className="flex justify-between items-baseline">
-                <span className="font-bold">NCF:</span>
-                <span className="font-mono font-black">{ncfValue}</span>
-              </div>
-            )}
-            {styleVariant !== 'moderno' && (
-              <div className="flex justify-between items-baseline">
-                <span>Factura No.:</span>
-                <span className="font-mono font-bold">{invoiceNumber}</span>
-              </div>
-            )}
-            <div className="flex justify-between items-baseline">
-              <span>Fecha:</span>
-              <span>{formattedDate}</span>
-            </div>
-            {settings.showIssueTime && formattedTime && (
-              <div className="flex justify-between items-baseline">
-                <span>Hora:</span>
-                <span>{formattedTime}</span>
-              </div>
-            )}
-            {settings.showCashier && cashierName && (
-              <div className="flex justify-between items-baseline">
-                <span>Cajero:</span>
-                <span>{cashierName}</span>
-              </div>
-            )}
-            {settings.showCustomer && customerName && (
-              <div className="flex justify-between items-baseline">
-                <span>Cliente:</span>
-                <span className="truncate max-w-[65%]">{customerName}</span>
-              </div>
-            )}
-          </>
+          <div className="text-center mt-1">
+            <span
+              className="font-bold uppercase tracking-wider block text-black font-mono"
+              style={{ fontSize: `${(10.5 * totalScale).toFixed(1)}px` }}
+            >
+              {receiptTitle}
+            </span>
+          </div>
         )}
       </div>
 
-      {/* Divisor antes de los artículos */}
-      {styleVariant === 'supermercado' ? (
-        <div className="text-center font-mono my-0.5 text-black overflow-hidden select-none" style={{ fontSize: microFontSize }}>
-          * * * * * * * * * * * * * * * * * * * * * * * * *
+      {/* DIVISOR SUPERIOR */}
+      {renderDivider(sectionGapClass)}
+
+      {/* ========================================================
+          2. METADATOS DE VENTA (No. Factura, Caja, Cajero, Fecha/Hora, NCF, Cliente)
+          ======================================================== */}
+      <div className={`${lineSpacingClass} ${sectionGapClass}`} style={{ fontSize: smallFontSize }}>
+        {/* No. Factura */}
+        <div className="flex justify-between items-baseline">
+          <span className="text-slate-800">No. Factura:</span>
+          <span className="font-bold font-mono text-black">{invoiceNumber}</span>
         </div>
-      ) : styleVariant === 'moderno' ? (
-        /* MODERNO: Franja negra sólida para encabezado de columnas */
+
+        {/* Caja Registradora */}
+        {settings.showRegisterNumber && (
+          <div className="flex justify-between items-baseline">
+            <span className="text-slate-800">Caja:</span>
+            <span className="font-mono font-medium truncate max-w-[75%] text-right text-black">
+              {registerDisplay}
+            </span>
+          </div>
+        )}
+
+        {/* Cajero */}
+        {settings.showCashier && cashierName && (
+          <div className="flex justify-between items-baseline">
+            <span className="text-slate-800">Cajero:</span>
+            <span className="font-medium truncate max-w-[75%] text-right text-black">{cashierName}</span>
+          </div>
+        )}
+
+        {/* Fecha y Hora */}
+        {settings.showIssueTime ? (
+          <div className="flex justify-between items-baseline">
+            <span className="text-slate-800">{isNarrow ? 'Fecha:' : 'Fecha / Hora:'}</span>
+            <span className="tabular-nums font-mono text-right text-black">
+              {`${formattedDate} ${formattedTime}`}
+            </span>
+          </div>
+        ) : (
+          <div className="flex justify-between items-baseline">
+            <span className="text-slate-800">Fecha:</span>
+            <span className="tabular-nums font-mono text-right text-black">{formattedDate}</span>
+          </div>
+        )}
+
+        {/* NCF si está habilitado y presente */}
+        {settings.showNcf && ncfValue && (
+          <div className="flex justify-between items-baseline font-bold pt-0.5">
+            <span>NCF:</span>
+            <span className="font-mono text-black">{ncfValue}</span>
+          </div>
+        )}
+
+        {/* Vencimiento NCF */}
+        {settings.showNcf && data.expirationDate && (
+          <div className="flex justify-between items-baseline" style={{ fontSize: microFontSize }}>
+            <span className="text-slate-700">Vence:</span>
+            <span className="font-mono text-black">{data.expirationDate}</span>
+          </div>
+        )}
+
+        {/* Cliente */}
+        {settings.showCustomer && customerName && (
+          <div className="flex justify-between items-baseline pt-0.5">
+            <span className="text-slate-800">Cliente:</span>
+            <span className="font-bold truncate max-w-[75%] text-right text-black">{customerName}</span>
+          </div>
+        )}
+
+        {/* RNC / Cédula del Cliente */}
+        {settings.showCustomer && (data.clienteRnc || data.customerRnc) && (
+          <div className="flex justify-between items-baseline">
+            <span className="text-slate-800">RNC/Cédula:</span>
+            <span className="font-mono font-medium text-right text-black">
+              {data.clienteRnc || data.customerRnc}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* DIVISOR ANTES DE PRODUCTOS */}
+      {renderDivider(sectionGapClass)}
+
+      {/* ========================================================
+          3. CABECERA DE LA TABLA DE PRODUCTOS
+          ======================================================== */}
+      {styleVariant === 'moderno' ? (
         <div className="bg-black text-white px-1.5 py-0.5 my-1 flex justify-between font-bold" style={{ fontSize: microFontSize }}>
           <span className="w-8 text-left">CANT</span>
           <span className="flex-1 text-left px-1">DESCRIPCIÓN</span>
           <span className="w-14 text-right">PRECIO</span>
           <span className="w-14 text-right">TOTAL</span>
         </div>
-      ) : styleVariant === 'compacto' ? (
-        <div className="my-0.5 border-b border-dashed border-black" />
-      ) : styleVariant === 'elegante' ? (
-        <>
-          <div className="mt-1 border-b-2 border-black" />
-          <div className="mb-0.5 border-b border-black" />
-          <div className="flex justify-between italic font-serif py-0.5" style={{ fontSize: microFontSize }}>
-            <span className="w-7 text-left">Cant.</span>
-            <span className="flex-1 text-left px-1">Descripción</span>
-            <span className="w-12 text-right">Precio</span>
-            <span className="w-14 text-right">Importe</span>
-          </div>
-          <div className="mb-1 border-b border-black" />
-        </>
-      ) : styleVariant === 'minimalista' ? (
-        <div className="my-1 border-b border-black" />
       ) : (
         <>
-          <div className="mt-1 border-b-2 border-black" />
-          <div className="mb-0.5 border-b border-black" />
-          <div className="flex justify-between font-bold py-0.5" style={{ fontSize: microFontSize }}>
-            <span className="w-7 text-left">CANT</span>
-            <span className="flex-1 text-left px-1">DESCRIPCIÓN</span>
-            <span className="w-12 text-right">PRECIO</span>
-            <span className="w-14 text-right">TOTAL</span>
+          <div className="flex justify-between items-baseline font-bold pb-0.5 text-black" style={{ fontSize: smallFontSize }}>
+            <span>Cant. Descripción</span>
+            <span>Importe</span>
           </div>
-          <div className="mb-1 border-b-2 border-black" />
+          <div className="border-t border-black/30 mb-1" />
         </>
       )}
 
       {/* ========================================================
-          4. LISTA DE PRODUCTOS / ÍTEMS
+          4. LISTA DE ARTÍCULOS (Diseño compacto y claro en 2 líneas)
           ======================================================== */}
-      <div className={shouldSavePaper ? 'space-y-0.5' : 'space-y-1'}>
+      <div className={shouldSavePaper ? 'space-y-1' : 'space-y-1.5'}>
         {itemsList.map((item, idx) => {
           const qty = item.cantidad ?? item.qty ?? 1;
           const name = item.descripcion ?? item.name ?? 'Producto';
@@ -517,416 +496,251 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
           const total = item.total ?? item.subtotal ?? qty * price;
           const indexFormatted = String(idx + 1).padStart(3, '0');
 
-          // COMPACTO: Formato en 1 sola línea horizontal (ej: 2x Café Molido 500g @385.00  ... 770.00)
-          if (styleVariant === 'compacto') {
-            return (
-              <div key={`item-${idx}`} className="flex justify-between items-baseline thermal-invoice-item">
-                <span className="truncate pr-1">
-                  <span className="font-bold">{qty}x</span> {name} <span className="font-normal text-slate-700">@{formatCurrency(price, '')}</span>
-                </span>
-                <span className="font-bold font-mono tabular-nums text-right flex-shrink-0">
-                  {formatCurrency(total, '')}
-                </span>
-              </div>
-            );
-          }
-
-          // SUPERMERCADO: Número secuencial 001 + 2 líneas
-          if (styleVariant === 'supermercado') {
-            return (
-              <div key={`item-${idx}`} className="thermal-invoice-item text-xs">
-                <p className="font-bold uppercase truncate">
-                  {indexFormatted} {name}
-                </p>
-                <div className="flex justify-between items-baseline pl-4 font-mono">
-                  <span>{qty} X {formatCurrency(price, '')}</span>
-                  <span className="font-bold tabular-nums">{formatCurrency(total, '')}</span>
-                </div>
-              </div>
-            );
-          }
-
-          // MINIMALISTA: Nombre en negrita en línea 1, cantidad y total en línea 2
-          if (styleVariant === 'minimalista') {
-            return (
-              <div key={`item-${idx}`} className="thermal-invoice-item">
-                <p className="font-bold font-sans truncate">{name}</p>
-                <div className="flex justify-between items-baseline font-sans" style={{ fontSize: smallFontSize }}>
-                  <span className="text-slate-800">{qty} × {formatCurrency(price, '')}</span>
-                  <span className="font-bold tabular-nums">{formatCurrency(total, '')}</span>
-                </div>
-              </div>
-            );
-          }
-
-          // CLÁSICO, MODERNO, ELEGANTE: Columnas alineadas Cant / Nombre / Precio / Total
           return (
             <div key={`item-${idx}`} className="thermal-invoice-item">
-              <div className="flex justify-between items-baseline">
-                <span className="w-7 text-left font-bold">{qty}</span>
-                <span className="flex-1 text-left px-1 truncate font-medium">{name}</span>
-                <span className="w-12 text-right tabular-nums text-slate-800 font-mono" style={{ fontSize: smallFontSize }}>
-                  {formatCurrency(price, '')}
+              {/* Línea 1: Descripción a la izquierda y Total a la derecha (ambos en negrita) */}
+              <div className="flex justify-between items-baseline font-bold leading-snug">
+                <span className="truncate pr-1 text-black">
+                  {styleVariant === 'supermercado' ? `${indexFormatted} ` : ''}{name}
                 </span>
-                <span className="w-14 text-right font-bold font-mono tabular-nums">
-                  {formatCurrency(total, '')}
+                <span className="tabular-nums font-mono text-right shrink-0 text-black">
+                  {formatCurrency(total, currencySymbol)}
                 </span>
               </div>
+
+              {/* Línea 2: Cantidad x Precio Unitario (ej: 1x RD$ 60.00) */}
+              {(settings.showItemPriceUnitPrice ?? true) && (
+                <div
+                  className="text-slate-600 font-mono tracking-tight leading-tight pl-0.5"
+                  style={{ fontSize: microFontSize }}
+                >
+                  {`${qty}x ${formatCurrency(price, currencySymbol)}`}
+                </div>
+              )}
             </div>
           );
         })}
       </div>
 
-      {/* Divisor post-artículos */}
-      {styleVariant === 'supermercado' ? (
-        <div className="text-center font-mono my-0.5 text-black overflow-hidden select-none" style={{ fontSize: microFontSize }}>
-          * * * * * * * * * * * * * * * * * * * * * * * * *
-        </div>
-      ) : styleVariant === 'elegante' ? (
-        <div className="my-1 border-b border-black" />
-      ) : styleVariant === 'moderno' ? (
-        <div className="my-1 border-b border-black" />
-      ) : styleVariant === 'minimalista' ? (
-        <div className="my-1 border-b border-black" />
-      ) : (
-        <div className="my-1 border-b-2 border-black" />
-      )}
+      {/* DIVISOR POST-PRODUCTOS */}
+      {renderDivider(sectionGapClass)}
 
       {/* ========================================================
-          5. TOTALES, SUB-TOTAL, ITBIS Y DESCUENTO
+          5. SUB-TOTALES, DESCUENTO E ITBIS
           ======================================================== */}
       <div className="thermal-invoice-totals">
-        <div className={`${lineSpacingClass} my-0.5`} style={{ fontSize: smallFontSize }}>
+        <div className={`${lineSpacingClass} ${sectionGapClass}`} style={{ fontSize: smallFontSize }}>
           {styleVariant === 'supermercado' && (
-            <div className="flex justify-between items-baseline font-mono">
+            <div className="flex justify-between items-baseline font-mono text-black">
               <span>TOTAL ARTÍCULOS</span>
               <span className="font-bold font-mono">{totals.totalArticulos}</span>
             </div>
           )}
 
           <div className="flex justify-between items-baseline">
-            <span>Subtotal:</span>
-            <span className="tabular-nums font-mono font-medium">
+            <span className="text-slate-800">Subtotal Neto:</span>
+            <span className="tabular-nums font-mono font-medium text-black">
               {formatCurrency(totals.subtotal, currencySymbol)}
             </span>
           </div>
 
           {Number(data.discount || 0) > 0 && (
-            <div className="flex justify-between items-baseline">
+            <div className="flex justify-between items-baseline text-slate-800">
               <span>Descuento:</span>
-              <span className="tabular-nums font-mono font-bold text-slate-800">
-                -{formatCurrency(data.discount, currencySymbol)}
+              <span className="tabular-nums font-mono font-bold text-black">
+                {`-${formatCurrency(data.discount, currencySymbol)}`}
               </span>
             </div>
           )}
 
-          <div className="flex justify-between items-baseline">
-            <span>ITBIS ({settings.itbisPercent ?? 18}%):</span>
-            <span className="tabular-nums font-mono">
-              {formatCurrency(totals.itbis, currencySymbol)}
-            </span>
-          </div>
+          {(settings.showTaxBreakdown ?? true) && (
+            <div className="flex justify-between items-baseline">
+              <span className="text-slate-800">{`ITBIS (${settings.itbisPercent ?? 18}%):`}</span>
+              <span className="tabular-nums font-mono text-black">
+                {formatCurrency(totals.itbis, currencySymbol)}
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* Recuadro de TOTAL según el estilo */}
+        {/* DIVISOR ANTES DEL TOTAL */}
+        {renderDivider(sectionGapClass)}
+
+        {/* ========================================================
+            6. RECUADRO O FILA DESTACADA DE TOTAL A PAGAR
+            ======================================================== */}
         {styleVariant === 'moderno' ? (
-          /* MODERNO: Bloque negro con texto blanco */
           <div className="bg-black text-white p-2 my-1 flex justify-between items-center -mx-1">
             <span
               className="font-black uppercase tracking-wider text-white font-sans"
-              style={{ fontSize: `${(12 * totalScale).toFixed(1)}px` }}
+              style={{ fontSize: `${(11.5 * totalScale).toFixed(1)}px` }}
             >
               TOTAL
             </span>
             <span
               className="font-black font-mono tracking-tight text-white tabular-nums"
-              style={{ fontSize: `${(16 * totalScale).toFixed(1)}px` }}
+              style={{ fontSize: `${(15.5 * totalScale).toFixed(1)}px` }}
             >
               {formatCurrency(totals.total, currencySymbol)}
             </span>
           </div>
         ) : styleVariant === 'supermercado' ? (
-          /* SUPERMERCADO: Gran texto centrado */
-          <>
-            <div className="text-center font-mono my-0.5 text-black overflow-hidden select-none" style={{ fontSize: microFontSize }}>
-              * * * * * * * * * * * * * * * * * * * * * * * * *
-            </div>
-            <div className="text-center my-1">
-              <span className="block font-mono font-bold tracking-wider uppercase text-xs">
-                TOTAL A PAGAR
-              </span>
-              <span
-                className="block font-mono font-black tabular-nums tracking-tight mt-0.5"
-                style={{ fontSize: `${(18 * totalScale).toFixed(1)}px` }}
-              >
-                {formatCurrency(totals.total, currencySymbol)}
-              </span>
-            </div>
-            <div className="text-center font-mono my-0.5 text-black overflow-hidden select-none" style={{ fontSize: microFontSize }}>
-              * * * * * * * * * * * * * * * * * * * * * * * * *
-            </div>
-          </>
-        ) : styleVariant === 'compacto' ? (
-          /* COMPACTO: Doble barra superior e inferior (ahorra altura) */
-          <div className="border-y-4 border-black py-1 my-1 flex justify-between items-center">
-            <span
-              className="font-black uppercase font-sans tracking-wide"
-              style={{ fontSize: `${(11 * totalScale).toFixed(1)}px` }}
-            >
-              TOTAL
+          <div className="text-center my-1">
+            <span className="block font-mono font-bold tracking-wider uppercase text-xs">
+              TOTAL A PAGAR
             </span>
             <span
-              className="font-black font-mono tabular-nums tracking-tight"
-              style={{ fontSize: `${(15 * totalScale).toFixed(1)}px` }}
-            >
-              {formatCurrency(totals.total, currencySymbol)}
-            </span>
-          </div>
-        ) : styleVariant === 'minimalista' ? (
-          /* MINIMALISTA: Barra superior de 4px con Total y valor a la derecha */
-          <div className="border-t-4 border-black pt-1.5 pb-0.5 my-1 flex justify-between items-baseline font-sans">
-            <span
-              className="font-normal uppercase tracking-wide text-xs"
-              style={{ fontSize: `${(11 * totalScale).toFixed(1)}px` }}
-            >
-              Total
-            </span>
-            <span
-              className="font-black tracking-tight tabular-nums"
+              className="block font-mono font-black tabular-nums tracking-tight mt-0.5 text-black"
               style={{ fontSize: `${(17 * totalScale).toFixed(1)}px` }}
             >
               {formatCurrency(totals.total, currencySymbol)}
             </span>
           </div>
-        ) : styleVariant === 'elegante' ? (
-          /* ELEGANTE: Enmarcado fino doble serif */
-          <div className="border-y-2 border-black py-1 my-1 flex justify-between items-baseline font-serif">
+        ) : (
+          /* Clásico / Compacto (Mockup exacto): Fila destacada con TOTAL A PAGAR */
+          <div className="flex justify-between items-baseline py-0.5 font-black text-black">
             <span
-              className="font-bold uppercase tracking-wider"
-              style={{ fontSize: `${(12 * totalScale).toFixed(1)}px` }}
+              className="uppercase tracking-tight"
+              style={{ fontSize: `${(11.5 * totalScale).toFixed(1)}px` }}
             >
-              Total
+              TOTAL A PAGAR:
             </span>
             <span
-              className="font-bold font-mono tracking-tight tabular-nums"
-              style={{ fontSize: `${(16 * totalScale).toFixed(1)}px` }}
+              className="font-mono tabular-nums tracking-tight text-right text-black"
+              style={{ fontSize: `${(15.5 * totalScale).toFixed(1)}px` }}
             >
               {formatCurrency(totals.total, currencySymbol)}
             </span>
           </div>
-        ) : (
-          /* CLÁSICO: Recuadro con borde grueso de 4px */
-          <div
-            className="my-1.5 p-1.5 text-black"
-            style={{ border: '4px solid #000000' }}
-          >
-            {!isNarrow ? (
-              <div className="flex justify-between items-center font-sans">
-                <span
-                  className="font-black tracking-wide"
-                  style={{ fontSize: `${(13.5 * totalScale).toFixed(1)}px` }}
-                >
-                  TOTAL
-                </span>
-                <span
-                  className="font-black font-mono tracking-tight tabular-nums"
-                  style={{ fontSize: `${(18 * totalScale).toFixed(1)}px` }}
-                >
-                  {formatCurrency(totals.total, currencySymbol)}
-                </span>
-              </div>
-            ) : (
-              <div className="text-center font-sans">
-                <span
-                  className="block font-bold uppercase tracking-wider leading-none"
-                  style={{ fontSize: `${(8.5 * totalScale).toFixed(1)}px` }}
-                >
-                  TOTAL
-                </span>
-                <span
-                  className="block font-black font-mono tracking-tight tabular-nums mt-0.5 leading-none"
-                  style={{ fontSize: `${(15 * totalScale).toFixed(1)}px` }}
-                >
-                  {formatCurrency(totals.total, currencySymbol)}
+        )}
+
+        {/* DIVISOR POST TOTAL */}
+        {renderDivider(sectionGapClass)}
+
+        {/* ========================================================
+            7. PAGO, EFECTIVO RECIBIDO Y CAMBIO
+            ======================================================== */}
+        {(settings.showPaymentDetails ?? true) && (
+          <div className={`${lineSpacingClass} ${sectionGapClass}`} style={{ fontSize: smallFontSize }}>
+            <div className="flex justify-between items-baseline">
+              <span className="text-slate-800">Método de Pago:</span>
+              <span className="font-bold uppercase font-mono text-black">
+                {data.paymentMethod || 'EFECTIVO'}
+              </span>
+            </div>
+
+            <div className="flex justify-between items-baseline">
+              <span className="text-slate-800">Efectivo Recibido:</span>
+              <span className="tabular-nums font-mono font-medium text-black">
+                {formatCurrency(totals.pagado, currencySymbol)}
+              </span>
+            </div>
+
+            {(settings.showChange ?? true) && (
+              <div className="flex justify-between items-baseline">
+                <span className="text-slate-800 font-bold">Cambio:</span>
+                <span className="font-bold font-mono tabular-nums text-black">
+                  {formatCurrency(totals.cambio, currencySymbol)}
                 </span>
               </div>
             )}
           </div>
         )}
-
-        {/* Pago y Cambio */}
-        <div className={`${lineSpacingClass} my-0.5`} style={{ fontSize: smallFontSize }}>
-          {styleVariant === 'compacto' ? (
-            <div className="flex justify-between items-baseline">
-              <span>Efect. {formatCurrency(totals.pagado, '')}</span>
-              <span className="font-bold">Cambio {formatCurrency(totals.cambio, '')}</span>
-            </div>
-          ) : (
-            <>
-              {data.paymentMethod && (
-                <div className="flex justify-between items-baseline">
-                  <span>Método de pago:</span>
-                  <span className="font-semibold uppercase truncate max-w-[65%]">
-                    {data.paymentMethod}
-                  </span>
-                </div>
-              )}
-              <div className="flex justify-between items-baseline">
-                <span>Efectivo / Pagado:</span>
-                <span className="tabular-nums font-mono font-medium">
-                  {formatCurrency(totals.pagado, currencySymbol)}
-                </span>
-              </div>
-              <div className="flex justify-between items-baseline">
-                <span className="font-bold">Cambio:</span>
-                <span className="font-bold font-mono tabular-nums">
-                  {formatCurrency(totals.cambio, currencySymbol)}
-                </span>
-              </div>
-              {styleVariant !== 'supermercado' && (
-                <div className="pt-0.5 text-right text-slate-700" style={{ fontSize: microFontSize }}>
-                  <span>Artículos: {totals.totalArticulos}</span>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* SUPERMERCADO: Bloque especial de ahorro y fidelidad si aplica */}
-          {styleVariant === 'supermercado' && Number(data.discount || 0) > 0 && (
-            <div className="border border-black p-1 text-center font-mono my-1 font-bold" style={{ fontSize: smallFontSize }}>
-              USTED AHORRÓ: {formatCurrency(data.discount, currencySymbol)}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* ========================================================
-          6. CÓDIGO DE BARRAS Y PIE DE PÁGINA
+          8. MENSAJES AL PIE, POLÍTICAS Y NOTA DGII
+          ======================================================== */}
+      {(settings.showFooter ?? true) && (
+        <div
+          className="thermal-invoice-footer"
+          style={{ breakInside: 'avoid', pageBreakInside: 'avoid' }}
+        >
+          {renderDivider(sectionGapClass)}
+
+          <div className="text-center space-y-1 my-1">
+            {(settings.showFooterMessage ?? true) && (
+              <p
+                className="italic font-medium leading-tight text-slate-800"
+                style={{ fontSize: smallFontSize }}
+              >
+                {settings.footerMessage || '¡Gracias por preferirnos! Conserve este comprobante para cualquier reclamación.'}
+              </p>
+            )}
+
+            {(settings.showTerms ?? true) && settings.termsAndConditions && (
+              <p
+                className="leading-tight text-slate-600 max-w-[95%] mx-auto"
+                style={{ fontSize: microFontSize }}
+              >
+                {settings.termsAndConditions}
+              </p>
+            )}
+
+            {(settings.showDgiiLegend ?? true) && settings.dgiiNotice && (
+              <p
+                className="leading-tight text-slate-500 font-mono text-center pt-0.5"
+                style={{ fontSize: microFontSize }}
+              >
+                {settings.dgiiNotice}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          9. CÓDIGO DE BARRAS CODE 128 (OPCIONAL)
+          ======================================================== */}
+      {settings.showBarcode && invoiceNumber && (
+        <div style={{ breakInside: 'avoid', pageBreakInside: 'avoid' }}>
+          {renderDivider(sectionGapClass)}
+          <InvoiceBarcode value={invoiceNumber} width={activeWidth} />
+        </div>
+      )}
+
+      {/* ========================================================
+          10. LÍNEAS DE FIRMAS DOBLES (Firma Cajero / Firma Cliente)
+          ======================================================== */}
+      {(settings.showSignatureLine ?? true) && (
+        <div style={{ breakInside: 'avoid', pageBreakInside: 'avoid' }}>
+          {renderDivider(sectionGapClass)}
+          <div className="pt-4 pb-1">
+            <div className="grid grid-cols-2 gap-3 text-center">
+              <div>
+                <div className="border-b border-black w-full mb-1" />
+                <span className="font-bold text-[9px] block text-black">Firma Cajero</span>
+              </div>
+              <div>
+                <div className="border-b border-black w-full mb-1" />
+                <span className="font-bold text-[9px] block text-black">Firma Cliente</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          11. PIE DE SISTEMA Y TEXTO DE COPIA
           ======================================================== */}
       <div
-        className="thermal-invoice-footer"
-        style={{ breakInside: 'avoid', pageBreakInside: 'avoid' }}
+        className="text-center pt-2 font-mono text-slate-500 select-none"
+        style={{ fontSize: microFontSize, breakInside: 'avoid', pageBreakInside: 'avoid' }}
       >
-        {/* Código de barras Code 128 */}
-        {settings.showBarcode && invoiceNumber && (
-          <>
-            {styleVariant === 'supermercado' ? (
-              <div className="text-center font-mono my-0.5 text-black overflow-hidden select-none" style={{ fontSize: microFontSize }}>
-                * * * * * * * * * * * * * * * * * * * * * * * * *
-              </div>
-            ) : styleVariant === 'elegante' ? (
-              <div className="my-1 border-b border-black" />
-            ) : (
-              <div className="my-1 border-b border-dashed border-black" />
-            )}
-
-            <InvoiceBarcode value={invoiceNumber} width={activeWidth} />
-          </>
-        )}
-
-        {/* Mensajes al pie y agradecimientos */}
-        {settings.showFooter && (
-          <>
-            {styleVariant === 'moderno' ? (
-              /* MODERNO: Franja negra inferior */
-              <div className="bg-black text-white p-2 my-1.5 text-center -mx-1">
-                <p className="font-bold text-white uppercase text-xs">
-                  {settings.footerMessage || '¡GRACIAS POR SU COMPRA!'}
-                </p>
-                <p className="text-slate-300 mt-0.5" style={{ fontSize: microFontSize }}>
-                  {settings.termsAndConditions || 'Cambios en 48 horas con esta factura'}
-                </p>
-              </div>
-            ) : styleVariant === 'supermercado' ? (
-              /* SUPERMERCADO: Asteriscos y mayúsculas */
-              <>
-                <div className="text-center font-mono my-0.5 text-black overflow-hidden select-none" style={{ fontSize: microFontSize }}>
-                  * * * * * * * * * * * * * * * * * * * * * * * * *
-                </div>
-                <div className="text-center font-mono space-y-0.5">
-                  <p className="font-black uppercase text-xs">
-                    {settings.footerMessage || '¡GRACIAS POR SU COMPRA!'}
-                  </p>
-                  <p className="font-bold text-xs">VUELVA PRONTO</p>
-                </div>
-              </>
-            ) : styleVariant === 'elegante' ? (
-              /* ELEGANTE: Cursivas y rombos */
-              <>
-                <div className="flex items-center gap-1 my-1">
-                  <div className="flex-1 border-b border-black" />
-                  <span className="text-[10px] leading-none">✦</span>
-                  <div className="flex-1 border-b border-black" />
-                </div>
-                <div className="text-center font-serif space-y-0.5">
-                  <p className="font-bold italic text-xs">
-                    {settings.footerMessage || 'Gracias por elegirnos'}
-                  </p>
-                  {settings.termsAndConditions && (!shouldSavePaper || itemCount > 1) && (
-                    <p className="italic leading-tight text-slate-800" style={{ fontSize: microFontSize }}>
-                      {settings.termsAndConditions}
-                    </p>
-                  )}
-                  <p className="pt-1 text-[10px]">✦  ✦  ✦</p>
-                </div>
-              </>
-            ) : styleVariant === 'minimalista' ? (
-              /* MINIMALISTA: Alineado a la izquierda */
-              <div className="text-left font-sans pt-1 space-y-0.5">
-                <p className="font-bold text-xs">
-                  {settings.footerMessage || 'Gracias por su compra.'}
-                </p>
-                {settings.termsAndConditions && (!shouldSavePaper || itemCount > 1) && (
-                  <p className="leading-tight text-slate-700" style={{ fontSize: microFontSize }}>
-                    {settings.termsAndConditions}
-                  </p>
-                )}
-                {settings.companyWebsite && (!shouldSavePaper || itemCount > 1) && (
-                  <p className="leading-tight text-slate-500 font-mono" style={{ fontSize: microFontSize }}>
-                    {settings.companyWebsite}
-                  </p>
-                )}
-              </div>
-            ) : (
-              /* CLÁSICO / COMPACTO */
-              <>
-                <div className="my-1 border-b border-dashed border-black" />
-                <div className="text-center space-y-0.5">
-                  <p className="font-bold text-black uppercase" style={{ fontSize: smallFontSize }}>
-                    {settings.footerMessage || '¡GRACIAS POR SU COMPRA!'}
-                  </p>
-
-                  {settings.termsAndConditions && (!shouldSavePaper || itemCount > 1) && (
-                    <p className="leading-tight text-black max-w-[95%] mx-auto" style={{ fontSize: microFontSize }}>
-                      {settings.termsAndConditions}
-                    </p>
-                  )}
-
-                  {settings.companyWebsite && (!shouldSavePaper || itemCount > 1) && (
-                    <p className="leading-tight text-black font-mono lowercase" style={{ fontSize: microFontSize }}>
-                      {settings.companyWebsite}
-                    </p>
-                  )}
-
-                  {/* Texto de Copia Configurable */}
-                  <p className="font-black text-black pt-0.5 uppercase tracking-wider" style={{ fontSize: smallFontSize }}>
-                    {settings.copyText || '*** COPIA CLIENTE ***'}
-                  </p>
-                </div>
-              </>
-            )}
-          </>
-        )}
-
-        {/* Avance final para corte de papel si está configurado (si ahorramos papel, se reduce a max 1 línea) */}
-        {settings.feedLines > 0 && (
-          <div
-            style={{
-              height: `${Math.min(shouldSavePaper ? 1 : 6, settings.feedLines) * 4}px`,
-            }}
-          />
-        )}
+        {settings.copyText ? (
+          <span className="block font-bold text-black uppercase mb-0.5">{settings.copyText}</span>
+        ) : null}
+        <span>Sistema Mercato POS</span>
       </div>
+
+      {/* Avance final para corte de papel */}
+      {settings.feedLines > 0 && (
+        <div
+          style={{
+            height: `${Math.min(shouldSavePaper ? 1 : 6, settings.feedLines) * 4}px`,
+          }}
+        />
+      )}
     </div>
   );
 };

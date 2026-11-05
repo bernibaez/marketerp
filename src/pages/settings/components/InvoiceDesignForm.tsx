@@ -94,12 +94,12 @@ const INVOICE_STYLES: Array<{
 }> = [
   {
     id: 'clasico',
-    name: 'Clásico Tradicional',
-    tag: 'Estándar Oficial',
+    name: 'Clásico Compacto (Oficial)',
+    tag: 'Diseño Recomendado',
     tagColor:
-      'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200 dark:border-blue-800',
+      'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
     description:
-      'Diseño tradicional y equilibrado con logo circular, NCF destacado, tabla de 4 columnas y marco de total en negrita.',
+      'Diseño compacto y claro con logo centrado, RNC y Tel inline, líneas punteadas, 2 líneas por producto y firmas para cajero y cliente.',
     thumbnail80: '/invoice-styles/clasico_80mm.png',
     thumbnail50: '/invoice-styles/clasico_50mm.png',
   },
@@ -735,71 +735,246 @@ export function InvoiceDesignForm({
       {/* ========================================================
           4. VISIBILIDAD DE ELEMENTOS (Mostrar / Ocultar)
           ======================================================== */}
-      <div className="space-y-3 pb-6 border-b border-slate-200/80 dark:border-slate-800">
+      <div className="space-y-4 pb-6 border-b border-slate-200/80 dark:border-slate-800">
         <div>
-          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
-            Elementos visibles en la factura
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Controla qué secciones aparecen en el comprobante impreso y en la vista previa.
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+              Elementos visibles en la factura
+            </h2>
+            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+              Personalización Total
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Activa o desactiva qué secciones se muestran en la impresión y en la vista previa del comprobante.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-          {[
-            {
-              key: 'showLogo' as const,
-              label: 'Logotipo o inicial de empresa',
-              desc: 'Círculo negro con inicial si no hay imagen',
-            },
-            {
-              key: 'showNcf' as const,
-              label: 'Comprobante fiscal (NCF)',
-              desc: 'Muestra fila destacada con NCF',
-            },
-            {
-              key: 'showCustomer' as const,
-              label: 'Datos del cliente',
-              desc: 'Nombre y RNC del comprador',
-            },
-            {
-              key: 'showCashier' as const,
-              label: 'Nombre del cajero / operador',
-              desc: 'Identificación del responsable de caja',
-            },
-            {
-              key: 'showBarcode' as const,
-              label: 'Código de barras Code 128',
-              desc: 'Con número de factura en letras espaciadas',
-            },
-            {
-              key: 'showFooter' as const,
-              label: 'Pie de página y políticas',
-              desc: 'Agradecimiento, política y copia cliente',
-            },
-          ].map((item) => (
-            <label
-              key={item.key}
-              htmlFor={`chk-${item.key}`}
-              className="flex items-start justify-between p-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900 cursor-pointer text-xs"
-            >
-              <div className="pr-2">
-                <span className="font-semibold text-slate-900 dark:text-white block">
-                  {item.label}
-                </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
-                  {item.desc}
-                </span>
-              </div>
-              <input
-                id={`chk-${item.key}`}
-                type="checkbox"
-                checked={Boolean(settings[item.key] ?? true)}
-                onChange={(e) => onFieldChange(item.key, e.target.checked)}
-                className="mt-0.5 w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 cursor-pointer shrink-0"
-              />
-            </label>
-          ))}
+        {/* 1. Encabezado y Datos de la Empresa */}
+        <div className="space-y-2">
+          <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+            Encabezado y Empresa
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {[
+              {
+                key: 'showLogo' as const,
+                label: 'Logotipo o distintivo comercial',
+                desc: 'Muestra el logo o inicial de empresa centrado arriba',
+              },
+              {
+                key: 'showCompanyRnc' as const,
+                label: 'RNC de la empresa',
+                desc: 'Muestra el RNC en la línea superior',
+              },
+              {
+                key: 'showCompanyPhone' as const,
+                label: 'Teléfono de contacto',
+                desc: 'Muestra el número telefónico en cabecera',
+              },
+              {
+                key: 'showCompanyAddress' as const,
+                label: 'Dirección física',
+                desc: 'Muestra la calle y ciudad del negocio',
+              },
+              {
+                key: 'showSlogan' as const,
+                label: 'Eslogan comercial',
+                desc: 'Frase o lema comercial de la empresa',
+              },
+            ].map((item) => (
+              <label
+                key={item.key}
+                htmlFor={`chk-${item.key}`}
+                className="flex items-start justify-between p-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900 cursor-pointer text-xs"
+              >
+                <div className="pr-2">
+                  <span className="font-semibold text-slate-900 dark:text-white block">
+                    {item.label}
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                    {item.desc}
+                  </span>
+                </div>
+                <input
+                  id={`chk-${item.key}`}
+                  type="checkbox"
+                  checked={Boolean(settings[item.key] ?? true)}
+                  onChange={(e) => onFieldChange(item.key, e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 cursor-pointer shrink-0"
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* 2. Metadatos de la Venta */}
+        <div className="space-y-2 pt-2">
+          <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+            Datos de la Venta y Fiscales
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {[
+              {
+                key: 'showNcf' as const,
+                label: 'Comprobante fiscal (NCF)',
+                desc: 'Secuencia NCF y fecha de vencimiento si aplica',
+              },
+              {
+                key: 'showRegisterNumber' as const,
+                label: 'Número de caja (Caja)',
+                desc: 'Identificador de la caja registradora activa',
+              },
+              {
+                key: 'showCashier' as const,
+                label: 'Nombre del cajero / operador',
+                desc: 'Identificación del responsable del turno de cobro',
+              },
+              {
+                key: 'showIssueTime' as const,
+                label: 'Hora de emisión',
+                desc: 'Muestra la hora exacta junto a la fecha de venta',
+              },
+              {
+                key: 'showCustomer' as const,
+                label: 'Datos del cliente',
+                desc: 'Nombre y RNC / Cédula del comprador',
+              },
+            ].map((item) => (
+              <label
+                key={item.key}
+                htmlFor={`chk-${item.key}`}
+                className="flex items-start justify-between p-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900 cursor-pointer text-xs"
+              >
+                <div className="pr-2">
+                  <span className="font-semibold text-slate-900 dark:text-white block">
+                    {item.label}
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                    {item.desc}
+                  </span>
+                </div>
+                <input
+                  id={`chk-${item.key}`}
+                  type="checkbox"
+                  checked={Boolean(settings[item.key] ?? true)}
+                  onChange={(e) => onFieldChange(item.key, e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 cursor-pointer shrink-0"
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* 3. Productos y Cobro */}
+        <div className="space-y-2 pt-2">
+          <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+            Detalle de Productos y Totales
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {[
+              {
+                key: 'showItemPriceUnitPrice' as const,
+                label: 'Detalle unitario (1x RD$ 60.00)',
+                desc: 'Muestra sublínea con cantidad multiplicada por precio',
+              },
+              {
+                key: 'showTaxBreakdown' as const,
+                label: 'Desglose de ITBIS',
+                desc: 'Fila con el importe calculado de impuestos',
+              },
+              {
+                key: 'showPaymentDetails' as const,
+                label: 'Método de pago y recibido',
+                desc: 'Efectivo/tarjeta y monto total pagado',
+              },
+              {
+                key: 'showChange' as const,
+                label: 'Cambio / Devuelta',
+                desc: 'Muestra la devuelta entregada al cliente',
+              },
+            ].map((item) => (
+              <label
+                key={item.key}
+                htmlFor={`chk-${item.key}`}
+                className="flex items-start justify-between p-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900 cursor-pointer text-xs"
+              >
+                <div className="pr-2">
+                  <span className="font-semibold text-slate-900 dark:text-white block">
+                    {item.label}
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                    {item.desc}
+                  </span>
+                </div>
+                <input
+                  id={`chk-${item.key}`}
+                  type="checkbox"
+                  checked={Boolean(settings[item.key] ?? true)}
+                  onChange={(e) => onFieldChange(item.key, e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 cursor-pointer shrink-0"
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* 4. Cierre, Políticas y Firmas */}
+        <div className="space-y-2 pt-2">
+          <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+            Pie de Factura, Políticas y Firmas
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {[
+              {
+                key: 'showFooter' as const,
+                label: 'Pie de página general',
+                desc: 'Habilita o deshabilita todo el bloque inferior',
+              },
+              {
+                key: 'showFooterMessage' as const,
+                label: 'Mensaje de agradecimiento',
+                desc: '¡Gracias por preferirnos! en cursiva',
+              },
+              {
+                key: 'showTerms' as const,
+                label: 'Políticas de cambios',
+                desc: 'Términos de devoluciones y garantías',
+              },
+              {
+                key: 'showSignatureLine' as const,
+                label: 'Líneas de firmas dobles',
+                desc: 'Líneas para Firma Cajero y Firma Cliente',
+              },
+              {
+                key: 'showBarcode' as const,
+                label: 'Código de barras Code 128',
+                desc: 'Código escaneable con número de factura',
+              },
+            ].map((item) => (
+              <label
+                key={item.key}
+                htmlFor={`chk-${item.key}`}
+                className="flex items-start justify-between p-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900 cursor-pointer text-xs"
+              >
+                <div className="pr-2">
+                  <span className="font-semibold text-slate-900 dark:text-white block">
+                    {item.label}
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                    {item.desc}
+                  </span>
+                </div>
+                <input
+                  id={`chk-${item.key}`}
+                  type="checkbox"
+                  checked={Boolean(settings[item.key] ?? true)}
+                  onChange={(e) => onFieldChange(item.key, e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 cursor-pointer shrink-0"
+                />
+              </label>
+            ))}
+          </div>
         </div>
       </div>
 
