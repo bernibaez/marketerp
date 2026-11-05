@@ -54,9 +54,18 @@ export function useProductos(params: ProductosFiltro = {}) {
   useEffect(() => {
     mountedRef.current = true;
     void refetch();
+
+    const handleProductsUpdated = () => {
+      if (mountedRef.current) {
+        void refetch();
+      }
+    };
+    window.addEventListener('mercato_products_updated', handleProductsUpdated);
+
     return () => {
       mountedRef.current = false;
       reqIdRef.current += 1;
+      window.removeEventListener('mercato_products_updated', handleProductsUpdated);
     };
   }, [refetch]);
 

@@ -129,9 +129,34 @@ export function updateProductPurchaseDataInStore(
   newCostPrice?: number,
   newSalePrice?: number
 ): ProductItem[] {
+  const normKey = (productIdOrSku || '').toLowerCase().trim();
+
+  // 1. Mantener sincronizado initialProducts en memoria
+  const demoMatch = initialProducts.find(
+    (p) =>
+      p.id.toLowerCase() === normKey ||
+      (p.sku && p.sku.toLowerCase() === normKey) ||
+      (p.barcode && p.barcode.toLowerCase() === normKey) ||
+      p.name.toLowerCase() === normKey
+  );
+  if (demoMatch) {
+    const raw = (demoMatch.currentStock ?? 0) + deltaQty;
+    demoMatch.currentStock = Math.max(0, Math.round(raw * 1000) / 1000);
+    demoMatch.stockStatus =
+      demoMatch.currentStock === 0 ? 'out' : demoMatch.currentStock <= demoMatch.minStock ? 'low' : 'normal';
+    if (newCostPrice !== undefined && newCostPrice > 0) demoMatch.costPrice = newCostPrice;
+    if (newSalePrice !== undefined && newSalePrice > 0) demoMatch.salePrice = newSalePrice;
+  }
+
+  // 2. Actualizar almacenamiento local persistente
   const products = getStoredProducts();
   const updated = products.map((p) => {
-    if (p.id === productIdOrSku || p.sku === productIdOrSku || p.barcode === productIdOrSku) {
+    if (
+      p.id.toLowerCase() === normKey ||
+      (p.sku && p.sku.toLowerCase() === normKey) ||
+      (p.barcode && p.barcode.toLowerCase() === normKey) ||
+      p.name.toLowerCase() === normKey
+    ) {
       const rawStock = p.currentStock + deltaQty;
       const newStock = Math.max(0, Math.round(rawStock * 1000) / 1000);
       let stockStatus: 'normal' | 'low' | 'out' = 'normal';

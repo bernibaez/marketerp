@@ -1,8 +1,10 @@
 import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupabase';
-import { actualizarProducto } from './productos.service';
+import { actualizarProducto, crearProducto, invalidarCacheProductos, uiAProductoInsert } from './productos.service';
 import { crearCxpDesdeCompra } from './cxp.service';
 import { movimientoInventarioPresentacion } from './presentaciones.service';
-import { updateProductPurchaseDataInStore } from '@/lib/productStore';
+import { updateProductPurchaseDataInStore, getStoredProducts } from '@/lib/productStore';
+import { initialProducts } from '@/lib/initialProducts';
+import { registrarMovimientoInventario } from './movimientosInventarioCentral.service';
 
 export function isUuid(val: unknown): boolean {
   if (typeof val !== 'string') return false;
@@ -202,20 +204,24 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
     (!cleanProveedorId && rawProvId ? rawProvId : '') ||
     'Sin proveedor';
 
-  // 1. Siempre actualizar inventario y costos localmente en productStore
+  // 1. Siempre actualizar inventario, costos y estado en memoria y productStore
   for (const linea of input.lineas) {
     const prodKey = linea.producto_id || linea.nombre;
+    const addQty = Number(linea.cantidad || 0);
+    const costPrice = Number(linea.precio_costo || 0);
+    const salePrice = Number(linea.precio_venta || 0);
+
     if (prodKey) {
       updateProductPurchaseDataInStore(
         prodKey,
-        linea.cantidad,
-        linea.precio_costo,
-        linea.precio_venta
+        addQty,
+        costPrice,
+        salePrice
       );
     }
   }
 
-  // 2. Si Supabase está disponible, intentar guardar remotamente con saneamiento estricto de tipos UUID
+  // 2. Si Supabase está disponible, intentar guardar remotamente con sincronización total de stock
   if (isSupabaseConfigured()) {
     try {
       const sb = getSupabase();
@@ -250,6 +256,194 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
         }
       }
 
+      // Pre-resolver productos en Supabase o crearlos si no existen aún (mapeo índice -> UUID en Supabase)
+      const resolvedProdMap = new Map<number, string>();
+
+      for (let i = 0; i < input.lineas.length; i++) {
+        const linea = input.lineas[i];
+        const rawId = typeof linea.producto_id === 'string' && linea.producto_id.trim() ? linea.producto_id.trim() : null;
+        const nombre = (linea.nombre || '').trim();
+        const addQty = Number(linea.cantidad || 0);
+        const costPrice = Number(linea.precio_costo || 0);
+        const salePrice = Number(linea.precio_venta || 0);
+        const wholesalePrice =
+          linea.precio_mayorista !== undefined && linea.precio_mayorista > 0
+            ? Number(linea.precio_mayorista)
+            : undefined;
+
+        let dbProd: any = null;
+
+        try {
+          // A. Buscar por UUID directo si rawId es UUID
+          if (rawId && isUuid(rawId)) {
+            const { data } = await sb.from('productos').select('*').eq('id', rawId).maybeSingle();
+            if (data) dbProd = data;
+          }
+
+          // B. Buscar por SKU o código de barras
+          if (!dbProd && rawId) {
+            const { data } = await sb
+              .from('productos')
+              .select('*')
+              .or(`sku.eq."${rawId}",codigo_barras.eq."${rawId}",plu.eq."${rawId}"`)
+              .maybeSingle();
+            if (data) dbProd = data;
+          }
+
+          // C. Buscar por nombre en Supabase
+          if (!dbProd && nombre) {
+            const { data } = await sb
+              .from('productos')
+              .select('*')
+              .ilike('nombre', nombre)
+              .maybeSingle();
+            if (data) dbProd = data;
+          }
+
+          // D. Buscar si coincide con catálogo inicial (ej. Pollo 'prod-003')
+          const demoMatch = initialProducts.find(
+            (p) =>
+              (rawId &&
+                (p.id.toLowerCase() === rawId.toLowerCase() ||
+                  (p.sku && p.sku.toLowerCase() === rawId.toLowerCase()) ||
+                  (p.barcode && p.barcode.toLowerCase() === rawId.toLowerCase()))) ||
+              (nombre && p.name.toLowerCase() === nombre.toLowerCase())
+          );
+
+          if (!dbProd && demoMatch) {
+            if (demoMatch.sku || demoMatch.barcode) {
+              const orFilters = [
+                demoMatch.sku ? `sku.eq."${demoMatch.sku}"` : null,
+                demoMatch.barcode ? `codigo_barras.eq."${demoMatch.barcode}"` : null,
+              ]
+                .filter(Boolean)
+                .join(',');
+              if (orFilters) {
+                const { data } = await sb.from('productos').select('*').or(orFilters).maybeSingle();
+                if (data) dbProd = data;
+              }
+            }
+          }
+
+          // E. Si ya existe en Supabase: actualizar stock y precios inmediatamente
+          if (dbProd && isUuid(dbProd.id)) {
+            resolvedProdMap.set(i, dbProd.id);
+
+            const mov = movimientoInventarioPresentacion(
+              {
+                id: dbProd.id,
+                producto_base_id: dbProd.producto_base_id,
+                factor_conversion: dbProd.factor_conversion,
+                is_weight_product: dbProd.is_weight_product,
+                es_pesado: dbProd.es_pesado,
+                sale_type: dbProd.sale_type,
+                unit: dbProd.unidad,
+              },
+              addQty
+            );
+            const targetId = mov.productoId;
+            const targetAdd = mov.cantidad;
+
+            let currentStock = Number(dbProd.stock_actual ?? 0);
+            if (targetId !== dbProd.id && isUuid(targetId)) {
+              const { data: baseRow } = await sb.from('productos').select('stock_actual').eq('id', targetId).maybeSingle();
+              currentStock = Number(baseRow?.stock_actual ?? 0);
+            }
+
+            const updatedStock = Math.max(0, Math.round((currentStock + targetAdd) * 1000) / 1000);
+
+            await actualizarProducto(targetId, {
+              stock_actual: updatedStock,
+              precio_costo: costPrice > 0 ? costPrice : undefined,
+              precio_venta: salePrice > 0 ? salePrice : undefined,
+              ...(wholesalePrice ? { precio_mayorista: wholesalePrice } : {}),
+              estado: 'activo',
+            });
+
+            if (targetId !== dbProd.id) {
+              await actualizarProducto(dbProd.id, {
+                precio_costo: costPrice > 0 ? costPrice : undefined,
+                precio_venta: salePrice > 0 ? salePrice : undefined,
+                ...(wholesalePrice ? { precio_mayorista: wholesalePrice } : {}),
+                estado: 'activo',
+              });
+            }
+
+            // Registrar trazabilidad en el Kardex
+            registrarMovimientoInventario({
+              producto_id: dbProd.id,
+              producto_nombre: dbProd.nombre || nombre,
+              tipo: 'Compra',
+              cantidad_entrada: addQty,
+              stock_anterior: currentStock,
+              stock_resultante: updatedStock,
+              documento_referencia: codigo,
+              usuario: 'Administrador',
+              motivo: `Compra ${codigo}`,
+            });
+          } else {
+            // F. Si no existía en Supabase: registrarlo para que quede activo con su stock
+            if (demoMatch) {
+              const baseQty = Number(demoMatch.currentStock ?? 0);
+              const initialStock = Math.max(0, Math.round((baseQty + addQty) * 1000) / 1000);
+              const insertData = uiAProductoInsert({
+                ...demoMatch,
+                id: undefined,
+                costPrice: costPrice > 0 ? costPrice : demoMatch.costPrice,
+                salePrice: salePrice > 0 ? salePrice : demoMatch.salePrice,
+                wholesalePrice: wholesalePrice || demoMatch.wholesalePrice,
+                currentStock: initialStock,
+                status: 'active',
+              });
+              const created = await crearProducto(insertData);
+              if (created?.id && isUuid(created.id)) {
+                resolvedProdMap.set(i, created.id);
+                registrarMovimientoInventario({
+                  producto_id: created.id,
+                  producto_nombre: created.nombre || nombre,
+                  tipo: 'Compra',
+                  cantidad_entrada: addQty,
+                  stock_anterior: baseQty,
+                  stock_resultante: initialStock,
+                  documento_referencia: codigo,
+                  usuario: 'Administrador',
+                  motivo: `Compra ${codigo} (producto sincronizado)`,
+                });
+              }
+            } else {
+              const created = await crearProducto({
+                nombre,
+                sku: `PROD-${Date.now().toString(36).toUpperCase()}`,
+                precio_costo: costPrice,
+                precio_venta: salePrice,
+                precio_mayorista: wholesalePrice,
+                stock_actual: addQty,
+                stock_minimo: 5,
+                unidad: 'Unidad',
+                categoria: 'General',
+                estado: 'activo',
+              });
+              if (created?.id && isUuid(created.id)) {
+                resolvedProdMap.set(i, created.id);
+                registrarMovimientoInventario({
+                  producto_id: created.id,
+                  producto_nombre: created.nombre || nombre,
+                  tipo: 'Compra',
+                  cantidad_entrada: addQty,
+                  stock_anterior: 0,
+                  stock_resultante: addQty,
+                  documento_referencia: codigo,
+                  usuario: 'Administrador',
+                  motivo: `Compra ${codigo} (nuevo producto)`,
+                });
+              }
+            }
+          }
+        } catch (syncErr) {
+          console.warn(`No se pudo sincronizar producto de compra en Supabase para "${nombre}":`, syncErr);
+        }
+      }
+
       // Inserción en compras
       const { data: compra, error } = await sb
         .from('compras')
@@ -269,10 +463,10 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
 
       if (error) throw error;
 
-      // Inserción en detalle_compras saneando producto_id a null si no es UUID válido
-      const detalles = input.lineas.map((l) => ({
+      // Inserción en detalle_compras con ID de producto vinculado
+      const detalles = input.lineas.map((l, idx) => ({
         compra_id: compra.id,
-        producto_id: isUuid(l.producto_id) ? l.producto_id : null,
+        producto_id: resolvedProdMap.get(idx) || (isUuid(l.producto_id) ? l.producto_id : null),
         nombre_item: l.nombre,
         cantidad: l.cantidad,
         cantidad_recibida: l.cantidad,
@@ -284,51 +478,6 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
 
       const { error: detErr } = await sb.from('detalle_compras').insert(detalles);
       if (detErr) throw detErr;
-
-      // Actualizar stock y precios en Supabase para aquellos productos con UUID válido
-      for (const linea of input.lineas) {
-        const prodId = typeof linea.producto_id === 'string' && isUuid(linea.producto_id) ? linea.producto_id : null;
-        if (!prodId) continue;
-        try {
-          const { data: prod } = await sb
-            .from('productos')
-            .select('stock_actual, producto_base_id, factor_conversion')
-            .eq('id', prodId)
-            .maybeSingle();
-
-          const movimiento = movimientoInventarioPresentacion(
-            {
-              id: prodId,
-              producto_base_id: (prod as { producto_base_id?: string | null } | null)?.producto_base_id,
-              factor_conversion: (prod as { factor_conversion?: number } | null)?.factor_conversion,
-            },
-            linea.cantidad
-          );
-          const targetProdId = movimiento.productoId;
-          const addQty = movimiento.cantidad;
-
-          if (isUuid(targetProdId)) {
-            const { data: targetProd } = await sb
-              .from('productos')
-              .select('stock_actual')
-              .eq('id', targetProdId)
-              .maybeSingle();
-
-            const currentBaseStock = Number(targetProd?.stock_actual ?? 0);
-            await actualizarProducto(targetProdId, {
-              stock_actual: currentBaseStock + addQty,
-            });
-          }
-
-          await actualizarProducto(prodId, {
-            precio_costo: linea.precio_costo,
-            precio_venta: linea.precio_venta,
-            ...(linea.precio_mayorista !== undefined ? { precio_mayorista: linea.precio_mayorista } : {}),
-          });
-        } catch (stockErr) {
-          console.warn(`No se pudo sincronizar stock en Supabase para producto ${prodId}:`, stockErr);
-        }
-      }
 
       // Registro en CxP si el pago es a crédito
       const metodo = mapMetodoPago(input.metodo_pago);
@@ -344,6 +493,12 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
         } catch {
           // No bloquear compra si CxP falla
         }
+      }
+
+      // Purgar caché en memoria y notificar reactivamente a la UI (POS, Productos, etc.)
+      invalidarCacheProductos();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('mercato_products_updated'));
       }
 
       return {
@@ -394,6 +549,12 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
 
   const existingLocal = getLocalCompras();
   saveLocalCompras([localCompra, ...existingLocal]);
+
+  // Purgar caché en memoria y notificar reactivamente a la UI (POS, Productos, etc.)
+  invalidarCacheProductos();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('mercato_products_updated'));
+  }
 
   return {
     id: localCompra.id,

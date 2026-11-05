@@ -111,6 +111,51 @@ describe('Compras y Personalización de Facturas (Tipografía & Zoom)', () => {
       const detalle = await obtenerDetalleCompra(nueva.id);
       expect(detalle?.estado).toBe('anulada');
     });
+
+    it('la compra de un producto agotado (ej. Pollo) incrementa su stock y ya no aparece agotado', async () => {
+      const { obtenerProductos, productoAUi } = await import('@/services/productos.service');
+
+      // Buscar los productos existentes de Pollo en el catálogo
+      const catalogBefore = await obtenerProductos({ busqueda: 'Pollo', estado: 'todos' });
+      expect(catalogBefore.datos.length).toBeGreaterThan(0);
+
+      // Tomar el producto Pollo
+      const targetProd = catalogBefore.datos.find((p) => p.nombre.toLowerCase().includes('pollo'))!;
+      expect(targetProd).toBeDefined();
+
+      const initialStock = Number(targetProd.stock_actual ?? 0);
+      const buyQty = 25;
+
+      // Registrar una compra del producto
+      await crearCompra({
+        codigo: 'FAC-COMP-POLLO-01',
+        proveedor_nombre: 'Pollo Cibao SRL',
+        metodo_pago: 'Efectivo',
+        lineas: [
+          {
+            producto_id: targetProd.id,
+            nombre: targetProd.nombre,
+            cantidad: buyQty,
+            precio_costo: 75,
+            precio_venta: 100,
+            porcentaje_impuesto: 0,
+          },
+        ],
+      });
+
+      // Consultar de nuevo el catálogo
+      const catalogAfter = await obtenerProductos({ busqueda: 'Pollo', estado: 'todos' });
+      const updatedItem = catalogAfter.datos.find((p) => p.id === targetProd.id);
+      expect(updatedItem).toBeDefined();
+
+      const newStock = Number(updatedItem?.stock_actual ?? 0);
+      expect(newStock).toBeGreaterThan(initialStock);
+      expect(newStock).toBeGreaterThan(0);
+
+      const ui = productoAUi(updatedItem!);
+      expect(ui.currentStock).toBeGreaterThan(0);
+      expect(ui.stockStatus).not.toBe('out');
+    });
   });
 
   describe('2. Tipografías de Factura Térmica (fontFamily)', () => {

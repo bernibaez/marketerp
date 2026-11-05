@@ -6,6 +6,7 @@ import {
 } from '@/lib/stockAdjustmentStore';
 import { initialProducts } from '@/lib/initialProducts';
 import { updateProductStockInStore, getStoredProducts } from '@/lib/productStore';
+import { invalidarCacheProductos } from './productos.service';
 
 export type AjusteItemPayload = {
   producto_id: string;
@@ -166,6 +167,12 @@ export async function procesarAjusteStockBloque(
     createBlockStockAdjustment(forLocal, 'Sistema');
   } catch {
     // ignore
+  }
+
+  // Purgar caché en memoria y notificar a la UI
+  invalidarCacheProductos();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('mercato_products_updated'));
   }
 
   return { ajustes: dbCount + nonUuidItems.length, ids: dbIds };
