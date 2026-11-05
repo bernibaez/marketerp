@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import AppLayout from '@/components/AppLayout';
 import {
   Search,
@@ -18,12 +18,15 @@ import {
   Loader2,
   Trash2,
   Layers,
+  DollarSign,
 } from 'lucide-react';
 import { exportTableToPdf } from '@/lib/exportPdf';
 import type { ProductItem } from '@/lib/productStore';
-import type { StockAdjustmentItem } from '@/lib/stockAdjustmentStore';
+import { getStoredAdjustments, type StockAdjustmentItem } from '@/lib/stockAdjustmentStore';
 import { obtenerHistorialAjustes, procesarAjusteStockBloque } from '@/services/inventario.service';
 import { obtenerProductos, productoAUi } from '@/services/productos.service';
+import { crearGasto, obtenerCategoriasGasto } from '@/services/gastos.service';
+import { registrarMovimientoInventario } from '@/services/movimientosInventarioCentral.service';
 import { isAbortError } from '@/lib/isAbortError';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/context/AuthContext';
@@ -48,6 +51,7 @@ const MOTIVOS_SALIDA_COMUNES = [
 interface PreparedExitItem {
   product: ProductItem;
   qtyToExit: number;
+  unitPrice: number;
   reason: string;
   customReason: string;
   adjustmentType: TipoAjuste;
@@ -85,12 +89,19 @@ export default function StockAdjustmentsPage() {
         tipo: typeFilter === 'all' ? 'todos' : (typeFilter as TipoAjuste),
       });
 
+      const stored = getStoredAdjustments();
+      const storedMap = new Map(stored.map((s) => [s.code, s]));
+
       setAdjustments(
         hist.datos.map((a) => {
           const created = new Date(a.creado_en);
           const pNombre = a.productos?.nombre || 'Producto';
           const pSku = a.productos?.sku || '';
           const pCategoria = a.productos?.categoria || '';
+          const storedMatch = storedMap.get(a.codigo) || stored.find((s) => s.productId === a.producto_id);
+          const unitPrice = storedMatch?.unitPrice ?? (a.productos as any)?.precio_compra ?? (a.productos as any)?.precio_venta ?? 0;
+          const qty = Math.abs(a.cantidad_variacion);
+          const totalLoss = storedMatch?.totalLoss ?? (a.tipo_ajuste !== 'entrada' ? Math.round(qty * unitPrice * 100) / 100 : 0);
 
           return {
             id: a.id,
@@ -100,9 +111,11 @@ export default function StockAdjustmentsPage() {
             sku: pSku,
             category: pCategoria,
             type: a.tipo_ajuste,
-            qty: Math.abs(a.cantidad_variacion),
+            qty,
             previousQty: a.cantidad_anterior,
             newQty: a.cantidad_nueva,
+            unitPrice,
+            totalLoss,
             reason: a.motivo,
             date: created.toISOString().slice(0, 10),
             time: created.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' }),
@@ -186,10 +199,12 @@ export default function StockAdjustmentsPage() {
       }
 
       toast.success(`"${product.name}" agregado para registrar salida`);
+      const initialPrice = product.costPrice && product.costPrice > 0 ? product.costPrice : (product.salePrice || 0);
       return [
         {
           product,
           qtyToExit: Math.max(1, initialQty),
+          unitPrice: initialPrice,
           reason: MOTIVOS_SALIDA_COMUNES[0].label,
           customReason: '',
           adjustmentType: MOTIVOS_SALIDA_COMUNES[0].tipo,
@@ -202,7 +217,15 @@ export default function StockAdjustmentsPage() {
   const handleUpdateExitQty = (productId: string, qty: number) => {
     setPreparedExits((prev) =>
       prev.map((item) =>
-        item.product.id === productId ? { ...item, qtyToExit: Math.max(1, qty) } : item
+        item.product.id === productId ? { ...item, qtyToExit: Math.max(0.01, qty) } : item
+      )
+    );
+  };
+
+  const handleUpdateExitPrice = (productId: string, price: number) => {
+    setPreparedExits((prev) =>
+      prev.map((item) =>
+        item.product.id === productId ? { ...item, unitPrice: Math.max(0, price) } : item
       )
     );
   };
@@ -259,12 +282,68 @@ export default function StockAdjustmentsPage() {
           cantidad_nueva: newStock,
           motivo: finalMotivo,
           responsable_id: user?.id ?? null,
+          precio_unitario: item.unitPrice,
         };
       });
 
+      // 1. Aplicar lote de ajustes al inventario
       await procesarAjusteStockBloque(itemsPayload);
+
+      // 2. Reflejar automáticamente la pérdida de cada producto en el módulo de Gastos y Kardex
+      let totalPerdidaMonto = 0;
+      try {
+        const cats = await obtenerCategoriasGasto().catch(() => []);
+        const catPerdida =
+          cats.find(
+            (c) =>
+              c.name.toLowerCase().includes('mantenimiento') ||
+              c.name.toLowerCase().includes('operativ') ||
+              c.name.toLowerCase().includes('suministro')
+          ) || cats[0];
+
+        for (const item of preparedExits) {
+          const itemLoss = Math.round(Number(item.qtyToExit) * Number(item.unitPrice || 0) * 100) / 100;
+          totalPerdidaMonto += itemLoss;
+
+          const finalMotivo =
+            item.reason.includes('Otro') && item.customReason.trim()
+              ? item.customReason.trim()
+              : item.reason;
+
+          if (itemLoss > 0) {
+            await crearGasto({
+              categoria_id: catPerdida?.id || 'cat-008',
+              descripcion: `Pérdida por ajuste de stock: -${item.qtyToExit} ${item.product.unit || 'uds'} de ${item.product.name} (SKU: ${item.product.sku}) - Motivo: ${finalMotivo}`,
+              monto: itemLoss,
+              metodo_pago: 'otro',
+              fecha: new Date().toISOString().slice(0, 10),
+              responsable_nombre: user?.name || 'Administrador',
+              tiene_recibo: false,
+              estado: 'aprobado',
+            }).catch(() => {});
+          }
+
+          // Registrar trazabilidad central en el Kardex
+          registrarMovimientoInventario({
+            producto_id: item.product.id,
+            producto_nombre: item.product.name,
+            tipo: 'Ajuste de inventario',
+            cantidad_salida: item.qtyToExit,
+            stock_anterior: item.product.currentStock,
+            stock_resultante: Math.max(0, item.product.currentStock - item.qtyToExit),
+            documento_referencia: 'AJU-STOCK',
+            usuario: user?.name || 'Administrador',
+            motivo: `Ajuste (${item.reason}) - Pérdida: RD$ ${itemLoss.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`,
+          });
+        }
+      } catch (errGasto) {
+        console.warn('Error al registrar pérdida de ajuste:', errGasto);
+      }
+
       toast.success(
-        `Se registraron las salidas de ${preparedExits.length} producto(s) exitosamente. Existencias descontadas.`
+        totalPerdidaMonto > 0
+          ? `Ajuste completado: Existencias descontadas y pérdida registrada en Gastos por RD$ ${totalPerdidaMonto.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`
+          : `Se registraron las salidas de ${preparedExits.length} producto(s) exitosamente.`
       );
       setPreparedExits([]);
       setShowExitModal(false);
@@ -290,6 +369,8 @@ export default function StockAdjustmentsPage() {
         'Stock Previo',
         'Salida / Variación',
         'Nuevo Stock',
+        'Costo Unit.',
+        'Pérdida RD$',
         'Motivo',
         'Fecha',
         'Responsable',
@@ -302,6 +383,8 @@ export default function StockAdjustmentsPage() {
         a.previousQty,
         a.type === 'entrada' ? `+${a.qty}` : `-${a.qty}`,
         a.newQty,
+        a.unitPrice ? `RD$ ${a.unitPrice.toFixed(2)}` : '—',
+        a.type !== 'entrada' ? `RD$ ${(a.totalLoss ?? (a.unitPrice ? a.qty * a.unitPrice : 0)).toFixed(2)}` : '—',
         a.reason,
         `${a.date} ${a.time}`,
         a.responsible,
@@ -313,10 +396,14 @@ export default function StockAdjustmentsPage() {
   const totalEntradas = adjustments.filter((a) => a.type === 'entrada').reduce((sum, a) => sum + a.qty, 0);
   const totalSalidas = adjustments.filter((a) => a.type === 'salida').reduce((sum, a) => sum + a.qty, 0);
   const totalPerdidas = adjustments.filter((a) => a.type === 'perdida').reduce((sum, a) => sum + a.qty, 0);
+  const totalPerdidaDinero = adjustments
+    .filter((a) => a.type !== 'entrada')
+    .reduce((sum, a) => sum + (a.totalLoss ?? (a.unitPrice ? a.qty * a.unitPrice : 0)), 0);
 
   // VISTA / MODAL DE REGISTRO DE SALIDAS DE INVENTARIO
   if (showExitModal) {
     const totalUnitsToExit = preparedExits.reduce((acc, curr) => acc + curr.qtyToExit, 0);
+    const totalLossToExit = preparedExits.reduce((acc, curr) => acc + curr.qtyToExit * (curr.unitPrice || 0), 0);
 
     return (
       <AppLayout>
@@ -554,12 +641,13 @@ export default function StockAdjustmentsPage() {
                                 </button>
                                 <input
                                   type="number"
-                                  min={1}
+                                  min={0.001}
+                                  step="any"
                                   value={salida}
                                   onChange={(e) =>
-                                    handleUpdateExitQty(item.product.id, parseInt(e.target.value, 10) || 1)
+                                    handleUpdateExitQty(item.product.id, parseFloat(e.target.value) || 0)
                                   }
-                                  className="input-field w-20 h-8 text-center font-black text-sm tabular-nums"
+                                  className="input-field w-24 h-8 text-center font-black text-sm tabular-nums"
                                 />
                                 <button
                                   type="button"
@@ -596,6 +684,36 @@ export default function StockAdjustmentsPage() {
                                 La salida ({salida}) supera el stock ({stockPrevio}). El stock quedará en 0.
                               </p>
                             )}
+                          </div>
+
+                          {/* Precio y Pérdida Financiera del Ajuste */}
+                          <div className="bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 p-2.5 rounded-xl space-y-2">
+                            <div className="flex items-center justify-between text-xs">
+                              <label className="font-bold text-foreground">
+                                Precio / Costo Unitario (RD$):
+                              </label>
+                              <div className="relative w-32">
+                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground font-bold text-[11px]">
+                                  RD$
+                                </span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={item.unitPrice}
+                                  onChange={(e) =>
+                                    handleUpdateExitPrice(item.product.id, parseFloat(e.target.value) || 0)
+                                  }
+                                  className="input-field pl-9 pr-2 h-8 text-right font-black text-xs tabular-nums w-full"
+                                />
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between text-xs pt-1 border-t border-amber-500/20">
+                              <span className="text-muted-foreground font-medium">Pérdida por este producto:</span>
+                              <span className="font-extrabold text-danger tabular-nums text-xs">
+                                -RD$ {(salida * (item.unitPrice || 0)).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
                           </div>
 
                           {/* Motivo del Ajuste */}
@@ -638,6 +756,13 @@ export default function StockAdjustmentsPage() {
                       <span className="text-muted-foreground">Total de unidades del ajuste:</span>
                       <span className="text-base font-black text-emerald-600 dark:text-emerald-400 font-mono">
                         -{totalUnitsToExit} unidades
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between items-center text-xs font-bold pb-1">
+                      <span className="text-muted-foreground">Pérdida Financiera Total:</span>
+                      <span className="text-base font-black text-rose-600 dark:text-rose-400 font-mono">
+                        -RD$ {totalLossToExit.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
 
@@ -694,7 +819,7 @@ export default function StockAdjustmentsPage() {
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="card p-4 flex items-center gap-3 border border-emerald-500/20 bg-emerald-500/5">
             <div className="p-3 rounded-2xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
               <ArrowDownRight size={22} />
@@ -722,6 +847,18 @@ export default function StockAdjustmentsPage() {
             <div>
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Entradas Ajustadas</p>
               <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-0.5">{totalEntradas} unidades</p>
+            </div>
+          </div>
+
+          <div className="card p-4 flex items-center gap-3 border border-rose-500/20 bg-rose-500/5">
+            <div className="p-3 rounded-2xl bg-rose-500/15 text-rose-600 dark:text-rose-400">
+              <DollarSign size={22} />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Pérdida Financiera</p>
+              <p className="text-xl font-black text-rose-600 dark:text-rose-400 mt-0.5 tabular-nums">
+                -RD$ {totalPerdidaDinero.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
             </div>
           </div>
         </div>
@@ -775,6 +912,8 @@ export default function StockAdjustmentsPage() {
                   <th className="text-center px-4 py-3.5">Stock Previo</th>
                   <th className="text-center px-4 py-3.5">Cantidad Salida / Ajuste</th>
                   <th className="text-center px-4 py-3.5">Nuevo Stock</th>
+                  <th className="text-right px-4 py-3.5">P. Costo</th>
+                  <th className="text-right px-4 py-3.5">Pérdida RD$</th>
                   <th className="text-left px-4 py-3.5 hidden lg:table-cell">Motivo</th>
                   <th className="text-left px-4 py-3.5 hidden md:table-cell">Fecha / Hora</th>
                   <th className="text-right px-4 py-3.5">Detalle</th>
@@ -783,14 +922,14 @@ export default function StockAdjustmentsPage() {
               <tbody className="divide-y divide-border/60">
                 {loadingHistory ? (
                   <tr>
-                    <td colSpan={10} className="text-center py-12 text-muted-foreground text-sm">
+                    <td colSpan={12} className="text-center py-12 text-muted-foreground text-sm">
                       <Loader2 size={24} className="animate-spin mx-auto text-amber-600 mb-2" />
                       Cargando historial de ajustes…
                     </td>
                   </tr>
                 ) : adjustments.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="text-center py-12 text-muted-foreground text-sm">
+                    <td colSpan={12} className="text-center py-12 text-muted-foreground text-sm">
                       No se encontraron registros de ajustes o salidas de inventario.
                     </td>
                   </tr>
@@ -798,6 +937,7 @@ export default function StockAdjustmentsPage() {
                   adjustments.map((a, i) => {
                     const typeConfig = typeMap[a.type] || typeMap.salida;
                     const delta = a.newQty - a.previousQty;
+                    const lossAmount = a.type !== 'entrada' ? (a.totalLoss ?? (a.unitPrice ? a.qty * a.unitPrice : 0)) : 0;
 
                     return (
                       <tr key={a.id} className={`hover:bg-secondary/30 transition-colors ${i % 2 === 0 ? '' : 'bg-secondary/10'}`}>
@@ -834,6 +974,18 @@ export default function StockAdjustmentsPage() {
                         </td>
                         <td className="px-4 py-3.5 text-center font-black text-foreground tabular-nums">
                           {a.newQty} unds
+                        </td>
+                        <td className="px-4 py-3.5 text-right font-medium text-muted-foreground tabular-nums">
+                          {a.unitPrice ? `RD$ ${a.unitPrice.toFixed(2)}` : '—'}
+                        </td>
+                        <td className="px-4 py-3.5 text-right font-black tabular-nums">
+                          {a.type !== 'entrada' && lossAmount > 0 ? (
+                            <span className="text-rose-600 dark:text-rose-400">
+                              -RD$ {lossAmount.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3.5 text-muted-foreground text-xs hidden lg:table-cell max-w-[200px] truncate">
                           {a.reason}
@@ -884,7 +1036,7 @@ export default function StockAdjustmentsPage() {
               </button>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 text-xs">
               <div className="p-3 bg-secondary/30 rounded-xl border border-border/50">
                 <span className="text-muted-foreground font-bold block mb-1">Código</span>
                 <span className="font-mono font-bold text-primary text-sm">{detailItem.code}</span>
@@ -902,6 +1054,10 @@ export default function StockAdjustmentsPage() {
                 <span className="font-bold text-foreground">{detailItem.category || 'General'}</span>
               </div>
               <div className="p-3 bg-secondary/30 rounded-xl border border-border/50">
+                <span className="text-muted-foreground font-bold block mb-1">Tipo de Movimiento</span>
+                <span className="font-bold text-foreground">{typeMap[detailItem.type]?.label || detailItem.type}</span>
+              </div>
+              <div className="p-3 bg-secondary/30 rounded-xl border border-border/50">
                 <span className="text-muted-foreground font-bold block mb-1">Stock Previo</span>
                 <span className="font-bold text-foreground text-sm">{detailItem.previousQty} unds</span>
               </div>
@@ -910,10 +1066,24 @@ export default function StockAdjustmentsPage() {
                 <span className="font-bold text-foreground text-sm">{detailItem.newQty} unds</span>
               </div>
               <div className="p-3 bg-secondary/30 rounded-xl border border-border/50">
+                <span className="text-muted-foreground font-bold block mb-1">Precio / Costo Unitario</span>
+                <span className="font-bold text-foreground text-sm">
+                  {detailItem.unitPrice ? `RD$ ${detailItem.unitPrice.toFixed(2)}` : '—'}
+                </span>
+              </div>
+              <div className="p-3 bg-secondary/30 rounded-xl border border-border/50">
+                <span className="text-muted-foreground font-bold block mb-1">Pérdida Financiera</span>
+                <span className="font-extrabold text-rose-600 dark:text-rose-400 text-sm">
+                  {detailItem.type !== 'entrada' && (detailItem.totalLoss || detailItem.unitPrice)
+                    ? `-RD$ ${(detailItem.totalLoss ?? (detailItem.unitPrice! * detailItem.qty)).toLocaleString('es-DO', { minimumFractionDigits: 2 })}`
+                    : '—'}
+                </span>
+              </div>
+              <div className="p-3 bg-secondary/30 rounded-xl border border-border/50">
                 <span className="text-muted-foreground font-bold block mb-1">Motivo</span>
                 <span className="font-medium text-foreground">{detailItem.reason}</span>
               </div>
-              <div className="p-3 bg-secondary/30 rounded-xl border border-border/50">
+              <div className="p-3 bg-secondary/30 rounded-xl border border-border/50 lg:col-span-2">
                 <span className="text-muted-foreground font-bold block mb-1">Fecha / Responsable</span>
                 <span className="font-medium text-foreground">
                   {detailItem.date} {detailItem.time} — {detailItem.responsible}

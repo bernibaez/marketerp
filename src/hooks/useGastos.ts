@@ -44,9 +44,18 @@ export function useGastos() {
   useEffect(() => {
     mountedRef.current = true;
     void refetch();
+
+    const handleUpdate = () => {
+      void refetch();
+    };
+    window.addEventListener('mercato_gastos_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+
     return () => {
       mountedRef.current = false;
       reqIdRef.current += 1;
+      window.removeEventListener('mercato_gastos_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
     };
   }, [refetch]);
 

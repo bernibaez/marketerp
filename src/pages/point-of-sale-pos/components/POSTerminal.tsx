@@ -121,7 +121,7 @@ export default function POSTerminal() {
 
   // 3. Cash Session State
   const [activeCashId, setActiveCashId] = useState<CashRegisterId>(() =>
-    isAdminUser ? ADMIN_OWN_CASH : DEFAULT_CASHIER_CASH
+    isAdminUser ? '4' : DEFAULT_CASHIER_CASH
   );
   const [shiftOpenedLocally, setShiftOpenedLocally] = useState(false);
   const [shiftClosedLocally, setShiftClosedLocally] = useState(false);
@@ -133,7 +133,7 @@ export default function POSTerminal() {
   useEffect(() => {
     if (registers.length === 0) return;
 
-    // 1. Si este cajero ya tiene una caja abierta registrada a su nombre, seleccionarla automáticamente
+    // 1. Si este usuario ya tiene una caja abierta registrada a su nombre, seleccionarla automáticamente
     const userOpenRegister = registers.find(
       (c) => c.open && c.cashierId && user?.id && c.cashierId === user.id && (isAdminUser || !c.isAdminBox)
     );
@@ -144,20 +144,29 @@ export default function POSTerminal() {
       return;
     }
 
-    const current = findCashRegister(registers, activeCashId);
-    if (current) {
-      if (current.id !== activeCashId) setActiveCashId(current.id);
-      if (!isAdminUser && current.isAdminBox) {
-        const fallback = registers.find((c) => !c.isAdminBox);
-        if (fallback) setActiveCashId(fallback.id);
+    // 2. Si es admin y la caja actual no es de admin, seleccionar la caja de administración
+    if (isAdminUser) {
+      const current = findCashRegister(registers, activeCashId);
+      if (!current || !current.isAdminBox) {
+        const adminBox = registers.find((c) => c.isAdminBox || c.label.toLowerCase().includes('admin'));
+        if (adminBox) {
+          setActiveCashId(adminBox.id);
+          return;
+        }
       }
-      return;
     }
 
-    const preferred = isAdminUser
-      ? registers.find((c) => c.isAdminBox) || registers[0]
-      : registers.find((c) => !c.isAdminBox) || registers[0];
-    if (preferred) setActiveCashId(preferred.id);
+    // 3. Si es cajero regular y la caja seleccionada es de admin, forzar una caja de cajero
+    if (!isAdminUser) {
+      const current = findCashRegister(registers, activeCashId);
+      if (!current || current.isAdminBox) {
+        const cashierBox = registers.find((c) => !c.isAdminBox) || registers[0];
+        if (cashierBox) {
+          setActiveCashId(cashierBox.id);
+          return;
+        }
+      }
+    }
   }, [isAdminUser, registers, activeCashId, user?.id]);
 
   const activeCashSession = findCashRegister(registers, activeCashId);

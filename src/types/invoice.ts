@@ -2,13 +2,58 @@ export type PaperWidth = 50 | 58 | 80;
 export type FontSizeOption = 'compact' | 'normal' | 'large' | 'xlarge';
 
 export type PrintFormat = 'ticket_80mm' | 'ticket_58mm' | 'ticket_50mm' | 'full_page' | 'half_page';
-export type TemplateStyle = 'modern' | 'classic' | 'minimal' | 'bold';
+
+export type TemplateStyle =
+  | 'clasico'
+  | 'compacto'
+  | 'elegante'
+  | 'minimalista'
+  | 'moderno'
+  | 'supermercado'
+  | 'classic'
+  | 'compact'
+  | 'elegant'
+  | 'minimal'
+  | 'modern'
+  | 'bold';
+
+export type InvoiceHeightMode = 'auto' | 'compact' | 'standard';
+
 export type FontFamily = 'courier' | 'sans' | 'mono' | 'condensed' | 'consolas' | 'serif';
 export type FontSize = 'compact' | 'normal' | 'large';
 export type FontWeight = 'normal' | 'medium' | 'bold';
 export type PrintDensity = 'compact' | 'normal' | 'spacious';
 export type SeparatorStyle = 'dashed' | 'solid' | 'dotted' | 'double';
 export type LogoSize = 'small' | 'medium' | 'large';
+
+export function normalizeInvoiceStyle(
+  style?: string
+): 'clasico' | 'compacto' | 'elegante' | 'minimalista' | 'moderno' | 'supermercado' {
+  switch (style?.toLowerCase()) {
+    case 'compacto':
+    case 'compact':
+      return 'compacto';
+    case 'elegante':
+    case 'elegant':
+      return 'elegante';
+    case 'minimalista':
+    case 'minimal':
+      return 'minimalista';
+    case 'moderno':
+    case 'modern':
+      return 'moderno';
+    case 'supermercado':
+    case 'bold':
+    case 'detailed':
+    case 'supermarket':
+      return 'supermercado';
+    case 'clasico':
+    case 'classic':
+    case 'standard':
+    default:
+      return 'clasico';
+  }
+}
 
 export interface InvoiceItem {
   cantidad: number;
@@ -102,6 +147,10 @@ export interface InvoiceSettings {
   customWidthMm: number;
   marginMm: number;
   feedLines: number;
+
+  // Control de Altura y Optimización de Rollo Térmico
+  heightMode?: InvoiceHeightMode;
+  paperSaverSmallSales?: boolean;
 
   fontFamily: FontFamily;
   customFontSizePt: number;

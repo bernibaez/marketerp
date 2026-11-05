@@ -3,6 +3,7 @@ import { X, ArrowDownRight, ArrowUpRight, DollarSign, Tag, FileText, CheckCircle
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/context/AuthContext';
 import { registrarMovimientoCaja } from '@/services/movimientosCaja.service';
+import { crearGasto, obtenerCategoriasGasto } from '@/services/gastos.service';
 import type { TipoMovimientoCaja } from '@/types/database';
 
 interface PosCashMovementModalProps {
@@ -49,6 +50,26 @@ export default function PosCashMovementModal({
         concepto: concepto.trim(),
         categoria: tipo === 'retiro' ? categoria : 'Aporte de Fondo',
       });
+
+      // Si es un retiro/gasto, reflejar automáticamente en el módulo central e historial de gastos
+      if (tipo === 'retiro') {
+        try {
+          const cats = await obtenerCategoriasGasto().catch(() => []);
+          const matchedCat = cats.find((c) => c.name.toLowerCase().includes('operativ') || c.name.toLowerCase().includes('otro')) || cats[0];
+          await crearGasto({
+            categoria_id: matchedCat?.id || 'cat-008',
+            descripcion: concepto.trim(),
+            monto: value,
+            metodo_pago: 'efectivo',
+            caja_id: String(cajaId),
+            cierre_id: cierreId,
+            responsable_nombre: user?.name ?? 'Usuario',
+            estado: 'aprobado',
+          });
+        } catch (eGasto) {
+          console.warn('Error al registrar gasto asociado al retiro:', eGasto);
+        }
+      }
 
       toast.success(
         tipo === 'entrada'

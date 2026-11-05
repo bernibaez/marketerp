@@ -15,6 +15,7 @@ export type AjusteItemPayload = {
   motivo: string;
   responsable_id?: string | null;
   codigo?: string;
+  precio_unitario?: number;
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -46,8 +47,8 @@ export async function procesarAjusteStockBloque(
     .filter((it) => UUID_RE.test(it.producto_id))
     .map((it) => ({
       ...it,
-      cantidad_nueva: it.cantidad_nueva != null ? Math.round(it.cantidad_nueva) : undefined,
-      cantidad_variacion: it.cantidad_variacion != null ? Math.round(it.cantidad_variacion) : undefined,
+      cantidad_nueva: it.cantidad_nueva != null ? Number(Number(it.cantidad_nueva).toFixed(3)) : undefined,
+      cantidad_variacion: it.cantidad_variacion != null ? Number(Number(it.cantidad_variacion).toFixed(3)) : undefined,
     }));
   const nonUuidItems = items.filter((it) => !UUID_RE.test(it.producto_id));
 
@@ -88,6 +89,31 @@ export async function procesarAjusteStockBloque(
       }
     }
   });
+
+  // Guardar también en stockAdjustmentStore para conservar el registro con precios y pérdidas
+  try {
+    const prods = getStoredProducts();
+    const forLocal = items.map((it) => {
+      const p = prods.find((prod) => prod.id === it.producto_id || prod.sku === it.producto_id) || {
+        id: it.producto_id,
+        name: 'Producto',
+        sku: '',
+        category: 'General',
+        currentStock: 0,
+        costPrice: it.precio_unitario || 0,
+        salePrice: it.precio_unitario || 0,
+      } as any;
+      return {
+        product: p,
+        newQty: it.cantidad_nueva ?? (p.currentStock + (it.cantidad_variacion ?? 0)),
+        reason: it.motivo,
+        unitPrice: it.precio_unitario ?? p.costPrice ?? p.salePrice ?? 0,
+      };
+    });
+    createBlockStockAdjustment(forLocal, 'Sistema');
+  } catch {
+    // ignore
+  }
 
   return { ajustes: dbCount + nonUuidItems.length, ids: dbIds };
 }

@@ -378,7 +378,7 @@ function normalizeVentaAmounts(row: any, detalles: DetalleVenta[], meta?: VentaM
   };
 }
 
-function getLocalVentas(): VentaConDetalle[] {
+export function getLocalVentas(): VentaConDetalle[] {
   try {
     const raw = localStorage.getItem(LOCAL_VENTAS_KEY);
     return raw ? (JSON.parse(raw) as VentaConDetalle[]) : [];
@@ -387,7 +387,7 @@ function getLocalVentas(): VentaConDetalle[] {
   }
 }
 
-function saveLocalVentas(ventas: VentaConDetalle[]) {
+export function saveLocalVentas(ventas: VentaConDetalle[]) {
   localStorage.setItem(LOCAL_VENTAS_KEY, JSON.stringify(ventas));
 }
 
@@ -883,7 +883,23 @@ export async function obtenerHistorialVentas(params: {
     getLocalVentas().map((lv) => [String(lv.id), lv])
   );
 
-  const rowsList: any[] = data ?? [];
+  const localList = getLocalVentas();
+  const remoteRows: any[] = data ?? [];
+  const remoteIds = new Set(remoteRows.map((r) => String(r.id)));
+  const unmergedLocal = localList.filter((lv) => !remoteIds.has(String(lv.id)));
+
+  const matchingLocal = unmergedLocal.filter((lv) => {
+    if (params.excluirAnuladas && (lv.estado === 'anulada' || (lv.estado as string) === 'cancelled')) return false;
+    if (params.fechaInicio && lv.creado_en && lv.creado_en.slice(0, 10) < params.fechaInicio) return false;
+    if (params.fechaFin && lv.creado_en && lv.creado_en.slice(0, 10) > params.fechaFin) return false;
+    if (params.cajaId) {
+      const boxIds = Array.isArray(params.cajaId) ? params.cajaId.map(String) : [String(params.cajaId)];
+      if (!boxIds.includes(String(lv.caja_id ?? ''))) return false;
+    }
+    return true;
+  });
+
+  const rowsList: any[] = [...remoteRows, ...matchingLocal];
   const missingDetalleIds = rowsList
     .filter((r) => !Array.isArray(r.detalle_ventas) || r.detalle_ventas.length === 0)
     .map((r) => String(r.id))
@@ -981,7 +997,16 @@ export async function obtenerHistorialVentas(params: {
   });
 
   if (params.cajeroId && !cajeroIdIsUuid) {
-    datos = datos.filter((v) => String(v.cajero_id ?? '') === String(params.cajeroId));
+    datos = datos.filter((v) => {
+      // Si la venta tiene cajero_id explícito, comparar
+      if (v.cajero_id != null && String(v.cajero_id).trim() !== '') {
+        return String(v.cajero_id) === String(params.cajeroId);
+      }
+      // Si cajero_id es null (típico en ventas Supabase de usuarios locales sin UUID en perfiles),
+      // no descartar si se especificó cajaId ya que la venta pertenece a la registradora
+      if (params.cajaId) return true;
+      return true;
+    });
     return { datos, total: datos.length };
   }
 
@@ -995,23 +1020,24 @@ export async function obtenerVentasTurno(params: {
   desde?: string;
   limite?: number;
 }): Promise<VentaConDetalle[]> {
+  const cajeroIdIsUuid = Boolean(params.cajeroId && isUUID(params.cajeroId));
   const { datos } = await obtenerHistorialVentas({
     pagina: 1,
     limite: params.limite ?? 500,
     cajaId: params.cajaId,
-    cajeroId: params.cajeroId,
+    cajeroId: cajeroIdIsUuid ? params.cajeroId : undefined,
     fechaInicio: params.desde?.slice(0, 10),
     excluirAnuladas: true,
   });
 
   if (datos.length === 0) return [];
 
-  // Filtrar por hora exacta de apertura comparando timestamps numéricos
+  // Filtrar por hora exacta de apertura comparando timestamps numéricos (con 60s de margen por sincronización de reloj)
   const desdeTime = params.desde ? new Date(params.desde).getTime() : 0;
   const filtradas = desdeTime > 0
     ? datos.filter((v) => {
         const t = new Date(v.creado_en).getTime();
-        return !isNaN(t) ? t >= desdeTime - 5000 : true;
+        return !isNaN(t) ? t >= desdeTime - 60_000 : true;
       })
     : datos;
 

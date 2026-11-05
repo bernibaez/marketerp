@@ -2,7 +2,7 @@ import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupa
 import { CIERRE_COLUMNS, type CierreCaja } from '@/types/database';
 import { getCashClosures, saveCashClosure, type CashClosure } from '@/lib/cashClosureStore';
 import { obtenerCajas } from './cajas.service';
-import { obtenerVentasTurno } from './ventas.service';
+import { obtenerVentasTurno, getLocalVentas } from './ventas.service';
 import { obtenerMovimientosCaja } from './movimientosCaja.service';
 
 function esUuid(value: string | undefined | null): boolean {
@@ -104,7 +104,7 @@ export function cierreDbARegistro(
 
 function persistirRegistroCierre(
   db: CierreCaja,
-  extra?: Partial<Pick<CashClosure, 'userName' | 'username' | 'cashRegisterLabel' | 'notes'>>
+  extra?: Partial<Pick<CashClosure, 'userName' | 'username' | 'cashRegisterLabel' | 'notes' | 'baseCash'>>
 ): CashClosure {
   const registro = cierreDbARegistro(db, extra);
   saveCashClosure(registro);
@@ -139,26 +139,34 @@ function mapCierreRowWithPerfil(row: any): CierreCaja & { cajero_nombre?: string
 export async function obtenerCierresCaja(params?: {
   signal?: AbortSignal;
 }): Promise<CierreCaja[]> {
+  const local = getCashClosures().map(localToDb);
   const sb = tryGetSupabase();
   if (!sb) {
-    return getCashClosures().map(localToDb);
+    return local;
   }
-  const buildQuery = (cols: string) => {
-    let q = sb
-      .from('cierres_caja')
-      .select(cols)
-      .order('abierta_en', { ascending: false })
-      .limit(100);
-    if (params?.signal) q = q.abortSignal(params.signal);
-    return q;
-  };
-  let { data, error } = await buildQuery(`${CIERRE_COLUMNS}, perfiles!cajero_id(nombre_completo, correo)`);
-  if (error) {
-    const fallback = await buildQuery(CIERRE_COLUMNS);
-    if (fallback.error) throw fallback.error;
-    data = fallback.data;
+  try {
+    const buildQuery = (cols: string) => {
+      let q = sb
+        .from('cierres_caja')
+        .select(cols)
+        .order('abierta_en', { ascending: false })
+        .limit(100);
+      if (params?.signal) q = q.abortSignal(params.signal);
+      return q;
+    };
+    let { data, error } = await buildQuery(`${CIERRE_COLUMNS}, perfiles!cajero_id(nombre_completo, correo)`);
+    if (error) {
+      const fallback = await buildQuery(CIERRE_COLUMNS);
+      if (!fallback.error) {
+        data = fallback.data;
+      }
+    }
+    const remote = (data ?? []).map(mapCierreRowWithPerfil);
+    const seen = new Set(remote.map((r) => r.id));
+    return [...remote, ...local.filter((l) => !seen.has(l.id))];
+  } catch {
+    return local;
   }
-  return (data ?? []).map(mapCierreRowWithPerfil);
 }
 
 export type NuevoCierreInput = {
@@ -182,67 +190,84 @@ export type NuevoCierreInput = {
 };
 
 export async function guardarCierreCaja(datos: NuevoCierreInput): Promise<CierreCaja> {
+  const now = new Date();
+  const closure: CashClosure = {
+    id: `cc-${Date.now()}`,
+    code: datos.codigo,
+    cashRegisterId: datos.caja_id,
+    cashRegisterLabel: datos.caja_label ?? `Caja ${datos.caja_id}`,
+    userId: String(datos.cajero_id ?? '0'),
+    username: datos.cajero_username ?? '',
+    userName: datos.cajero_nombre ?? '',
+    expectedCash: datos.monto_esperado,
+    countedCash: datos.monto_real,
+    difference: datos.monto_diferencia,
+    totalSales: datos.total_ventas ?? 0,
+    totalCash: datos.total_efectivo ?? 0,
+    totalCard: datos.total_tarjeta ?? 0,
+    totalTransfer: datos.total_transferencia ?? 0,
+    cardCount: 0,
+    transferCount: 0,
+    totalCheque: 0,
+    chequeCount: 0,
+    totalCredit: 0,
+    creditCount: 0,
+    openedAt: now.toISOString(),
+    closedAt: datos.estado === 'cerrada' ? now.toISOString() : '',
+    date: now.toISOString().slice(0, 10),
+    baseCash: datos.monto_apertura,
+    status: datos.estado,
+    notes: datos.notes,
+  };
+
+  // Guardar SIEMPRE en almacenamiento local primero para garantizar cero pérdida de datos
+  saveCashClosure(closure);
+
   if (!isSupabaseConfigured()) {
-    const now = new Date();
-    const closure: CashClosure = {
-      id: `cc-${Date.now()}`,
-      code: datos.codigo,
-      cashRegisterId: datos.caja_id,
-      cashRegisterLabel: datos.caja_label ?? `Caja ${datos.caja_id}`,
-      userId: String(datos.cajero_id ?? '0'),
-      username: datos.cajero_username ?? '',
-      userName: datos.cajero_nombre ?? '',
-      expectedCash: datos.monto_esperado,
-      countedCash: datos.monto_real,
-      difference: datos.monto_diferencia,
-      totalSales: datos.total_ventas ?? 0,
-      totalCash: datos.total_efectivo ?? 0,
-      totalCard: datos.total_tarjeta ?? 0,
-      totalTransfer: datos.total_transferencia ?? 0,
-      cardCount: 0,
-      transferCount: 0,
-      totalCheque: 0,
-      chequeCount: 0,
-      totalCredit: 0,
-      creditCount: 0,
-      openedAt: now.toISOString(),
-      closedAt: datos.estado === 'cerrada' ? now.toISOString() : '',
-      date: now.toISOString().slice(0, 10),
-      notes: datos.notes,
-    };
-    saveCashClosure(closure);
     return localToDb(closure);
   }
 
-  const sb = getSupabase();
-  const { data, error } = await sb
-    .from('cierres_caja')
-    .insert({
-      codigo: datos.codigo,
-      caja_id: datos.caja_id,
-      cajero_id: datos.cajero_id ?? null,
-      sucursal_id: datos.sucursal_id ?? null,
-      monto_apertura: datos.monto_apertura,
-      monto_esperado: datos.monto_esperado,
-      monto_real: datos.monto_real,
-      monto_diferencia: datos.monto_diferencia,
-      total_ventas: datos.total_ventas ?? 0,
-      total_efectivo: datos.total_efectivo ?? 0,
-      total_tarjeta: datos.total_tarjeta ?? 0,
-      total_transferencia: datos.total_transferencia ?? 0,
-      estado: datos.estado,
-      cerrada_en: datos.estado === 'cerrada' ? new Date().toISOString() : null,
-    })
-    .select(CIERRE_COLUMNS)
-    .single();
-  if (error) throw error;
-  persistirRegistroCierre(data as CierreCaja, {
-    userName: datos.cajero_nombre,
-    username: datos.cajero_username,
-    cashRegisterLabel: datos.caja_label,
-    notes: datos.notes,
-  });
-  return data as CierreCaja;
+  try {
+    const sb = getSupabase();
+    const cajeroUuid = esUuid(datos.cajero_id) ? datos.cajero_id : null;
+    const sucursalUuid = esUuid(datos.sucursal_id) ? datos.sucursal_id : null;
+
+    const { data, error } = await sb
+      .from('cierres_caja')
+      .insert({
+        codigo: datos.codigo,
+        caja_id: datos.caja_id,
+        cajero_id: cajeroUuid,
+        sucursal_id: sucursalUuid,
+        monto_apertura: datos.monto_apertura,
+        monto_esperado: datos.monto_esperado,
+        monto_real: datos.monto_real,
+        monto_diferencia: datos.monto_diferencia,
+        total_ventas: datos.total_ventas ?? 0,
+        total_efectivo: datos.total_efectivo ?? 0,
+        total_tarjeta: datos.total_tarjeta ?? 0,
+        total_transferencia: datos.total_transferencia ?? 0,
+        estado: datos.estado,
+        cerrada_en: datos.estado === 'cerrada' ? now.toISOString() : null,
+      })
+      .select(CIERRE_COLUMNS)
+      .single();
+
+    if (!error && data) {
+      persistirRegistroCierre(data as CierreCaja, {
+        userName: datos.cajero_nombre,
+        username: datos.cajero_username,
+        cashRegisterLabel: datos.caja_label,
+        notes: datos.notes,
+        baseCash: datos.monto_apertura,
+      });
+      return data as CierreCaja;
+    }
+  } catch (err) {
+    console.warn('Advertencia al insertar cierre en Supabase (manteniendo respaldo local):', err);
+  }
+
+  return localToDb(closure);
 }
 
 export type NuevoInicioCajaInput = {
@@ -406,6 +431,10 @@ export interface ResumenCajaAbierta {
 export async function calcularResumenCajaAbierta(cajaId: string, cajeroId?: string): Promise<ResumenCajaAbierta> {
   const ids = await expandCajaIds(cajaId);
   const abierta = await obtenerCajaAbierta(cajaId, cajeroId);
+  if (abierta?.caja_id) {
+    const extraIds = await expandCajaIds(abierta.caja_id);
+    extraIds.forEach((x) => ids.add(x));
+  }
   const apertura = Number(abierta?.monto_apertura ?? 0);
   const desde = abierta?.abierta_en || new Date().toISOString().slice(0, 10);
 
@@ -417,12 +446,45 @@ export async function calcularResumenCajaAbierta(cajaId: string, cajeroId?: stri
 
   try {
     const searchCajaIds = Array.from(ids);
-    const ventas = await obtenerVentasTurno({
+    let ventas = await obtenerVentasTurno({
       cajaId: searchCajaIds.length > 0 ? searchCajaIds : cajaId,
       cajeroId: abierta?.cajero_id || cajeroId,
       desde,
       limite: 1000,
     });
+
+    // Respaldo de seguridad: si no trajo ventas pero la caja tuvo ventas registradas hoy
+    if (ventas.length === 0) {
+      const fallbackVentas = await obtenerVentasTurno({
+        cajaId: searchCajaIds.length > 0 ? searchCajaIds : cajaId,
+        desde,
+        limite: 1000,
+      });
+      if (fallbackVentas.length > 0) {
+        ventas = fallbackVentas;
+      }
+    }
+
+    // Complementar con ventas locales de espejo que coincidan con la caja
+    try {
+      const localVentas = getLocalVentas();
+      const desdeTime = desde ? new Date(desde).getTime() : 0;
+      const seenIds = new Set(ventas.map((v) => v.id));
+      for (const lv of localVentas) {
+        if (seenIds.has(lv.id)) continue;
+        const matchesBox = ids.has(String(lv.caja_id ?? ''));
+        if (!matchesBox) continue;
+        if (desdeTime > 0 && lv.creado_en) {
+          const lt = new Date(lv.creado_en).getTime();
+          if (!isNaN(lt) && lt < desdeTime - 60_000) continue;
+        }
+        ventas.push(lv);
+        seenIds.add(lv.id);
+      }
+    } catch {
+      // ignore
+    }
+
     for (const v of ventas) {
       totalVentas += Number(v.monto_total) || 0;
       totalEfectivo += Number(v.monto_efectivo) || 0;
@@ -469,18 +531,25 @@ export async function calcularResumenCajaAbierta(cajaId: string, cajeroId?: stri
   }
 
   // Complementar con gastos locales y de POS para que nunca falte un gasto registrado
+  const desdeTime = desde ? new Date(desde).getTime() : 0;
+  const desdeDate = desde ? desde.slice(0, 10) : new Date().toISOString().slice(0, 10);
+
   try {
     const rawPosExp = typeof localStorage !== 'undefined' ? localStorage.getItem('mercato_pos_expenses') : null;
     if (rawPosExp) {
       const posExps = JSON.parse(rawPosExp) as any[];
-      const desdeDate = desde ? desde.slice(0, 10) : new Date().toISOString().slice(0, 10);
       for (const exp of posExps) {
-        if (exp.date && exp.date >= desdeDate) {
-          const key = `gasto-${exp.amount}-${(exp.description || '').trim().toLowerCase()}`;
-          if (!countedMovementKeys.has(key)) {
-            totalRetiros += Number(exp.amount || 0);
-            countedMovementKeys.add(key);
-          }
+        if (exp.cajaId && !ids.has(String(exp.cajaId))) continue;
+        if (desdeTime > 0 && exp.created_at) {
+          const et = new Date(exp.created_at).getTime();
+          if (!isNaN(et) && et < desdeTime - 5000) continue;
+        } else if (exp.date && exp.date < desdeDate) {
+          continue;
+        }
+        const key = `gasto-${exp.amount}-${(exp.description || '').trim().toLowerCase()}`;
+        if (!countedMovementKeys.has(key)) {
+          totalRetiros += Number(exp.amount || 0);
+          countedMovementKeys.add(key);
         }
       }
     }
@@ -488,10 +557,15 @@ export async function calcularResumenCajaAbierta(cajaId: string, cajeroId?: stri
     const rawGastos = typeof localStorage !== 'undefined' ? localStorage.getItem('mercato_gastos_local') : null;
     if (rawGastos) {
       const localGastos = JSON.parse(rawGastos) as any[];
-      const desdeDate = desde ? desde.slice(0, 10) : new Date().toISOString().slice(0, 10);
       for (const g of localGastos) {
+        if (g.caja_id && !ids.has(String(g.caja_id))) continue;
+        if (desdeTime > 0 && (g.created_at || g.creado_en)) {
+          const gt = new Date(g.created_at || g.creado_en).getTime();
+          if (!isNaN(gt) && gt < desdeTime - 5000) continue;
+        } else if (g.date && g.date < desdeDate) {
+          continue;
+        }
         if (
-          g.date >= desdeDate &&
           g.status !== 'rejected' &&
           (g.paymentMethod?.toLowerCase() === 'efectivo' || g.paymentMethod?.toLowerCase() === 'caja_chica')
         ) {
@@ -512,16 +586,15 @@ export async function calcularResumenCajaAbierta(cajaId: string, cajeroId?: stri
     const rawDevs = typeof localStorage !== 'undefined' ? localStorage.getItem('mercato_devoluciones_local') : null;
     if (rawDevs) {
       const localDevs = JSON.parse(rawDevs) as any[];
-      const desdeTime = desde ? new Date(desde).getTime() : 0;
       for (const dev of localDevs) {
+        if (dev.caja_id && !ids.has(String(dev.caja_id))) continue;
         if (dev.estado !== 'rechazada' && (dev.metodo_reembolso === 'efectivo' || dev.metodo_reembolso === 'cash')) {
           const devTime = dev.creado_en ? new Date(dev.creado_en).getTime() : 0;
-          if (desdeTime === 0 || devTime >= desdeTime - 5000) {
-            const key = `salida-${dev.monto_total}-devolución`;
-            if (!countedMovementKeys.has(key)) {
-              totalDevoluciones += Number(dev.monto_total || 0);
-              countedMovementKeys.add(key);
-            }
+          if (desdeTime > 0 && devTime > 0 && devTime < desdeTime - 5000) continue;
+          const key = `salida-${dev.monto_total}-devolución`;
+          if (!countedMovementKeys.has(key)) {
+            totalDevoluciones += Number(dev.monto_total || 0);
+            countedMovementKeys.add(key);
           }
         }
       }
@@ -534,14 +607,19 @@ export async function calcularResumenCajaAbierta(cajaId: string, cajeroId?: stri
   const sbCierre = tryGetSupabase();
   if (sbCierre && isSupabaseConfigured()) {
     try {
-      const desdeDate = desde ? desde.slice(0, 10) : new Date().toISOString().slice(0, 10);
       const { data: remoteGastos } = await sbCierre
         .from('gastos')
-        .select('id, descripcion, monto, metodo_pago, creado_en')
+        .select('id, descripcion, monto, metodo_pago, creado_en, caja_id')
         .eq('estado', 'aprobado')
         .gte('creado_en', `${desdeDate}T00:00:00`);
 
       for (const g of remoteGastos ?? []) {
+        // Solo considerar si el gasto pertenece explícitamente a esta caja y ocurrió dentro del turno
+        if (!g.caja_id || !ids.has(String(g.caja_id))) continue;
+        if (desdeTime > 0 && g.creado_en) {
+          const gt = new Date(g.creado_en).getTime();
+          if (!isNaN(gt) && gt < desdeTime - 5000) continue;
+        }
         const method = String(g.metodo_pago ?? 'efectivo').toLowerCase();
         if (method === 'efectivo' || method === 'caja_chica') {
           const key = `gasto-${g.monto}-${(g.descripcion || '').trim().toLowerCase()}`;
@@ -556,14 +634,19 @@ export async function calcularResumenCajaAbierta(cajaId: string, cajeroId?: stri
     }
 
     try {
-      const desdeDate = desde ? desde.slice(0, 10) : new Date().toISOString().slice(0, 10);
       const { data: remoteDevs } = await sbCierre
         .from('devoluciones')
-        .select('id, monto_total, metodo_reembolso, estado, creado_en')
+        .select('id, monto_total, metodo_reembolso, estado, creado_en, caja_id')
         .neq('estado', 'rechazada')
         .gte('creado_en', `${desdeDate}T00:00:00`);
 
       for (const d of remoteDevs ?? []) {
+        // Solo considerar si la devolución pertenece explícitamente a esta caja y ocurrió dentro del turno
+        if (!d.caja_id || !ids.has(String(d.caja_id))) continue;
+        if (desdeTime > 0 && d.creado_en) {
+          const dt = new Date(d.creado_en).getTime();
+          if (!isNaN(dt) && dt < desdeTime - 5000) continue;
+        }
         const m = String(d.metodo_reembolso ?? '').toLowerCase();
         if (m === 'efectivo' || m === 'cash') {
           const key = `salida-${d.monto_total}-devolución`;
@@ -682,27 +765,65 @@ export async function cerrarTurnoCaja(input: CerrarTurnoInput): Promise<CierreCa
         return localToDb(closed);
       }
     } else {
-      const sb = getSupabase();
-      let { data, error } = await sb
-        .from('cierres_caja')
-        .update(updateFields)
-        .eq('id', abierta.id)
-        .select(CIERRE_COLUMNS)
-        .single();
-      if (error) {
-        const { codigo: _omitCodigo, ...withoutCode } = updateFields;
-        const retry = await sb
+      try {
+        const sb = getSupabase();
+        let { data, error } = await sb
           .from('cierres_caja')
-          .update(withoutCode)
+          .update(updateFields)
           .eq('id', abierta.id)
           .select(CIERRE_COLUMNS)
           .single();
-        data = retry.data;
-        error = retry.error;
+        if (error) {
+          const { codigo: _omitCodigo, ...withoutCode } = updateFields;
+          const retry = await sb
+            .from('cierres_caja')
+            .update(withoutCode)
+            .eq('id', abierta.id)
+            .select(CIERRE_COLUMNS)
+            .single();
+          data = retry.data;
+          error = retry.error;
+        }
+        if (!error && data) {
+          persistirRegistroCierre(data as CierreCaja, extraUi);
+          return data as CierreCaja;
+        }
+      } catch (err) {
+        console.warn('Error al actualizar cierre en Supabase (usando cierre local):', err);
       }
-      if (error) throw error;
-      persistirRegistroCierre(data as CierreCaja, extraUi);
-      return data as CierreCaja;
+      // Si falló Supabase, cerrar en memoria local sin bloquear al usuario
+      const current = getCashClosures();
+      const existing = current.find((c) => c.id === abierta.id) ?? current.find((c) => c.status === 'abierta');
+      const closed: CashClosure = {
+        id: abierta.id,
+        code: closureCode,
+        cashRegisterId: input.caja_id,
+        cashRegisterLabel: input.caja_label || existing?.cashRegisterLabel || `Caja ${input.caja_id}`,
+        userId: String(input.cajero_id ?? existing?.userId ?? '0'),
+        username: input.cajero_username || existing?.username || '',
+        userName: input.cajero_nombre || existing?.userName || 'Cajero',
+        expectedCash: input.monto_esperado,
+        countedCash: input.monto_real,
+        difference: input.monto_diferencia,
+        totalSales: input.total_ventas ?? existing?.totalSales ?? 0,
+        totalCash: input.total_efectivo ?? existing?.totalCash ?? 0,
+        totalCard: input.total_tarjeta ?? existing?.totalCard ?? 0,
+        totalTransfer: input.total_transferencia ?? existing?.totalTransfer ?? 0,
+        cardCount: existing?.cardCount ?? 0,
+        transferCount: existing?.transferCount ?? 0,
+        totalCheque: existing?.totalCheque ?? 0,
+        chequeCount: existing?.chequeCount ?? 0,
+        totalCredit: existing?.totalCredit ?? 0,
+        creditCount: existing?.creditCount ?? 0,
+        status: 'cerrada',
+        openedAt: existing?.openedAt || now,
+        closedAt: now,
+        date: now.slice(0, 10),
+        notes: input.notes,
+        baseCash: input.monto_apertura,
+      };
+      saveCashClosure(closed);
+      return localToDb(closed);
     }
   }
 

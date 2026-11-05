@@ -11,6 +11,8 @@ export interface StockAdjustmentItem {
   previousQty: number;
   newQty: number;
   qty: number; // Variación absoluta
+  unitPrice?: number;
+  totalLoss?: number;
   reason: string;
   date: string;
   time: string;
@@ -45,6 +47,7 @@ export function createBlockStockAdjustment(
     product: ProductItem;
     newQty: number;
     reason: string;
+    unitPrice?: number;
   }[],
   responsibleUser: string = 'Admin General'
 ): StockAdjustmentItem[] {
@@ -60,6 +63,9 @@ export function createBlockStockAdjustment(
 
     const type: 'entrada' | 'salida' | 'perdida' = delta > 0 ? 'entrada' : (adj.reason.toLowerCase().includes('perd') || adj.reason.toLowerCase().includes('venc') ? 'perdida' : 'salida');
     const seq = String(currentHistory.length + newEntries.length + 1).padStart(3, '0');
+    const unitPrice = adj.unitPrice ?? adj.product.costPrice ?? adj.product.salePrice ?? 0;
+    const absQty = Math.abs(delta);
+    const totalLoss = type !== 'entrada' ? Math.round(absQty * unitPrice * 100) / 100 : 0;
 
     const entry: StockAdjustmentItem = {
       id: `adj-${Date.now()}-${index}`,
@@ -71,7 +77,9 @@ export function createBlockStockAdjustment(
       type,
       previousQty: adj.product.currentStock,
       newQty: adj.newQty,
-      qty: Math.abs(delta),
+      qty: absQty,
+      unitPrice,
+      totalLoss,
       reason: adj.reason || 'Ajuste de inventario en bloque',
       date: dateStr,
       time: timeStr,

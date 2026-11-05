@@ -138,14 +138,14 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           </h4>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
             <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800">
-              <span className="text-[10.5px] text-slate-400 font-bold block uppercase mb-0.5">Precio Venta</span>
+              <span className="text-[10.5px] text-slate-400 font-bold block uppercase mb-0.5">Precio de Venta</span>
               <span className="text-sm sm:text-base font-black text-slate-900 dark:text-white tabular-nums">
                 RD$ {product.salePrice.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
               </span>
             </div>
 
             <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800">
-              <span className="text-[10.5px] text-slate-400 font-bold block uppercase mb-0.5">Precio Costo</span>
+              <span className="text-[10.5px] text-slate-400 font-bold block uppercase mb-0.5">Precio de Compra</span>
               <span className="text-sm sm:text-base font-bold text-slate-600 dark:text-slate-300 tabular-nums">
                 RD$ {product.costPrice.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
               </span>

@@ -159,15 +159,9 @@ export default function PosCashOpenModal({
 
     setLoading(true);
     try {
-      const cajeroNombre = isAdmin
-        ? selectedUser?.nombre_completo || user?.name || 'super admin'
-        : user?.name || 'super admin';
-      const cajeroUsername = isAdmin
-        ? selectedUser?.correo || user?.username || ''
-        : user?.username || '';
-      const cajeroId = isAdmin
-        ? selectedUser?.id || user?.id || null
-        : user?.id || null;
+      const cajeroNombre = user?.name || 'Usuario';
+      const cajeroUsername = user?.username || user?.email || '';
+      const cajeroId = user?.id || null;
 
       const result = await iniciarCaja({
         caja_id: selectedCaja.dbId || selectedCajaId,
@@ -181,10 +175,7 @@ export default function PosCashOpenModal({
 
       logAuditEvent({
         user: cajeroNombre,
-        role:
-          isAdmin && selectedUser
-            ? ROL_DB_A_UI[selectedUser.rol] || 'Super Administrador'
-            : user?.role || 'Super Administrador',
+        role: user?.role || 'Cajero',
         action: 'Inicio de caja',
         module: 'Caja',
         details: `Inicio de caja ${selectedCaja.label} asignada a ${cajeroNombre} con fondo de RD$ ${monto.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`,
@@ -201,14 +192,8 @@ export default function PosCashOpenModal({
     }
   };
 
-  const activeUserName =
-    isAdmin && selectedUser
-      ? selectedUser.nombre_completo
-      : user?.name || 'Cajero';
-  const activeUserRole =
-    isAdmin && selectedUser
-      ? ROL_DB_A_UI[selectedUser.rol] || 'Cajero'
-      : user?.role || 'Cajero';
+  const activeUserName = user?.name || 'Usuario';
+  const activeUserRole = user?.role || 'Cajero';
 
   return (
     <div
@@ -267,32 +252,18 @@ export default function PosCashOpenModal({
               <div>
                 <div className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">
                   <User size={14} strokeWidth={2.5} />
-                  <span>Cajero Responsable</span>
+                  <span>Usuario Responsable</span>
                 </div>
                 <div className="p-3.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center gap-3 shadow-2xs">
                   <div className="w-10 h-10 rounded-full bg-emerald-600 text-white font-black text-sm flex items-center justify-center flex-shrink-0">
                     {activeUserName.charAt(0).toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">
-                    {isAdmin && dbUsers.length > 0 ? (
-                      <select
-                        value={selectedCajeroId}
-                        onChange={(e) => setSelectedCajeroId(e.target.value)}
-                        className="w-full text-sm font-extrabold text-slate-900 dark:text-white bg-transparent focus:outline-none cursor-pointer truncate"
-                      >
-                        {dbUsers.map((u) => (
-                          <option key={u.id} value={u.id} className="bg-white dark:bg-slate-900">
-                            {u.nombre_completo} ({ROL_DB_A_UI[u.rol] || u.rol})
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <p className="text-sm font-extrabold text-slate-900 dark:text-white leading-tight truncate">
-                        {activeUserName}
-                      </p>
-                    )}
+                    <p className="text-sm font-extrabold text-slate-900 dark:text-white leading-tight truncate">
+                      {activeUserName}
+                    </p>
                     <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400 truncate">
-                      {activeUserRole}
+                      {activeUserRole} {user?.username ? `• @${user.username}` : ''}
                     </p>
                   </div>
                 </div>

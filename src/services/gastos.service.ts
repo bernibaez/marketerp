@@ -176,62 +176,135 @@ export async function obtenerCategoriasGasto(signal?: AbortSignal): Promise<Cate
   }
 }
 
+export async function sugerirSiguienteCodigoGasto(): Promise<string> {
+  let maxNum = 0;
+  for (const g of getLocalGastos()) {
+    const match = String(g.code || '').match(/GAS-(\d+)/i);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (!isNaN(n) && n > maxNum) maxNum = n;
+    }
+  }
+
+  const sb = tryGetSupabase();
+  if (sb) {
+    try {
+      const { data } = await sb
+        .from('gastos')
+        .select('codigo')
+        .order('creado_en', { ascending: false })
+        .limit(100);
+      for (const row of data ?? []) {
+        const match = String((row as any).codigo || '').match(/GAS-(\d+)/i);
+        if (match) {
+          const n = parseInt(match[1], 10);
+          if (!isNaN(n) && n > maxNum) maxNum = n;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return `GAS-${String(maxNum + 1).padStart(3, '0')}`;
+}
+
 export async function obtenerGastos(signal?: AbortSignal): Promise<GastoUi[]> {
   const localList = getLocalGastos();
+  const catsMap = new Map(getLocalCategorias().map((c) => [c.id, c.name]));
   const sb = tryGetSupabase();
-  if (!sb) return localList;
 
-  try {
-    let query = sb
-      .from('gastos')
-      .select(
+  let combined: GastoUi[] = [...localList];
+
+  if (sb) {
+    try {
+      let query = sb
+        .from('gastos')
+        .select(
+          `
+          *,
+          categorias_gasto ( nombre ),
+          perfiles!responsable_id ( nombre_completo )
         `
-        *,
-        categorias_gasto ( nombre ),
-        perfiles!responsable_id ( nombre_completo )
-      `
-      )
-      .order('creado_en', { ascending: false })
-      .limit(300);
+        )
+        .order('creado_en', { ascending: false })
+        .limit(300);
 
-    if (signal) query = query.abortSignal(signal);
+      if (signal) query = query.abortSignal(signal);
 
-    const { data, error } = await query;
-    if (error || !data) {
-      return localList;
+      const { data, error } = await query;
+      if (!error && data) {
+        const fromDb: GastoUi[] = data.map((row: any) => {
+          const cat = row.categorias_gasto as { nombre?: string } | null;
+          const perfil = row.perfiles as { nombre_completo?: string } | null;
+          const estado = (row.estado as EstadoGasto) ?? 'pendiente';
+          const fecha = row.fecha || String(row.creado_en || new Date().toISOString()).slice(0, 10);
+          const categoryName = cat?.nombre || catsMap.get(String(row.categoria_id)) || 'Gastos Operativos';
+
+          return {
+            id: String(row.id),
+            code: String(row.codigo),
+            category: categoryName,
+            categoryId: row.categoria_id ? String(row.categoria_id) : null,
+            description: String(row.descripcion ?? ''),
+            amount: Number(row.monto ?? 0),
+            paymentMethod: String(row.metodo_pago ?? 'efectivo'),
+            responsible: row.responsable_nombre || perfil?.nombre_completo || 'Administrador',
+            date: fecha,
+            receipt: Boolean(row.tiene_recibo),
+            status: STATUS_UI[estado] ?? 'pending',
+          };
+        });
+
+        // Fusionar elementos locales que aún no estén en base de datos
+        const dbIds = new Set(fromDb.map((g) => g.id));
+        const dbCodes = new Set(fromDb.map((g) => g.code));
+        const pendingLocal = localList.filter((g) => !dbIds.has(g.id) && !dbCodes.has(g.code));
+        combined = [...pendingLocal, ...fromDb];
+      }
+    } catch {
+      // continuar con localList
     }
-
-    const catsMap = new Map(getLocalCategorias().map((c) => [c.id, c.name]));
-
-    const fromDb: GastoUi[] = data.map((row: any) => {
-      const cat = row.categorias_gasto as { nombre?: string } | null;
-      const perfil = row.perfiles as { nombre_completo?: string } | null;
-      const estado = (row.estado as EstadoGasto) ?? 'pendiente';
-      const fecha = row.fecha || String(row.creado_en || new Date().toISOString()).slice(0, 10);
-      const categoryName = cat?.nombre || catsMap.get(String(row.categoria_id)) || 'Sin categoría';
-
-      return {
-        id: String(row.id),
-        code: String(row.codigo),
-        category: categoryName,
-        categoryId: row.categoria_id ? String(row.categoria_id) : null,
-        description: String(row.descripcion ?? ''),
-        amount: Number(row.monto ?? 0),
-        paymentMethod: String(row.metodo_pago ?? 'efectivo'),
-        responsible: row.responsable_nombre || perfil?.nombre_completo || 'Administrador',
-        date: fecha,
-        receipt: Boolean(row.tiene_recibo),
-        status: STATUS_UI[estado] ?? 'pending',
-      };
-    });
-
-    // Fusionar elementos locales que aún no estén en base de datos
-    const dbIds = new Set(fromDb.map((g) => g.id));
-    const pendingLocal = localList.filter((g) => !dbIds.has(g.id));
-    return [...pendingLocal, ...fromDb];
-  } catch {
-    return localList;
   }
+
+  // Complementar automáticamente con movimientos de caja (retiros/gastos) que falten en el listado
+  try {
+    const rawMovs = typeof localStorage !== 'undefined' ? localStorage.getItem('mercato_movimientos_caja_local') : null;
+    if (rawMovs) {
+      const movs = JSON.parse(rawMovs) as any[];
+      const existingKeys = new Set(
+        combined.map((g) => `${g.amount}-${(g.description || '').trim().toLowerCase()}`)
+      );
+
+      for (const m of movs) {
+        if ((m.tipo === 'gasto' || m.tipo === 'retiro') && Number(m.monto || 0) > 0) {
+          const key = `${m.monto}-${(m.concepto || '').trim().toLowerCase()}`;
+          if (!existingKeys.has(key)) {
+            existingKeys.add(key);
+            combined.push({
+              id: m.id || `mov-gas-${Date.now()}`,
+              code: m.codigo || `GAS-MOV-${String(combined.length + 1).padStart(3, '0')}`,
+              category: m.categoria || 'Gastos de Caja / Retiro',
+              categoryId: null,
+              description: m.concepto || 'Retiro / Gasto de Caja',
+              amount: Number(m.monto),
+              paymentMethod: 'efectivo',
+              responsible: m.cajero_nombre || 'Cajero',
+              date: (m.creado_en || new Date().toISOString()).slice(0, 10),
+              receipt: false,
+              status: 'approved',
+            });
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // Ordenar de más reciente a más antiguo
+  combined.sort((a, b) => (a.date < b.date ? 1 : -1));
+  return combined;
 }
 
 export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
@@ -246,12 +319,23 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
   const effectiveResponsable = input.responsable_nombre || authUser?.name || 'Administrador';
 
   const localCats = getLocalCategorias();
-  const cat = localCats.find((c) => c.id === input.categoria_id);
+  let cat = localCats.find((c) => c.id === input.categoria_id);
+  if (!cat && isUUID(input.categoria_id)) {
+    cat = localCats.find((c) => isUUID(c.id));
+  }
   const catName = cat?.name ?? 'Gastos Operativos';
 
+  // Buscar un UUID de categoría válido para Supabase
+  let dbCatId: string | null = null;
+  if (isUUID(input.categoria_id)) {
+    dbCatId = input.categoria_id;
+  } else {
+    const uuidCat = localCats.find((c) => isUUID(c.id));
+    if (uuidCat) dbCatId = uuidCat.id;
+  }
+
   const localGastos = getLocalGastos();
-  const nextSeq = localGastos.length + 1;
-  const codigo = `GAS-${String(nextSeq).padStart(3, '0')}`;
+  let codigo = await sugerirSiguienteCodigoGasto().catch(() => `GAS-${String(localGastos.length + 1).padStart(3, '0')}`);
   const id = crypto.randomUUID();
 
   const newGastoUi: GastoUi = {
@@ -265,7 +349,7 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
     responsible: effectiveResponsable,
     date: effectiveFecha,
     receipt: Boolean(input.tiene_recibo),
-    status: STATUS_UI[input.estado ?? 'pendiente'] ?? 'pending',
+    status: STATUS_UI[input.estado ?? 'aprobado'] ?? 'approved',
   };
 
   // 1. Guardar de inmediato en almacenamiento local para no perder nunca el registro
@@ -299,7 +383,7 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
       const payloadWithMeta: Record<string, unknown> = {
         id,
         codigo,
-        categoria_id: isUUID(input.categoria_id) ? input.categoria_id : null,
+        categoria_id: dbCatId,
         descripcion: input.descripcion.trim(),
         monto: input.monto,
         metodo_pago: effectiveMetodoPago,
@@ -307,22 +391,26 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
         responsable_id: authUser?.id && isUUID(authUser.id) ? authUser.id : null,
         responsable_nombre: effectiveResponsable,
         tiene_recibo: input.tiene_recibo ?? false,
-        estado: input.estado ?? 'pendiente',
+        estado: input.estado ?? 'aprobado',
       };
 
       const { error: err1 } = await sb.from('gastos').insert(payloadWithMeta);
       if (err1) {
-        // Si las columnas metodo_pago o fecha no están en la tabla de Supabase, reintentar con esquema estándar
-        if (err1.message?.includes('column') || err1.code === '42703') {
+        // Si hay conflicto de código único, reintentar con sufijo temporal único
+        if (err1.code === '23505' || err1.message?.includes('duplicate key')) {
+          codigo = `GAS-${Date.now().toString().slice(-6)}`;
+          payloadWithMeta.codigo = codigo;
+          await sb.from('gastos').insert(payloadWithMeta);
+        } else if (err1.message?.includes('column') || err1.code === '42703') {
           const minimalPayload = {
             id,
             codigo,
-            categoria_id: isUUID(input.categoria_id) ? input.categoria_id : null,
+            categoria_id: dbCatId,
             descripcion: input.descripcion.trim(),
             monto: input.monto,
             responsable_id: authUser?.id && isUUID(authUser.id) ? authUser.id : null,
             tiene_recibo: input.tiene_recibo ?? false,
-            estado: input.estado ?? 'pendiente',
+            estado: input.estado ?? 'aprobado',
           };
           await sb.from('gastos').insert(minimalPayload);
         }
@@ -330,6 +418,11 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
     } catch {
       // Si la base de datos rechaza por RLS (42501) u offline, el gasto ya se guardó localmente con éxito
     }
+  }
+
+  // Notificar a la aplicación que los gastos se actualizaron
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('mercato_gastos_updated', { detail: newGastoUi }));
   }
 
   return newGastoUi;

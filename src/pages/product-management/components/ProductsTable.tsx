@@ -181,9 +181,15 @@ export default function ProductsTable({
                   <SortIcon field="category" sortField={sortField} sortDir={sortDir} />
                 </div>
               </th>
+              <th className="px-4 py-3 text-right cursor-pointer select-none" onClick={() => onSort('costPrice')}>
+                <div className="flex items-center gap-1.5 justify-end">
+                  <span>P. Compra</span>
+                  <SortIcon field="costPrice" sortField={sortField} sortDir={sortDir} />
+                </div>
+              </th>
               <th className="px-4 py-3 text-right cursor-pointer select-none" onClick={() => onSort('salePrice')}>
                 <div className="flex items-center gap-1.5 justify-end">
-                  <span>Precio</span>
+                  <span>P. Venta</span>
                   <SortIcon field="salePrice" sortField={sortField} sortDir={sortDir} />
                 </div>
               </th>
@@ -282,7 +288,17 @@ export default function ProductsTable({
                     </span>
                   </td>
 
-                  {/* Precio */}
+                  {/* Precio de Compra */}
+                  <td className="px-4 py-2.5 text-right">
+                    <div className="font-semibold text-xs tabular-nums text-muted-foreground">
+                      RD$ {product.costPrice.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                      {(product.saleType === 'weight' || product.saleType === 'both') && (
+                        <span className="text-[10px] text-muted-foreground font-normal ml-0.5">/{product.weightUnit || 'lb'}</span>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* Precio de Venta */}
                   <td className="px-4 py-2.5 text-right">
                     <div className="font-semibold text-xs tabular-nums text-foreground">
                       RD$ {product.salePrice.toLocaleString('es-DO', { minimumFractionDigits: 2 })}

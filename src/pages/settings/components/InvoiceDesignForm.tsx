@@ -2,20 +2,11 @@ import React from 'react';
 import type {
   InvoiceSettings,
   PaperWidth,
-  FontSizeOption,
-  FontFamily,
-  SeparatorStyle,
-  LogoSize,
+  TemplateStyle,
+  InvoiceHeightMode,
 } from '@/types/invoice';
-
-const ACCENT_COLORS = [
-  { name: 'Negro térmico puro', hex: '#000000' },
-  { name: 'Verde esmeralda', hex: '#0f766e' },
-  { name: 'Azul clásico', hex: '#2563eb' },
-  { name: 'Violeta moderno', hex: '#7c3aed' },
-  { name: 'Negro slate', hex: '#0f172a' },
-  { name: 'Rojo carmesí', hex: '#be123c' },
-];
+import { normalizeInvoiceStyle } from '@/types/invoice';
+import { Check } from 'lucide-react';
 
 interface InvoiceDesignFormProps {
   settings: InvoiceSettings;
@@ -26,6 +17,83 @@ interface InvoiceDesignFormProps {
   onRemoveLogo: () => void;
 }
 
+const INVOICE_STYLES: Array<{
+  id: TemplateStyle;
+  name: string;
+  tag: string;
+  tagColor: string;
+  description: string;
+  thumbnail80: string;
+  thumbnail50: string;
+}> = [
+  {
+    id: 'clasico',
+    name: 'Clásico Tradicional',
+    tag: 'Estándar Oficial',
+    tagColor:
+      'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200 dark:border-blue-800',
+    description:
+      'Diseño tradicional y equilibrado con logo circular, NCF destacado, tabla de 4 columnas y marco de total en negrita.',
+    thumbnail80: '/invoice-styles/clasico_80mm.png',
+    thumbnail50: '/invoice-styles/clasico_50mm.png',
+  },
+  {
+    id: 'compacto',
+    name: 'Compacto (Ultra Ahorro)',
+    tag: 'Ahorro Máximo de Papel',
+    tagColor:
+      'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+    description:
+      'Optimizado para ahorrar hasta un 60% de papel térmico. Ítems en 1 sola línea horizontal, datos en 2 columnas y altura mínima.',
+    thumbnail80: '/invoice-styles/compacto_80mm.png',
+    thumbnail50: '/invoice-styles/compacto_50mm.png',
+  },
+  {
+    id: 'elegante',
+    name: 'Elegante Boutique',
+    tag: 'Gourmet / Boutique',
+    tagColor:
+      'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+    description:
+      'Tipografía serif refinada con ornamentos de rombo ✦, tracking espaciado, cursivas y dobles líneas artesanales.',
+    thumbnail80: '/invoice-styles/elegante_80mm.png',
+    thumbnail50: '/invoice-styles/elegante_50mm.png',
+  },
+  {
+    id: 'minimalista',
+    name: 'Minimalista Nórdico',
+    tag: 'Moderno Limpio',
+    tagColor:
+      'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700',
+    description:
+      'Alineación moderna a la izquierda, tipografía sans-serif limpia, encabezado prominente y líneas delgadas sin saturación.',
+    thumbnail80: '/invoice-styles/minimalista_80mm.png',
+    thumbnail50: '/invoice-styles/minimalista_50mm.png',
+  },
+  {
+    id: 'moderno',
+    name: 'Moderno Alto Contraste',
+    tag: 'Banners Invertidos',
+    tagColor:
+      'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border-purple-200 dark:border-purple-800',
+    description:
+      'Bloques y cintillos en negro sólido con texto blanco en encabezado, tabla y total para máxima visibilidad en caja.',
+    thumbnail80: '/invoice-styles/moderno_80mm.png',
+    thumbnail50: '/invoice-styles/moderno_50mm.png',
+  },
+  {
+    id: 'supermercado',
+    name: 'Supermercado Retail',
+    tag: 'Caja Registradora',
+    tagColor:
+      'bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300 border-orange-200 dark:border-orange-800',
+    description:
+      'Formato terminal de retail con marco doble superior, numeración secuencial 001, líneas de asteriscos y gran total centrado.',
+    thumbnail80: '/invoice-styles/supermercado_80mm.png',
+    thumbnail50: '/invoice-styles/supermercado_50mm.png',
+  },
+];
+
 export function InvoiceDesignForm({
   settings,
   logoUrl,
@@ -34,7 +102,11 @@ export function InvoiceDesignForm({
   onLogoUpload,
   onRemoveLogo,
 }: InvoiceDesignFormProps) {
-  const currentPaperWidth = settings.paperWidth || (settings.customWidthMm === 50 ? 50 : settings.printFormat === 'ticket_58mm' ? 58 : 80);
+  const currentPaperWidth =
+    settings.paperWidth ||
+    (settings.customWidthMm === 50 ? 50 : settings.printFormat === 'ticket_58mm' ? 58 : 80);
+
+  const activeStyle = normalizeInvoiceStyle(settings.templateStyle);
 
   const handleWidthChange = (w: PaperWidth) => {
     onFieldChange('paperWidth', w);
@@ -47,8 +119,241 @@ export function InvoiceDesignForm({
   };
 
   return (
-    <div className="lg:col-span-6 space-y-6">
-      {/* 1. Ancho de Papel Térmico (80 mm / 58 mm / 50 mm) */}
+    <div className="lg:col-span-6 space-y-7">
+      {/* ========================================================
+          1. SELECTOR DE ESTILOS DE DISEÑO DE FACTURAS (6 ESTILOS)
+          ======================================================== */}
+      <div className="space-y-3 pb-6 border-b border-slate-200/80 dark:border-slate-800">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+              Estilo de diseño de factura
+            </h2>
+            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+              6 Estilos disponibles
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Elige el formato visual que mejor se adapte a tu tipo de negocio. Todos son 100% compatibles con impresoras de 80mm, 58mm y 50mm.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          {INVOICE_STYLES.map((st) => {
+            const isSelected = activeStyle === st.id;
+            const thumbUrl = currentPaperWidth === 50 ? st.thumbnail50 : st.thumbnail80;
+
+            return (
+              <div
+                key={st.id}
+                onClick={() => onFieldChange('templateStyle', st.id)}
+                className={`group relative rounded-xl border p-3.5 transition-all cursor-pointer flex flex-col justify-between ${
+                  isSelected
+                    ? 'border-emerald-600 dark:border-emerald-500 ring-2 ring-emerald-500/30 bg-emerald-50/40 dark:bg-emerald-950/20 shadow-xs'
+                    : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900'
+                }`}
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${st.tagColor}`}
+                    >
+                      {st.tag}
+                    </span>
+
+                    <div
+                      className={`w-5 h-5 rounded-full flex items-center justify-center transition-all ${
+                        isSelected
+                          ? 'bg-emerald-600 text-white shadow-2xs'
+                          : 'border border-slate-300 dark:border-slate-700 group-hover:border-slate-400'
+                      }`}
+                    >
+                      {isSelected && <Check size={12} strokeWidth={3} />}
+                    </div>
+                  </div>
+
+                  <h3 className="text-xs font-black text-slate-900 dark:text-white leading-tight">
+                    {st.name}
+                  </h3>
+
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">
+                    {st.description}
+                  </p>
+                </div>
+
+                {/* Previsualización en miniatura de la factura */}
+                <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-10 h-10 rounded border border-slate-200 dark:border-slate-700 overflow-hidden bg-white flex items-center justify-center shadow-2xs">
+                      <img
+                        src={thumbUrl}
+                        alt={st.name}
+                        className="w-full h-full object-cover object-top"
+                        onError={(e) => {
+                          // Si no carga la imagen, ocultar
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      80mm & 50mm
+                    </span>
+                  </div>
+
+                  <span
+                    className={`text-[11px] font-bold ${
+                      isSelected
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200'
+                    }`}
+                  >
+                    {isSelected ? 'Activo' : 'Seleccionar'}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ========================================================
+          2. CONTROL DE ALTURA Y OPTIMIZACIÓN DE PAPEL TÉRMICO
+          ======================================================== */}
+      <div className="space-y-3 pb-6 border-b border-slate-200/80 dark:border-slate-800">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+              Tamaño de la factura y control de altura
+            </h2>
+            <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+              Ahorro de Rollo Térmico
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Resuelve que las facturas salgan largas cuando hay solo 1 o pocos productos. Automatiza la longitud según la compra.
+          </p>
+        </div>
+
+        {/* 3 Modos de Altura */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+          <button
+            type="button"
+            onClick={() => onFieldChange('heightMode', 'auto')}
+            className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+              (settings.heightMode || 'auto') === 'auto'
+                ? 'border-emerald-600 dark:border-emerald-500 ring-2 ring-emerald-500/30 bg-emerald-50/50 dark:bg-emerald-950/20'
+                : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-900 dark:text-white">
+                Automático
+              </span>
+              <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                Recomendado
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-snug">
+              Corta y compacta para 1-3 productos; se alarga naturalmente si hay muchos ítems.
+            </p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onFieldChange('heightMode', 'compact')}
+            className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+              settings.heightMode === 'compact'
+                ? 'border-emerald-600 dark:border-emerald-500 ring-2 ring-emerald-500/30 bg-emerald-50/50 dark:bg-emerald-950/20'
+                : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-900 dark:text-white">
+                Ultra Compacto
+              </span>
+              <span className="text-[10px] font-mono text-slate-500">
+                Ahorro Max
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-snug">
+              Interlineado mínimo y sin saltos vacíos en todas las ventas.
+            </p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onFieldChange('heightMode', 'standard')}
+            className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+              settings.heightMode === 'standard'
+                ? 'border-emerald-600 dark:border-emerald-500 ring-2 ring-emerald-500/30 bg-emerald-50/50 dark:bg-emerald-950/20'
+                : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-900 dark:text-white">
+                Estándar
+              </span>
+              <span className="text-[10px] font-mono text-slate-500">
+                Completo
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-snug">
+              Espaciado tradicional holgado independientemente de la cantidad de productos.
+            </p>
+          </button>
+        </div>
+
+        {/* Automatización de ventas pequeñas */}
+        <label className="flex items-start justify-between p-3 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 cursor-pointer text-xs">
+          <div className="pr-3">
+            <span className="font-bold text-slate-900 dark:text-white block">
+              Ahorro automático de papel en ventas pequeñas (1 a 3 productos)
+            </span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5 leading-relaxed">
+              Cuando el cliente adquiere pocos productos, compacta el encabezado, suprime líneas secundarias y reduce el pie para no emitir una factura kilometrica.
+            </span>
+          </div>
+          <input
+            type="checkbox"
+            checked={Boolean(settings.paperSaverSmallSales ?? true)}
+            onChange={(e) => onFieldChange('paperSaverSmallSales', e.target.checked)}
+            className="mt-0.5 w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400 cursor-pointer shrink-0"
+          />
+        </label>
+
+        {/* Avance de papel al corte (Feed lines) */}
+        <div className="flex items-center justify-between p-3 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900">
+          <div>
+            <span className="text-xs font-semibold text-slate-900 dark:text-white block">
+              Avance de papel para corte (Feed lines)
+            </span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+              Líneas vacías expulsadas al cortar el ticket térmico.
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {[0, 1, 2, 3].map((lines) => (
+              <button
+                key={`feed-${lines}`}
+                type="button"
+                onClick={() => onFieldChange('feedLines', lines)}
+                className={`w-8 h-7 text-xs font-bold rounded-lg border transition cursor-pointer flex items-center justify-center ${
+                  (settings.feedLines ?? 1) === lines
+                    ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white shadow-xs'
+                    : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                {lines}
+              </button>
+            ))}
+            <span className="text-[11px] text-slate-400 pl-1 font-mono">líneas</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ========================================================
+          3. ANCHO DE PAPEL TÉRMICO (80 mm / 58 mm / 50 mm)
+          ======================================================== */}
       <div className="space-y-3 pb-6 border-b border-slate-200/80 dark:border-slate-800">
         <div>
           <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
@@ -59,7 +364,6 @@ export function InvoiceDesignForm({
           </p>
         </div>
 
-        {/* Selector de Ancho */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
           <button
             type="button"
@@ -201,59 +505,12 @@ export function InvoiceDesignForm({
               </button>
             </div>
           </div>
-
-          {/* Ajuste manual continuo de Zoom */}
-          <div className="pt-2">
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs text-slate-700 dark:text-slate-300 font-medium">
-                Zoom manual térmico predeterminado
-              </label>
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  min={50}
-                  max={180}
-                  step={1}
-                  value={Math.round((settings.zoomScale ?? 1.0) * 100)}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    if (!isNaN(v) && v >= 40 && v <= 200) {
-                      onFieldChange('zoomScale', Number((v / 100).toFixed(2)));
-                    }
-                  }}
-                  className="w-12 text-center text-xs font-mono font-bold px-1 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
-                />
-                <span className="text-[11px] font-mono text-slate-500">%</span>
-                {(settings.zoomScale ?? 1.0) !== 1.0 && (
-                  <button
-                    type="button"
-                    onClick={() => onFieldChange('zoomScale', 1.0)}
-                    className="text-[10px] font-bold text-primary hover:underline ml-1 cursor-pointer"
-                  >
-                    100%
-                  </button>
-                )}
-              </div>
-            </div>
-            <input
-              type="range"
-              min={60}
-              max={160}
-              step={1}
-              value={Math.round((settings.zoomScale ?? 1.0) * 100)}
-              onChange={(e) => onFieldChange('zoomScale', Number((Number(e.target.value) / 100).toFixed(2)))}
-              className="w-full accent-primary cursor-pointer h-2 bg-slate-200 dark:bg-slate-700 rounded-lg"
-            />
-            <div className="flex justify-between text-[10px] text-slate-400 font-mono mt-0.5">
-              <span>60% (Compacto)</span>
-              <span>100% (Estándar)</span>
-              <span>160% (Grande)</span>
-            </div>
-          </div>
         </div>
       </div>
 
-      {/* 2. Visibilidad de Elementos (Mostrar / Ocultar) */}
+      {/* ========================================================
+          4. VISIBILIDAD DE ELEMENTOS (Mostrar / Ocultar)
+          ======================================================== */}
       <div className="space-y-3 pb-6 border-b border-slate-200/80 dark:border-slate-800">
         <div>
           <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
@@ -322,7 +579,9 @@ export function InvoiceDesignForm({
         </div>
       </div>
 
-      {/* 3. Logotipo de la Empresa */}
+      {/* ========================================================
+          5. LOGOTIPO DEL NEGOCIO
+          ======================================================== */}
       <div className="space-y-3 pb-6 border-b border-slate-200/80 dark:border-slate-800">
         <div>
           <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
@@ -382,7 +641,9 @@ export function InvoiceDesignForm({
         </div>
       </div>
 
-      {/* 4. Datos del Negocio & Fiscalidad */}
+      {/* ========================================================
+          6. DATOS DEL NEGOCIO Y FISCALES
+          ======================================================== */}
       <div className="space-y-3 pb-6 border-b border-slate-200/80 dark:border-slate-800">
         <div>
           <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
@@ -550,7 +811,9 @@ export function InvoiceDesignForm({
         </div>
       </div>
 
-      {/* 5. Textos al Pie, Políticas y Copia Cliente */}
+      {/* ========================================================
+          7. TEXTOS AL PIE, POLÍTICAS Y COPIA CLIENTE
+          ======================================================== */}
       <div className="space-y-3 pb-4">
         <div>
           <h2 className="text-sm font-semibold text-slate-900 dark:text-white">

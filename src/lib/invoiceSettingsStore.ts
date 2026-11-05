@@ -7,6 +7,7 @@ import type {
   FontSizeOption,
   PrintFormat,
   TemplateStyle,
+  InvoiceHeightMode,
   FontFamily,
   FontSize,
   FontWeight,
@@ -14,6 +15,7 @@ import type {
   SeparatorStyle,
   LogoSize,
 } from '@/types/invoice';
+import { normalizeInvoiceStyle } from '@/types/invoice';
 
 export type {
   InvoiceSettings,
@@ -21,6 +23,7 @@ export type {
   FontSizeOption,
   PrintFormat,
   TemplateStyle,
+  InvoiceHeightMode,
   FontFamily,
   FontSize,
   FontWeight,
@@ -28,6 +31,7 @@ export type {
   SeparatorStyle,
   LogoSize,
 };
+export { normalizeInvoiceStyle };
 
 const INVOICE_SETTINGS_KEY = 'mercato_invoice_settings';
 
@@ -67,10 +71,14 @@ export const DEFAULT_INVOICE_SETTINGS: InvoiceSettings = {
 
   // Formato & Dimensiones manuales
   printFormat: 'ticket_80mm',
-  templateStyle: 'modern',
+  templateStyle: 'clasico',
   customWidthMm: 80,
-  marginMm: 3,
-  feedLines: 3,
+  marginMm: 2,
+  feedLines: 1, // 1 línea predeterminada para evitar desperdicio de papel térmico
+
+  // Control de Altura y Optimización Automática de Papel
+  heightMode: 'auto',
+  paperSaverSmallSales: true,
 
   // Tipografía Avanzada
   fontFamily: 'courier',
@@ -148,6 +156,10 @@ export function getInvoiceSettings(): InvoiceSettings {
         showBarcode: parsed.showBarcode ?? parsed.showBarcodeQr ?? true,
         showFooter: parsed.showFooter ?? parsed.showFooterMessage ?? true,
         defaultCopies: parsed.defaultCopies ?? 1,
+        templateStyle: parsed.templateStyle ?? 'clasico',
+        heightMode: parsed.heightMode ?? 'auto',
+        paperSaverSmallSales: parsed.paperSaverSmallSales ?? true,
+        feedLines: parsed.feedLines !== undefined ? parsed.feedLines : 1,
       };
       return { ...DEFAULT_INVOICE_SETTINGS, ...migrated };
     }
@@ -178,96 +190,73 @@ export function saveInvoiceSettings(settings: Partial<InvoiceSettings>): Invoice
       updated.paperWidth = updated.paperWidth === 50 ? 50 : 58;
     } else if (settings.printFormat === 'ticket_80mm') {
       updated.paperWidth = 80;
+      updated.customWidthMm = 80;
     }
   }
 
-  if (settings.showCustomer !== undefined) {
-    updated.showCustomerInfo = settings.showCustomer;
-  } else if (settings.showCustomerInfo !== undefined) {
-    updated.showCustomer = settings.showCustomerInfo;
-  }
-
-  if (settings.showBarcode !== undefined) {
-    updated.showBarcodeQr = settings.showBarcode;
-  } else if (settings.showBarcodeQr !== undefined) {
-    updated.showBarcode = settings.showBarcodeQr;
-  }
-
-  if (settings.showFooter !== undefined) {
-    updated.showFooterMessage = settings.showFooter;
-  } else if (settings.showFooterMessage !== undefined) {
-    updated.showFooter = settings.showFooterMessage;
-  }
-
-  try {
-    localStorage.setItem(INVOICE_SETTINGS_KEY, JSON.stringify(updated));
-  } catch {
-    /* ignore write errors */
-  }
-  LISTENERS.forEach((cb) => cb());
+  localStorage.setItem(INVOICE_SETTINGS_KEY, JSON.stringify(updated));
+  LISTENERS.forEach((l) => l());
   return updated;
 }
 
-export function subscribeInvoiceSettings(callback: () => void): () => void {
-  LISTENERS.add(callback);
+export function subscribeInvoiceSettings(listener: () => void): () => void {
+  LISTENERS.add(listener);
   return () => {
-    LISTENERS.delete(callback);
+    LISTENERS.delete(listener);
   };
 }
 
-/**
- * Sincroniza la configuración de factura desde Supabase si está disponible.
- * Actualiza el store local y notifica a todos los componentes escuchando (POS, Ventas, etc.).
- */
 export async function syncInvoiceSettingsFromSupabase(): Promise<InvoiceSettings> {
+  const local = getInvoiceSettings();
   if (!isSupabaseConfigured()) {
-    return getInvoiceSettings();
+    return local;
   }
-  try {
-    const cfg = await obtenerConfiguracionEmpresa();
-    void syncCompanyLogoFromDb().catch(() => {});
-    if (!cfg) return getInvoiceSettings();
 
-    const fromDb: Partial<InvoiceSettings> = {
-      companyName: cfg.nombre_comercial?.trim() || undefined,
-      companyRnc: cfg.rnc?.trim() || undefined,
-      companyPhone: cfg.telefono?.trim() || undefined,
-      companyEmail: cfg.correo?.trim() || undefined,
-      companyAddress: cfg.direccion?.trim() || undefined,
-      ...(cfg.configuracion_factura && typeof cfg.configuracion_factura === 'object'
-        ? cfg.configuracion_factura
-        : {}),
+  try {
+    const config = await obtenerConfiguracionEmpresa();
+    if (!config) return local;
+
+    await syncCompanyLogoFromDb();
+
+    const merged: InvoiceSettings = {
+      ...local,
+      companyName: config.nombre_comercial || local.companyName,
+      companyRnc: config.rnc || local.companyRnc,
+      companyPhone: config.telefono || local.companyPhone,
+      companyEmail: config.correo || local.companyEmail,
+      companyAddress: config.direccion || local.companyAddress,
+      currencySymbol: config.moneda || local.currencySymbol,
+      itbisPercent: config.itbis_porcentaje ?? local.itbisPercent,
     };
 
-    const clean: Partial<InvoiceSettings> = {};
-    for (const [k, v] of Object.entries(fromDb)) {
-      if (v !== undefined) {
-        (clean as Record<string, unknown>)[k] = v;
-      }
-    }
-    return saveInvoiceSettings(clean);
+    saveInvoiceSettings(merged);
+    return merged;
   } catch (err) {
-    console.warn('[invoiceSettingsStore] Error al sincronizar desde Supabase:', err);
-    return getInvoiceSettings();
+    console.warn('Error al sincronizar configuración de factura desde Supabase:', err);
+    return local;
   }
 }
 
-/**
- * Guarda la configuración de factura en localStorage y la persiste en Supabase.
- */
-export async function saveInvoiceSettingsToSupabase(
-  settings: Partial<InvoiceSettings>
-): Promise<InvoiceSettings> {
-  const updated = saveInvoiceSettings(settings);
-  if (isSupabaseConfigured()) {
-    await guardarConfiguracionEmpresa({
-      nombre_comercial: updated.companyName,
-      rnc: updated.companyRnc,
-      telefono: updated.companyPhone,
-      correo: updated.companyEmail,
-      direccion: updated.companyAddress,
-      configuracion_factura: updated,
-    });
+export async function saveInvoiceSettingsToSupabase(settings: InvoiceSettings): Promise<InvoiceSettings> {
+  const savedLocal = saveInvoiceSettings(settings);
+  if (!isSupabaseConfigured()) {
+    return savedLocal;
   }
-  return updated;
+
+  try {
+    await guardarConfiguracionEmpresa({
+      nombre_comercial: settings.companyName || 'Mi Empresa',
+      rnc: settings.companyRnc,
+      telefono: settings.companyPhone,
+      correo: settings.companyEmail,
+      direccion: settings.companyAddress,
+      moneda: settings.currencySymbol,
+      itbis_porcentaje: settings.itbisPercent,
+      configuracion_factura: settings,
+    });
+  } catch (err) {
+    console.error('Error al guardar configuración de empresa en Supabase:', err);
+  }
+
+  return savedLocal;
 }

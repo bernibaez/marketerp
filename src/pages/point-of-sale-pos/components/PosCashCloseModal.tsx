@@ -125,15 +125,9 @@ export default function PosCashCloseModal({
 
     setLoading(true);
     try {
-      const cajeroNombre = summary.cajero_nombre || (isAdmin
-        ? (selectedUser?.nombre_completo || user?.name || 'Cajero Activo')
-        : (user?.name || 'Cajero Activo'));
-      const cajeroUsername = summary.cajero_username || (isAdmin
-        ? (selectedUser?.correo || user?.username || '')
-        : (user?.username || ''));
-      const cajeroId = summary.cajero_id || (isAdmin
-        ? (selectedUser?.id || user?.id || null)
-        : (user?.id || null));
+      const cajeroNombre = user?.name || summary.cajero_nombre || 'Usuario';
+      const cajeroUsername = user?.username || user?.email || summary.cajero_username || '';
+      const cajeroId = user?.id || summary.cajero_id || null;
 
       const result = await cerrarTurnoCaja({
         cierre_id: summary.cierre_id,
@@ -217,25 +211,55 @@ export default function PosCashCloseModal({
         </div>
 
         <form onSubmit={handleCloseRegister} className="space-y-4">
+          {/* Usuario Responsable del Cierre */}
+          <div className="p-3 bg-secondary/40 rounded-2xl border border-border flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-black text-sm flex items-center justify-center flex-shrink-0 border border-amber-500/30">
+                {(user?.name || 'U').charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-black text-foreground truncate">{user?.name || 'Usuario'}</p>
+                <p className="text-[11px] text-muted-foreground truncate">
+                  {user?.role || 'Cajero'} {user?.username ? `• @${user.username}` : ''}
+                </p>
+              </div>
+            </div>
+            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">
+              Cierre de Turno
+            </span>
+          </div>
+
           {/* Select Register */}
           <div>
             <label className="text-xs font-bold text-foreground mb-1 block">
               Caja a Cerrar
             </label>
-            <div className="relative">
-              <Monitor size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <select
-                value={selectedCajaId}
-                onChange={(e) => setSelectedCajaId(e.target.value)}
-                className="input-field pl-10 h-11 text-xs font-bold w-full"
-              >
-                {availableRegisters.map((reg) => (
-                  <option key={reg.id} value={reg.id}>
-                    {reg.label} — (Caja #{reg.id})
-                  </option>
-                ))}
-              </select>
-            </div>
+            {isAdmin ? (
+              <div className="relative">
+                <Monitor size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <select
+                  value={selectedCajaId}
+                  onChange={(e) => setSelectedCajaId(e.target.value)}
+                  className="input-field pl-10 h-11 text-xs font-bold w-full cursor-pointer"
+                >
+                  {availableRegisters.map((reg) => (
+                    <option key={reg.id} value={reg.id}>
+                      {reg.label} — (Caja #{reg.id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="p-3 bg-secondary/50 rounded-xl border border-border flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold">
+                  <Monitor size={16} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-black text-foreground truncate">{selectedCaja.label}</p>
+                  <p className="text-[10px] text-muted-foreground">Tu registradora activa asignada</p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Real Breakdown Financial Cards */}
