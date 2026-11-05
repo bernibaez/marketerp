@@ -376,8 +376,16 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
     }
   }
 
-  // 2. Intentar guardar en Supabase si está disponible
-  const sb = tryGetSupabase();
+  // 2. Intentar guardar en Supabase si está disponible (excluyendo entornos de pruebas automatizadas para no contaminar la base de datos de producción)
+  const isTestEnv =
+    typeof process !== 'undefined' &&
+    Boolean(
+      process.env.VITEST ||
+        process.env.NODE_ENV === 'test' ||
+        process.env.JEST_WORKER_ID
+    );
+
+  const sb = !isTestEnv ? tryGetSupabase() : null;
   if (sb) {
     try {
       const payloadWithMeta: Record<string, unknown> = {
@@ -388,6 +396,7 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
         monto: input.monto,
         metodo_pago: effectiveMetodoPago,
         fecha: effectiveFecha,
+        caja_id: input.caja_id || null,
         responsable_id: authUser?.id && isUUID(authUser.id) ? authUser.id : null,
         responsable_nombre: effectiveResponsable,
         tiene_recibo: input.tiene_recibo ?? false,
@@ -408,6 +417,7 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
             categoria_id: dbCatId,
             descripcion: input.descripcion.trim(),
             monto: input.monto,
+            caja_id: input.caja_id || null,
             responsable_id: authUser?.id && isUUID(authUser.id) ? authUser.id : null,
             tiene_recibo: input.tiene_recibo ?? false,
             estado: input.estado ?? 'aprobado',

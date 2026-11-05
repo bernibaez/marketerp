@@ -539,7 +539,7 @@ export async function calcularResumenCajaAbierta(cajaId: string, cajeroId?: stri
     if (rawPosExp) {
       const posExps = JSON.parse(rawPosExp) as any[];
       for (const exp of posExps) {
-        if (exp.cajaId && !ids.has(String(exp.cajaId))) continue;
+        if (!exp.cajaId || !ids.has(String(exp.cajaId))) continue;
         if (desdeTime > 0 && exp.created_at) {
           const et = new Date(exp.created_at).getTime();
           if (!isNaN(et) && et < desdeTime - 5000) continue;
@@ -558,7 +558,7 @@ export async function calcularResumenCajaAbierta(cajaId: string, cajeroId?: stri
     if (rawGastos) {
       const localGastos = JSON.parse(rawGastos) as any[];
       for (const g of localGastos) {
-        if (g.caja_id && !ids.has(String(g.caja_id))) continue;
+        if (!g.caja_id || !ids.has(String(g.caja_id))) continue;
         if (desdeTime > 0 && (g.created_at || g.creado_en)) {
           const gt = new Date(g.created_at || g.creado_en).getTime();
           if (!isNaN(gt) && gt < desdeTime - 5000) continue;
@@ -569,9 +569,9 @@ export async function calcularResumenCajaAbierta(cajaId: string, cajeroId?: stri
           g.status !== 'rejected' &&
           (g.paymentMethod?.toLowerCase() === 'efectivo' || g.paymentMethod?.toLowerCase() === 'caja_chica')
         ) {
-          const key = `gasto-${g.amount}-${(g.description || '').trim().toLowerCase()}`;
+          const key = `gasto-${g.monto ?? g.amount}-${(g.descripcion || g.description || '').trim().toLowerCase()}`;
           if (!countedMovementKeys.has(key)) {
-            totalRetiros += Number(g.amount || 0);
+            totalRetiros += Number((g.monto ?? g.amount) || 0);
             countedMovementKeys.add(key);
           }
         }
