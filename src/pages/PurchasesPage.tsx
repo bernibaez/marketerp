@@ -31,8 +31,9 @@ function mapEstadoUi(estado: string): Purchase['status'] {
 }
 
 function nextPurchaseInvoice() {
-  const seq = String(Date.now()).slice(-3);
-  return `FAC-COMP-${seq}`;
+  const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `FAC-COMP-${dateStr}-${rand}`;
 }
 
 export default function PurchasesPage() {
@@ -239,11 +240,16 @@ export default function PurchasesPage() {
       return;
     }
 
+    const selectedProv = proveedores.find((p) => p.id === supplierId);
+    const provName =
+      selectedProv?.nombre || (typeof supplierId === 'string' && supplierId.trim() ? supplierId.trim() : 'Proveedor General');
+
     setSaving(true);
     try {
       const created = await crearCompra({
         codigo: invoiceNumber,
         proveedor_id: supplierId,
+        proveedor_nombre: provName,
         metodo_pago: paymentMethod,
         estado: 'recibida',
         lineas: purchaseItems.map((item) => ({
@@ -261,7 +267,7 @@ export default function PurchasesPage() {
         {
           id: created.id,
           code: created.codigo,
-          supplier: created.proveedor,
+          supplier: created.proveedor || provName,
           date: created.fecha || purchaseDate,
           items: created.items,
           subtotal: created.subtotal,
@@ -272,9 +278,11 @@ export default function PurchasesPage() {
         },
         ...prev,
       ]);
-      toast.success('Compra guardada en Supabase. Stock y precios actualizados.');
+      toast.success(`Compra ${created.codigo} guardada exitosamente. Stock actualizado.`);
       setShowAddForm(false);
       clearItems();
+      setSupplierId('');
+      setInvoiceNumber(nextPurchaseInvoice());
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Error al guardar la compra');
     } finally {

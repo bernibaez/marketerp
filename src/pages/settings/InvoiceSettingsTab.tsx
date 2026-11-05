@@ -193,6 +193,7 @@ export default function InvoiceSettingsTab({ onBack, showBackButton = false }: I
           previewTab={previewTab}
           onTabChange={setPreviewTab}
           onWidthChange={(w) => handleFieldChange('paperWidth', w)}
+          onZoomChange={(z) => handleFieldChange('zoomScale', z)}
         />
       </div>
     </div>

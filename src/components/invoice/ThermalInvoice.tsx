@@ -139,8 +139,28 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
   const customerName = data.cliente || data.customerName;
   const ncfValue = data.ncf || settings.ncfSequence;
 
-  // Tipografía según estilo
+  // Tipografía seleccionada: respeta settings.fontFamily o utiliza la del estilo visual
   const fontFamilyStyle = useMemo(() => {
+    const family = settings.fontFamily;
+    if (family === 'courier') {
+      return "'Courier New', Courier, 'DejaVu Sans Mono', monospace";
+    }
+    if (family === 'sans') {
+      return "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+    }
+    if (family === 'mono') {
+      return "'Roboto Mono', 'SF Mono', Consolas, 'DejaVu Sans Mono', monospace";
+    }
+    if (family === 'condensed') {
+      return "'Arial Narrow', 'Helvetica Condensed', 'Roboto Condensed', 'Franklin Gothic Medium', sans-serif-condensed, sans-serif";
+    }
+    if (family === 'consolas') {
+      return "'Consolas', 'Fira Code', 'Menlo', 'Monaco', monospace";
+    }
+    if (family === 'serif') {
+      return "'Georgia', 'Times New Roman', 'DejaVu Serif', serif";
+    }
+
     switch (styleVariant) {
       case 'elegante':
         return "'DejaVu Serif', Georgia, 'Times New Roman', serif";
@@ -153,7 +173,7 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
       default:
         return "'DejaVu Sans Mono', 'Courier New', Courier, monospace";
     }
-  }, [styleVariant]);
+  }, [settings.fontFamily, styleVariant]);
 
   // Espaciado vertical adaptable: si hay pocos productos o modo compacto, se reducen márgenes
   const sectionGapClass = shouldSavePaper ? 'my-0.5' : 'my-1.5';

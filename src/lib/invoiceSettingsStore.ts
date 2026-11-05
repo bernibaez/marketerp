@@ -160,6 +160,8 @@ export function getInvoiceSettings(): InvoiceSettings {
         heightMode: parsed.heightMode ?? 'auto',
         paperSaverSmallSales: parsed.paperSaverSmallSales ?? true,
         feedLines: parsed.feedLines !== undefined ? parsed.feedLines : 1,
+        fontFamily: parsed.fontFamily ?? 'courier',
+        zoomScale: typeof parsed.zoomScale === 'number' && !isNaN(parsed.zoomScale) ? parsed.zoomScale : 1.0,
       };
       return { ...DEFAULT_INVOICE_SETTINGS, ...migrated };
     }
@@ -218,15 +220,19 @@ export async function syncInvoiceSettingsFromSupabase(): Promise<InvoiceSettings
 
     await syncCompanyLogoFromDb();
 
+    const remoteFactura =
+      (config.configuracion_factura as Partial<InvoiceSettings> | null) ?? {};
+
     const merged: InvoiceSettings = {
       ...local,
-      companyName: config.nombre_comercial || local.companyName,
-      companyRnc: config.rnc || local.companyRnc,
-      companyPhone: config.telefono || local.companyPhone,
-      companyEmail: config.correo || local.companyEmail,
-      companyAddress: config.direccion || local.companyAddress,
-      currencySymbol: config.moneda || local.currencySymbol,
-      itbisPercent: config.itbis_porcentaje ?? local.itbisPercent,
+      ...remoteFactura,
+      companyName: config.nombre_comercial || remoteFactura.companyName || local.companyName,
+      companyRnc: config.rnc || remoteFactura.companyRnc || local.companyRnc,
+      companyPhone: config.telefono || remoteFactura.companyPhone || local.companyPhone,
+      companyEmail: config.correo || remoteFactura.companyEmail || local.companyEmail,
+      companyAddress: config.direccion || remoteFactura.companyAddress || local.companyAddress,
+      currencySymbol: config.moneda || remoteFactura.currencySymbol || local.currencySymbol,
+      itbisPercent: config.itbis_porcentaje ?? remoteFactura.itbisPercent ?? local.itbisPercent,
     };
 
     saveInvoiceSettings(merged);

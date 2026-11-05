@@ -104,6 +104,7 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({
             settings={settings}
             width={activeWidth}
             logoUrl={logoUrl}
+            zoomScale={settings.zoomScale}
           />
 
           {/* Efecto de borde dentado de guillotina / corte de papel al final */}

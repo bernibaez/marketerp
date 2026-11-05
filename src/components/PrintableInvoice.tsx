@@ -346,7 +346,7 @@ export default function PrintableInvoice({
           width={effectiveWidth}
           logoUrl={logoUrl}
           fontSizeOption={fontSizeOverride}
-          zoomScale={zoomScale}
+          zoomScale={zoomScale ?? settings.zoomScale}
         />
       </div>
     );
@@ -364,7 +364,7 @@ export default function PrintableInvoice({
       )} ${className}`}
       style={{
         fontFamily: getFontFamily(settings.fontFamily || 'courier'),
-        fontSize: `${baseFontPt}px`,
+        fontSize: `${baseFontPt * (zoomScale ?? settings.zoomScale ?? 1.0)}px`,
         fontWeight: settings.fontWeight === 'bold' ? 700 : settings.fontWeight === 'medium' ? 600 : 400,
         textTransform: settings.uppercaseOnly ? 'uppercase' : 'none',
       }}
