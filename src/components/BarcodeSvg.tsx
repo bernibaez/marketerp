@@ -98,6 +98,21 @@ export default function BarcodeSvg({
           }
         },
       });
+
+      // Asegurar viewBox para escalado vectorial nítido sin recortes en impresión y pantallas
+      if (svgRef.current) {
+        const rawWidth = svgRef.current.getAttribute('width');
+        const rawHeight = svgRef.current.getAttribute('height');
+        if (rawWidth && rawHeight) {
+          const wNum = parseFloat(rawWidth);
+          const hNum = parseFloat(rawHeight);
+          if (!isNaN(wNum) && !isNaN(hNum) && wNum > 0 && hNum > 0) {
+            svgRef.current.setAttribute('viewBox', `0 0 ${wNum} ${hNum}`);
+            svgRef.current.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+          }
+        }
+      }
+
       setRenderError(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error al renderizar código de barras';

@@ -79,14 +79,18 @@ export default function ProductLabel({
   // Alerta de desbordamiento en etiquetas pequeñas según el ancho nativo donde se dibuja el código
   const isOverflowing = isBarcodeOverflowing(format, rawCode, naturalWidthMm);
 
-  // Dimensiones dinámicas del código de barras proporcionales al alto y ancho nativo
-  const barcodeHeight = Math.max(
-    28,
-    Math.min(naturalHeightMm * 0.9, naturalHeightMm < 30 ? 30 : naturalHeightMm < 40 ? 40 : 50)
-  );
+  // Dimensiones dinámicas del código de barras calibradas para no exceder los límites físicos de la etiqueta
+  const barcodeHeight =
+    naturalHeightMm <= 26
+      ? 20
+      : naturalHeightMm <= 32
+        ? 24
+        : naturalHeightMm <= 42
+          ? 32
+          : 42;
 
   const barcodeModuleWidth =
-    naturalWidthMm < 45 ? 1.4 : naturalWidthMm < 60 ? 1.7 : naturalWidthMm < 75 ? 2.0 : 2.2;
+    naturalWidthMm < 45 ? 1.2 : naturalWidthMm < 60 ? 1.35 : naturalWidthMm < 75 ? 1.6 : 1.9;
 
   // 1 mm ≈ 3.7795 px a 96 DPI estándar de pantalla
   const pxPerMm = 3.78 * scale;
@@ -126,7 +130,13 @@ export default function ProductLabel({
           className="font-bold uppercase tracking-wider text-slate-600 truncate leading-none mb-0.5"
           style={{
             color: '#444444',
-            fontSize: isPrintMode ? '6.5pt' : undefined,
+            fontSize: isPrintMode
+              ? naturalHeightMm <= 26
+                ? '5.5pt'
+                : naturalHeightMm <= 32
+                  ? '6pt'
+                  : '7pt'
+              : undefined,
           }}
         >
           {businessName}
@@ -140,8 +150,14 @@ export default function ProductLabel({
           title={product.name}
           style={{
             color: '#000000',
-            fontSize: isPrintMode ? (naturalHeightMm < 30 ? '7.5pt' : '9pt') : undefined,
-            lineHeight: isPrintMode ? '1.15' : undefined,
+            fontSize: isPrintMode
+              ? naturalHeightMm <= 26
+                ? '6.5pt'
+                : naturalHeightMm <= 32
+                  ? '7.5pt'
+                  : '8.5pt'
+              : undefined,
+            lineHeight: isPrintMode ? '1.1' : undefined,
           }}
         >
           {product.name}
@@ -155,7 +171,13 @@ export default function ProductLabel({
             className="text-[9px] sm:text-[10px] font-bold mr-0.5 mt-0.5 tracking-tight align-top"
             style={{
               color: '#111111',
-              fontSize: isPrintMode ? (naturalHeightMm < 30 ? '7pt' : '8pt') : undefined,
+              fontSize: isPrintMode
+                ? naturalHeightMm <= 26
+                  ? '6.5pt'
+                  : naturalHeightMm <= 32
+                    ? '7pt'
+                    : '8pt'
+                : undefined,
             }}
           >
             {currencySymbol}
@@ -165,10 +187,14 @@ export default function ProductLabel({
             style={{
               color: '#000000',
               fontSize: isPrintMode
-                ? naturalHeightMm < 30
-                  ? '13pt'
-                  : '18pt'
-                : naturalHeightMm < 30
+                ? naturalHeightMm <= 26
+                  ? '11pt'
+                  : naturalHeightMm <= 32
+                    ? '13pt'
+                    : naturalHeightMm <= 42
+                      ? '15pt'
+                      : '18pt'
+                : naturalHeightMm <= 32
                   ? '16px'
                   : '22px',
             }}
@@ -186,7 +212,18 @@ export default function ProductLabel({
           width={barcodeModuleWidth}
           height={barcodeHeight}
           displayValue={showBarcodeText}
-          fontSize={isPrintMode ? (naturalHeightMm < 30 ? 7 : 8) : (naturalHeightMm < 30 ? 8 : 10)}
+          fontSize={
+            isPrintMode
+              ? naturalHeightMm <= 26
+                ? 6
+                : naturalHeightMm <= 32
+                  ? 7
+                  : 8
+              : naturalHeightMm <= 32
+                ? 8
+                : 10
+          }
+          textMargin={1}
           margin={0}
           lineColor="#000000"
           background="transparent"
@@ -198,7 +235,11 @@ export default function ProductLabel({
         <div
           className="flex items-center justify-between text-slate-500 font-mono px-0.5 leading-none mt-0.5 border-t border-slate-100 pt-0.5"
           style={{
-            fontSize: isPrintMode ? '6pt' : undefined,
+            fontSize: isPrintMode
+              ? naturalHeightMm <= 26
+                ? '5pt'
+                : '5.5pt'
+              : undefined,
           }}
         >
           <span className="truncate">SKU: {product.sku || '—'}</span>
@@ -241,7 +282,7 @@ export default function ProductLabel({
             boxSizing: 'border-box',
             backgroundColor: '#ffffff',
             color: '#000000',
-            padding: naturalHeightMm < 30 ? '0.8mm' : '1.2mm',
+            padding: naturalHeightMm <= 26 ? '0.5mm' : naturalHeightMm <= 32 ? '0.8mm' : '1.2mm',
             WebkitPrintColorAdjust: 'exact',
             printColorAdjust: 'exact',
             fontFamily: 'Inter, Arial, Helvetica, sans-serif',

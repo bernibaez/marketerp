@@ -214,20 +214,20 @@ export function usePrintLabels() {
             margin: 0 !important;
             padding: 0 !important;
             width: ${widthMm}mm !important;
-            height: ${heightMm}mm !important;
-            min-width: ${widthMm}mm !important;
-            min-height: ${heightMm}mm !important;
-            max-width: ${widthMm}mm !important;
-            max-height: ${heightMm}mm !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
             background: #ffffff !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
-            overflow: hidden !important;
+            overflow: visible !important;
           }
           .label-print-single-container {
             width: ${widthMm}mm !important;
             margin: 0 auto !important;
             padding: 0 !important;
+            height: auto !important;
+            overflow: visible !important;
           }
           .label-print-single-item {
             width: ${widthMm}mm !important;

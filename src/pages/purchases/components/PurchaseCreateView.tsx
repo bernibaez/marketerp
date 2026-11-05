@@ -183,7 +183,7 @@ export function PurchaseCreateView({
   const filteredProveedores = useMemo(() => {
     if (!supplierSearch.trim()) return allProveedores;
     const q = supplierSearch.toLowerCase().trim();
-    return proveedores.filter(
+    return allProveedores.filter(
       (p) =>
         p.nombre.toLowerCase().includes(q) ||
         (p.codigo && p.codigo.toLowerCase().includes(q)) ||
@@ -275,11 +275,17 @@ export function PurchaseCreateView({
                     type="text"
                     value={supplierSearch}
                     onChange={(e) => {
-                      setSupplierSearch(e.target.value);
+                      const val = e.target.value;
+                      setSupplierSearch(val);
                       setSupplierDropdownOpen(true);
                       setSupplierHighlightIndex(0);
-                      if (!e.target.value.trim()) {
+                      if (!val.trim()) {
                         setSupplierId('');
+                      } else {
+                        const match = allProveedores.find(
+                          (p) => p.nombre.toLowerCase() === val.trim().toLowerCase()
+                        );
+                        setSupplierId(match ? match.id : val.trim());
                       }
                     }}
                     onFocus={() => setSupplierDropdownOpen(true)}

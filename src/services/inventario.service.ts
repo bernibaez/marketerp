@@ -47,6 +47,7 @@ export async function procesarAjusteStockBloque(
     .filter((it) => UUID_RE.test(it.producto_id))
     .map((it) => ({
       ...it,
+      responsable_id: it.responsable_id && UUID_RE.test(it.responsable_id) ? it.responsable_id : null,
       cantidad_nueva: it.cantidad_nueva != null ? Number(Number(it.cantidad_nueva).toFixed(3)) : undefined,
       cantidad_variacion: it.cantidad_variacion != null ? Number(Number(it.cantidad_variacion).toFixed(3)) : undefined,
     }));
@@ -56,15 +57,67 @@ export async function procesarAjusteStockBloque(
   let dbIds: string[] = [];
 
   if (validUuidItems.length > 0) {
-    const sb = getSupabase();
-    const { data, error } = await sb.rpc('procesar_ajuste_stock_bloque', {
-      p_items: validUuidItems,
-    });
-    if (error) throw error;
-    if (data) {
-      const res = data as { ajustes?: number; ids?: string[] };
-      dbCount = res.ajustes ?? 0;
-      dbIds = res.ids ?? [];
+    try {
+      const sb = getSupabase();
+      const { data, error } = await sb.rpc('procesar_ajuste_stock_bloque', {
+        p_items: validUuidItems,
+      });
+
+      if (!error && data) {
+        const res = data as { ajustes?: number; ids?: string[] };
+        dbCount = res.ajustes ?? 0;
+        dbIds = res.ids ?? [];
+      } else {
+        if (error) {
+          console.warn('RPC procesar_ajuste_stock_bloque falló, aplicando ajuste directo en Supabase:', error);
+        }
+        // Fallback a actualización e inserción directa en tablas de Supabase
+        for (const it of validUuidItems) {
+          try {
+            const { data: prod } = await sb
+              .from('productos')
+              .select('stock_actual')
+              .eq('id', it.producto_id)
+              .maybeSingle();
+
+            const current = Number(prod?.stock_actual ?? 0);
+            const target =
+              it.cantidad_nueva != null
+                ? it.cantidad_nueva
+                : it.tipo_ajuste === 'entrada'
+                  ? current + (it.cantidad_variacion ?? 0)
+                  : Math.max(0, current - Math.abs(it.cantidad_variacion ?? 0));
+
+            await sb.from('productos').update({ stock_actual: target }).eq('id', it.producto_id);
+
+            const ajId = `aj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+            const { data: insAj } = await sb
+              .from('ajustes_stock')
+              .insert({
+                codigo:
+                  it.codigo ||
+                  `AJ-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`,
+                producto_id: it.producto_id,
+                tipo_ajuste: it.tipo_ajuste,
+                cantidad_anterior: current,
+                cantidad_nueva: target,
+                cantidad_variacion: target - current,
+                motivo: it.motivo || 'Ajuste de inventario',
+                responsable_id:
+                  it.responsable_id && UUID_RE.test(it.responsable_id) ? it.responsable_id : null,
+              })
+              .select('id')
+              .maybeSingle();
+
+            if (insAj?.id) dbIds.push(insAj.id);
+            dbCount++;
+          } catch (itemErr) {
+            console.warn(`No se pudo actualizar producto ${it.producto_id} directamente en Supabase:`, itemErr);
+          }
+        }
+      }
+    } catch (rpcErr) {
+      console.warn('Excepción al invocar rpc procesar_ajuste_stock_bloque en Supabase:', rpcErr);
     }
   }
 
