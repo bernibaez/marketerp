@@ -56,6 +56,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/dashboard" element={<Navigate to="/" replace />} />
       <Route path="/" element={<Guard><DashboardPage /></Guard>} />
       <Route path="/point-of-sale-pos" element={<Guard><POSPage /></Guard>} />
       <Route path="/sales" element={<Guard><SalesPage /></Guard>} />

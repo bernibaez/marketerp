@@ -14,6 +14,11 @@ export type HeldSale = {
   customer: unknown | null;
   globalDiscount: number;
   savedAt: string;
+  cashierId?: string;
+  cashierName?: string;
+  cajaId?: string;
+  cajaLabel?: string;
+  total?: number;
 };
 
 export type PosReturnStatus = 'pending' | 'approved' | 'rejected';

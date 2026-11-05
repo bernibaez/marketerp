@@ -266,6 +266,20 @@ export default function StockAdjustmentsPage() {
 
     setSavingExits(true);
     try {
+      // Determinar código correlativo unificado para el lote de ajuste (ej: AJU-001, AJU-002...)
+      const stored = getStoredAdjustments();
+      const existingCodes = [...adjustments.map((a) => a.code), ...stored.map((s) => s.code)];
+      let maxNum = 0;
+      for (const c of existingCodes) {
+        const match = String(c || '').match(/AJU-(\d+)/i);
+        if (match) {
+          const n = parseInt(match[1], 10);
+          if (!isNaN(n) && n > maxNum) maxNum = n;
+        }
+      }
+      const nextSeq = String(Math.max(maxNum + 1, adjustments.length + 1)).padStart(3, '0');
+      const batchCode = `AJU-${nextSeq}`;
+
       const itemsPayload = preparedExits.map((item) => {
         const finalMotivo =
           item.reason.includes('Otro') && item.customReason.trim()
@@ -283,13 +297,14 @@ export default function StockAdjustmentsPage() {
           motivo: finalMotivo,
           responsable_id: user?.id ?? null,
           precio_unitario: item.unitPrice,
+          codigo: batchCode,
         };
       });
 
       // 1. Aplicar lote de ajustes al inventario
       await procesarAjusteStockBloque(itemsPayload);
 
-      // 2. Reflejar automáticamente la pérdida de cada producto en el módulo de Gastos y Kardex
+      // 2. Reflejar la pérdida acumulada en un ÚNICO gasto agrupado con el código del ajuste
       let totalPerdidaMonto = 0;
       try {
         const cats = await obtenerCategoriasGasto().catch(() => []);
@@ -305,25 +320,7 @@ export default function StockAdjustmentsPage() {
           const itemLoss = Math.round(Number(item.qtyToExit) * Number(item.unitPrice || 0) * 100) / 100;
           totalPerdidaMonto += itemLoss;
 
-          const finalMotivo =
-            item.reason.includes('Otro') && item.customReason.trim()
-              ? item.customReason.trim()
-              : item.reason;
-
-          if (itemLoss > 0) {
-            await crearGasto({
-              categoria_id: catPerdida?.id || 'cat-008',
-              descripcion: `Pérdida por ajuste de stock: -${item.qtyToExit} ${item.product.unit || 'uds'} de ${item.product.name} (SKU: ${item.product.sku}) - Motivo: ${finalMotivo}`,
-              monto: itemLoss,
-              metodo_pago: 'otro',
-              fecha: new Date().toISOString().slice(0, 10),
-              responsable_nombre: user?.name || 'Administrador',
-              tiene_recibo: false,
-              estado: 'aprobado',
-            }).catch(() => {});
-          }
-
-          // Registrar trazabilidad central en el Kardex
+          // Registrar trazabilidad central en el Kardex para cada producto
           registrarMovimientoInventario({
             producto_id: item.product.id,
             producto_nombre: item.product.name,
@@ -331,13 +328,28 @@ export default function StockAdjustmentsPage() {
             cantidad_salida: item.qtyToExit,
             stock_anterior: item.product.currentStock,
             stock_resultante: Math.max(0, item.product.currentStock - item.qtyToExit),
-            documento_referencia: 'AJU-STOCK',
+            documento_referencia: batchCode,
             usuario: user?.name || 'Administrador',
-            motivo: `Ajuste (${item.reason}) - Pérdida: RD$ ${itemLoss.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`,
+            motivo: `Ajuste (${batchCode}) - ${item.reason} - Pérdida: RD$ ${itemLoss.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`,
           });
         }
+
+        const totalPerdidaRedondeada = Math.round(totalPerdidaMonto * 100) / 100;
+        if (totalPerdidaRedondeada > 0) {
+          // Se crea un solo registro en Gastos con el monto total acumulado del ajuste
+          await crearGasto({
+            categoria_id: catPerdida?.id || 'cat-008',
+            descripcion: `Ajuste de stock #${batchCode}`,
+            monto: totalPerdidaRedondeada,
+            metodo_pago: 'otro',
+            fecha: new Date().toISOString().slice(0, 10),
+            responsable_nombre: user?.name || 'Administrador',
+            tiene_recibo: false,
+            estado: 'aprobado',
+          }).catch(() => {});
+        }
       } catch (errGasto) {
-        console.warn('Error al registrar pérdida de ajuste:', errGasto);
+        console.warn('Error al registrar pérdida de ajuste en Gastos:', errGasto);
       }
 
       toast.success(

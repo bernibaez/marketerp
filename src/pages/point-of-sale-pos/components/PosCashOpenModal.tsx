@@ -65,14 +65,23 @@ export default function PosCashOpenModal({
     ? registers
     : registers.filter((c) => !c.isAdminBox);
 
+  const userOpenBox = availableRegisters.find(
+    (c) => c.open && c.cashierId && user?.id && c.cashierId === user.id
+  );
+  const firstFreeBox = availableRegisters.find(
+    (c) => !c.open || (c.cashierId && user?.id && c.cashierId === user.id)
+  );
   const resolvedMatch =
     findCashRegister(availableRegisters, initialCajaId) ||
     findCashRegister(registers, initialCajaId);
+  const initialIsOccupiedByOther = Boolean(
+    resolvedMatch?.open && resolvedMatch?.cashierId && user?.id && resolvedMatch.cashierId !== user.id
+  );
   const resolvedInitial =
-    resolvedMatch?.id ||
+    (!initialIsOccupiedByOther && resolvedMatch?.id) ||
+    userOpenBox?.id ||
+    firstFreeBox?.id ||
     availableRegisters[0]?.id ||
-    registers.find((c) => !c.isAdminBox)?.id ||
-    registers[0]?.id ||
     '2';
 
   const [selectedCajaId, setSelectedCajaId] = useState(resolvedInitial);
@@ -291,16 +300,26 @@ export default function PosCashOpenModal({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {availableRegisters.map((caja) => {
+                  const isOccupiedByOther = Boolean(
+                    caja.open && caja.cashierId && user?.id && caja.cashierId !== user.id
+                  );
+                  const isMyRegister = Boolean(
+                    caja.open && caja.cashierId && user?.id && caja.cashierId === user.id
+                  );
                   const isSelected = selectedCajaId === caja.id;
+
                   return (
                     <button
                       key={caja.id}
                       type="button"
-                      onClick={() => setSelectedCajaId(caja.id)}
-                      className={`p-3 rounded-2xl border text-left flex items-center gap-3 transition-all cursor-pointer ${
-                        isSelected
-                          ? 'border-2 border-emerald-500 bg-emerald-50/20 dark:bg-emerald-950/20 text-slate-900 dark:text-white shadow-xs'
-                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-700 text-slate-600 dark:text-slate-300'
+                      disabled={isOccupiedByOther}
+                      onClick={() => !isOccupiedByOther && setSelectedCajaId(caja.id)}
+                      className={`p-3 rounded-2xl border text-left flex items-center gap-3 transition-all ${
+                        isOccupiedByOther
+                          ? 'opacity-60 bg-slate-100/70 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 cursor-not-allowed text-slate-400'
+                          : isSelected
+                          ? 'border-2 border-emerald-500 bg-emerald-50/20 dark:bg-emerald-950/20 text-slate-900 dark:text-white shadow-xs cursor-pointer'
+                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-700 text-slate-600 dark:text-slate-300 cursor-pointer'
                       }`}
                     >
                       <div
@@ -315,10 +334,18 @@ export default function PosCashOpenModal({
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-black truncate">{caja.label}</p>
                         <p className="text-[10px] text-slate-400 truncate">
-                          {caja.cashier || activeUserName} • {caja.role || activeUserRole}
+                          {isOccupiedByOther
+                            ? `En uso por: ${caja.cashier || 'Otro cajero'}`
+                            : isMyRegister
+                            ? 'Tu caja abierta'
+                            : `Disponible para ${activeUserName}`}
                         </p>
                       </div>
-                      {isSelected ? (
+                      {isOccupiedByOther ? (
+                        <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-400">
+                          EN USO
+                        </span>
+                      ) : isSelected ? (
                         <CheckCircle2
                           size={18}
                           className="text-emerald-600 dark:text-emerald-400 flex-shrink-0 fill-emerald-600 text-white"
@@ -470,7 +497,7 @@ export default function PosCashOpenModal({
               className="flex items-center gap-2 px-6 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-all shadow-2xs cursor-pointer active:scale-95"
             >
               <ArrowLeft size={15} strokeWidth={2.5} />
-              <span>Salir del POS</span>
+              <span>{isMandatory ? 'Salir al Menú Principal' : 'Cancelar'}</span>
             </button>
 
             <button

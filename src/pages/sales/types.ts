@@ -6,7 +6,7 @@ export interface CartItem {
   precio_unitario: number;
 }
 
-export type SalesTab = 'sales' | 'quotes' | 'returns';
+export type SalesTab = 'sales' | 'quotes' | 'returns' | 'held';
 
 export const saleStatusMap: Record<string, { label: string; cls: string }> = {
   completada: { label: 'Completada', cls: 'badge-success' },

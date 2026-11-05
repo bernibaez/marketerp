@@ -156,13 +156,18 @@ export default function POSTerminal() {
       }
     }
 
-    // 3. Si es cajero regular y la caja seleccionada es de admin, forzar una caja de cajero
+    // 3. Si es cajero regular:
+    // Evitar asignar una caja que ya esté abierta por otro usuario
     if (!isAdminUser) {
       const current = findCashRegister(registers, activeCashId);
-      if (!current || current.isAdminBox) {
-        const cashierBox = registers.find((c) => !c.isAdminBox) || registers[0];
-        if (cashierBox) {
-          setActiveCashId(cashierBox.id);
+      const isOccupiedByOther = Boolean(current?.open && current?.cashierId && user?.id && current.cashierId !== user.id);
+      if (!current || current.isAdminBox || isOccupiedByOther) {
+        // Buscar la primera caja disponible (cerrada) o que ya pertenezca al usuario actual
+        const availableBox = registers.find(
+          (c) => !c.isAdminBox && (!c.open || (c.cashierId && c.cashierId === user?.id))
+        ) || registers.find((c) => !c.isAdminBox) || registers[0];
+        if (availableBox && availableBox.id !== activeCashId) {
+          setActiveCashId(availableBox.id);
           return;
         }
       }
@@ -201,6 +206,9 @@ export default function POSTerminal() {
     cart,
     selectedCustomer,
     globalDiscount,
+    total,
+    user,
+    activeCashRegister: activeCash ? { id: activeCash.id, label: activeCash.label } : null,
     setCart,
     setSelectedCustomer,
     setGlobalDiscount,
@@ -580,7 +588,7 @@ export default function POSTerminal() {
           <PosCashOpenModal
             isMandatory={true}
             initialCajaId={String(activeCash.dbId || activeCashId)}
-            onExit={() => navigate('/dashboard')}
+            onExit={() => navigate('/')}
             onClose={() => {}}
             onSuccess={(cierre) => {
               setShiftClosedLocally(false);

@@ -105,6 +105,43 @@ export function usePurchaseItems() {
     });
   };
 
+  const handleSubstituteLine = (
+    id: string,
+    newProduct: ProductItem,
+    keepPriceAndQty: boolean = true
+  ) => {
+    setPurchaseItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        const newCost =
+          keepPriceAndQty && item.price > 0
+            ? item.price
+            : newProduct.costPrice || item.price;
+        const newSale =
+          keepPriceAndQty && item.salePrice > 0
+            ? item.salePrice
+            : newProduct.salePrice || item.salePrice;
+        const newWholesale =
+          keepPriceAndQty && item.wholesalePrice > 0
+            ? item.wholesalePrice
+            : newProduct.wholesalePrice || item.wholesalePrice;
+        const newTax = newProduct.tax !== undefined ? newProduct.tax : item.taxPercent;
+
+        return {
+          ...item,
+          productId: newProduct.id,
+          name: newProduct.name,
+          sku: newProduct.sku,
+          price: newCost,
+          salePrice: newSale,
+          wholesalePrice: newWholesale,
+          taxPercent: newTax,
+        };
+      })
+    );
+    toast.success(`Producto sustituido por "${newProduct.name}"`);
+  };
+
   const clearItems = () => setPurchaseItems([]);
 
   return {
@@ -120,5 +157,6 @@ export function usePurchaseItems() {
     handleRemoveLine,
     addProductDirectlyToPurchase,
     clearItems,
+    handleSubstituteLine,
   };
 }

@@ -1,10 +1,10 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import AppLayout from '@/components/AppLayout';
-import { Search, Loader2, X, Plus, Trash2, Check, ChevronDown, Building2, Phone, Mail, MapPin } from 'lucide-react';
+import { Search, Loader2, X, Plus, Trash2, Check, ChevronDown, Building2, Phone, Mail, MapPin, ArrowLeftRight } from 'lucide-react';
 import ModalShell from '@/components/ui/ModalShell';
 import { crearProveedor } from '@/services/proveedores.service';
 import { toast } from '@/lib/toast';
-import type { ProductItem } from '@/lib/productStore';
+import { getStoredProducts, type ProductItem } from '@/lib/productStore';
 import type { Proveedor } from '@/services/proveedores.service';
 
 export interface PurchaseLineItem {
@@ -20,6 +20,7 @@ export interface PurchaseLineItem {
 }
 
 interface PurchaseCreateViewProps {
+  isEditing?: boolean;
   supplierId: string;
   setSupplierId: (v: string) => void;
   proveedores: Proveedor[];
@@ -50,6 +51,7 @@ interface PurchaseCreateViewProps {
   onUpdateLineSalePrice: (id: string, salePrice: number) => void;
   onUpdateLineWholesalePrice: (id: string, wholesalePrice: number) => void;
   onRemoveLine: (id: string) => void;
+  onSubstituteLine?: (lineId: string, newProduct: ProductItem, keepPriceAndQty: boolean) => void;
   onSavePurchase: () => Promise<void>;
   saving: boolean;
   subtotal: number;
@@ -59,6 +61,7 @@ interface PurchaseCreateViewProps {
 }
 
 export function PurchaseCreateView({
+  isEditing = false,
   supplierId,
   setSupplierId,
   proveedores,
@@ -89,6 +92,7 @@ export function PurchaseCreateView({
   onUpdateLineSalePrice,
   onUpdateLineWholesalePrice,
   onRemoveLine,
+  onSubstituteLine,
   onSavePurchase,
   saving,
   subtotal,
@@ -108,6 +112,28 @@ export function PurchaseCreateView({
   const [newSupplierEmail, setNewSupplierEmail] = useState('');
   const [newSupplierAddress, setNewSupplierAddress] = useState('');
   const [localNewSuppliers, setLocalNewSuppliers] = useState<Proveedor[]>([]);
+
+  // Estado para sustitución de producto en factura
+  const [substitutingLine, setSubstitutingLine] = useState<PurchaseLineItem | null>(null);
+  const [substituteSearch, setSubstituteSearch] = useState('');
+  const [keepCurrentPriceAndQty, setKeepCurrentPriceAndQty] = useState(true);
+
+  const allCatalogProducts = useMemo(() => {
+    return getStoredProducts();
+  }, [substitutingLine]);
+
+  const filteredSubstitutes = useMemo(() => {
+    if (!substituteSearch.trim()) return allCatalogProducts.slice(0, 15);
+    const q = substituteSearch.toLowerCase();
+    return allCatalogProducts
+      .filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          (p.sku && p.sku.toLowerCase().includes(q)) ||
+          (p.barcode && p.barcode.toLowerCase().includes(q))
+      )
+      .slice(0, 20);
+  }, [allCatalogProducts, substituteSearch]);
 
   const handleOpenNewSupplierModal = () => {
     setNewSupplierName(supplierSearch.trim());
@@ -232,9 +258,18 @@ export function PurchaseCreateView({
         {/* Encabezado */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-foreground">Nueva Compra</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground flex items-center gap-2">
+              {isEditing ? 'Editar Factura de Compra' : 'Nueva Compra'}
+              {isEditing && (
+                <span className="text-[11px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-400 border border-amber-300 dark:border-amber-800">
+                  Modo Edición
+                </span>
+              )}
+            </h1>
             <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-              Registrar orden de compra y actualizar existencias
+              {isEditing
+                ? 'Modifica productos, sustituye renglones o ajusta cantidades y costos sin perder trazabilidad'
+                : 'Registrar orden de compra y actualizar existencias'}
             </p>
           </div>
           <button type="button" onClick={onBack} className="btn-secondary text-xs sm:text-sm cursor-pointer">
@@ -468,7 +503,7 @@ export function PurchaseCreateView({
               className="btn-primary w-full py-2.5 sm:py-3 text-sm sm:text-base font-bold shadow-md flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer transition active:scale-[0.99]"
             >
               <Check size={18} />
-              {saving ? 'Guardando…' : 'Guardar Compra'}
+              {saving ? 'Guardando…' : isEditing ? 'Guardar Cambios' : 'Guardar Compra'}
             </button>
           </div>
         </div>
@@ -841,14 +876,28 @@ export function PurchaseCreateView({
 
                         {/* Acciones */}
                         <td className="py-2 px-2 text-center">
-                          <button
-                            type="button"
-                            onClick={() => onRemoveLine(item.id)}
-                            className="p-1 text-muted-foreground hover:text-danger hover:bg-danger-bg rounded-md transition-colors cursor-pointer"
-                            title="Eliminar renglón"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSubstitutingLine(item);
+                                setSubstituteSearch('');
+                                setKeepCurrentPriceAndQty(true);
+                              }}
+                              className="p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md transition-colors cursor-pointer"
+                              title="Sustituir por otro producto del inventario conservando precio y cantidad"
+                            >
+                              <ArrowLeftRight size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onRemoveLine(item.id)}
+                              className="p-1 text-muted-foreground hover:text-danger hover:bg-danger-bg rounded-md transition-colors cursor-pointer"
+                              title="Eliminar renglón"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -886,7 +935,7 @@ export function PurchaseCreateView({
                 className="btn-primary py-2 px-5 text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs self-end sm:self-auto disabled:opacity-50 cursor-pointer"
               >
                 <Check size={15} />
-                {saving ? 'Guardando…' : 'Guardar Compra'}
+                {saving ? 'Guardando…' : isEditing ? 'Guardar Cambios' : 'Guardar Compra'}
               </button>
             </div>
           )}
@@ -1015,6 +1064,130 @@ export function PurchaseCreateView({
           </div>
         </form>
       </ModalShell>
+
+      {/* Modal para sustitución de producto en factura */}
+      {substitutingLine && (
+        <ModalShell
+          open={Boolean(substitutingLine)}
+          onClose={() => setSubstitutingLine(null)}
+          size="md"
+          className="p-5 sm:p-6"
+        >
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-[#007052] dark:text-emerald-400">
+                  <ArrowLeftRight size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-foreground text-base">Sustituir Producto</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Reemplaza este renglón en la factura por un producto de tu catálogo
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSubstitutingLine(null)}
+                className="p-1 text-muted-foreground hover:text-foreground rounded-lg transition cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Producto actual */}
+            <div className="p-3 rounded-xl bg-secondary/30 border border-border text-xs space-y-1">
+              <span className="font-bold text-muted-foreground uppercase text-[10px]">Producto actual:</span>
+              <p className="font-bold text-foreground text-sm">{substitutingLine.name}</p>
+              <div className="flex items-center gap-3 text-muted-foreground font-mono">
+                <span>Cant: <strong>{substitutingLine.qty}</strong></span>
+                <span>Precio costo: <strong>RD$ {substitutingLine.price.toLocaleString('es-DO', { minimumFractionDigits: 2 })}</strong></span>
+                <span>Subtotal: <strong>RD$ {(substitutingLine.qty * substitutingLine.price).toLocaleString('es-DO', { minimumFractionDigits: 2 })}</strong></span>
+              </div>
+            </div>
+
+            {/* Opción para conservar precio y cantidad */}
+            <label className="flex items-start gap-2.5 p-3 rounded-xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/50 dark:bg-emerald-950/20 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={keepCurrentPriceAndQty}
+                onChange={(e) => setKeepCurrentPriceAndQty(e.target.checked)}
+                className="rounded border-slate-300 text-[#007052] focus:ring-[#007052] w-4 h-4 mt-0.5"
+              />
+              <div className="text-xs">
+                <p className="font-bold text-emerald-900 dark:text-emerald-200">
+                  Conservar precio unitario (RD$ {substitutingLine.price.toLocaleString('es-DO', { minimumFractionDigits: 2 })}) y cantidad ({substitutingLine.qty})
+                </p>
+                <p className="text-[11px] text-emerald-700/80 dark:text-emerald-300/80 mt-0.5">
+                  Recomendado para artículos facturados con descripción genérica (ej. «Vasos número 10») que sustituyes por tu código de inventario.
+                </p>
+              </div>
+            </label>
+
+            {/* Buscador de producto de reemplazo */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-foreground">
+                Selecciona el producto equivalente del inventario:
+              </label>
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-2.5 text-muted-foreground" />
+                <input
+                  type="text"
+                  autoFocus
+                  value={substituteSearch}
+                  onChange={(e) => setSubstituteSearch(e.target.value)}
+                  placeholder="Buscar por nombre, SKU o código de barras..."
+                  className="input-field !pl-9 h-9 text-xs w-full"
+                />
+              </div>
+
+              <div className="max-h-60 overflow-y-auto divide-y divide-border border border-border rounded-xl">
+                {filteredSubstitutes.length === 0 ? (
+                  <p className="p-4 text-center text-xs text-muted-foreground">
+                    No se encontraron productos coincidentes en el catálogo
+                  </p>
+                ) : (
+                  filteredSubstitutes.map((prod) => (
+                    <div
+                      key={prod.id}
+                      onClick={() => {
+                        if (onSubstituteLine) {
+                          onSubstituteLine(substitutingLine.id, prod, keepCurrentPriceAndQty);
+                        }
+                        setSubstitutingLine(null);
+                      }}
+                      className="p-2.5 flex items-center justify-between hover:bg-secondary/40 cursor-pointer transition text-xs"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="font-bold text-foreground truncate">{prod.name}</p>
+                        <p className="text-[10px] text-muted-foreground font-mono">
+                          SKU: {prod.sku} · Stock actual: {prod.currentStock} {prod.unit}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-xs font-mono font-bold text-foreground">
+                          Costo catálogo: RD$ {(prod.costPrice || 0).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                        </span>
+                        <p className="text-[10px] text-[#007052] dark:text-emerald-400 font-bold">Seleccionar →</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end pt-2 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setSubstitutingLine(null)}
+                className="btn-secondary text-xs px-4 py-2 cursor-pointer"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </ModalShell>
+      )}
 
     </AppLayout>
   );

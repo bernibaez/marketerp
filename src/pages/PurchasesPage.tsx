@@ -3,12 +3,13 @@ import AppLayout from '@/components/AppLayout';
 import { Trash2 } from 'lucide-react';
 import { exportTableToPdf, formatMoneyPdf } from '@/lib/exportPdf';
 import { useProveedores } from '@/hooks/useProveedores';
-import { crearCompra, obtenerCompras, obtenerDetalleCompra, anularCompra, type CompraDetalle } from '@/services/compras.service';
+import { useAuth } from '@/context/AuthContext';
+import { crearCompra, editarCompra, obtenerCompras, obtenerDetalleCompra, anularCompra, type CompraDetalle } from '@/services/compras.service';
 import { toast } from '@/lib/toast';
 import ModalShell from '@/components/ui/ModalShell';
 import { PurchaseDetailView } from './purchases/components/PurchaseDetailView';
 import { PurchaseProductModal } from './purchases/components/PurchaseProductModal';
-import { PurchaseCreateView } from './purchases/components/PurchaseCreateView';
+import { PurchaseCreateView, type PurchaseLineItem } from './purchases/components/PurchaseCreateView';
 import { PurchasesListView, type Purchase, type ReturnItem } from './purchases/components/PurchasesListView';
 import { usePurchaseItems } from './purchases/hooks/usePurchaseItems';
 import { usePurchaseCatalog } from './purchases/hooks/usePurchaseCatalog';
@@ -37,6 +38,7 @@ function nextPurchaseInvoice() {
 }
 
 export default function PurchasesPage() {
+  const { user } = useAuth();
   const [tab, setTab] = useState<Tab>('list');
   const [purchasesList, setPurchasesList] = useState<Purchase[]>([]);
   const [returnsList] = useState<ReturnItem[]>([]);
@@ -44,6 +46,7 @@ export default function PurchasesPage() {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingPurchaseId, setEditingPurchaseId] = useState<string | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState(() => nextPurchaseInvoice());
   const [supplierId, setSupplierId] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Transferencia');
@@ -67,6 +70,7 @@ export default function PurchasesPage() {
     handleUpdateLineSalePrice,
     handleUpdateLineWholesalePrice,
     handleRemoveLine,
+    handleSubstituteLine,
     addProductDirectlyToPurchase,
     clearItems,
   } = usePurchaseItems();
@@ -225,6 +229,44 @@ export default function PurchasesPage() {
       p.supplier.toLowerCase().includes(search.toLowerCase())
   );
 
+  const handleStartEditPurchase = async (id: string) => {
+    try {
+      const detail = await obtenerDetalleCompra(id);
+      if (!detail) {
+        toast.error('No se pudo encontrar el detalle de la compra');
+        return;
+      }
+      if (detail.estado === 'anulada') {
+        toast.error('No se puede editar una factura de compra anulada');
+        return;
+      }
+
+      setEditingPurchaseId(detail.id);
+      setInvoiceNumber(detail.codigo);
+      setSupplierId(detail.proveedor_id || detail.proveedor || '');
+      setPaymentMethod(detail.metodo_pago || 'Transferencia');
+      setPurchaseDate(detail.fecha || new Date().toISOString().split('T')[0]);
+
+      const items: PurchaseLineItem[] = detail.lineas.map((l, idx) => ({
+        id: l.id || `line-${Date.now()}-${idx}`,
+        productId: l.producto_id || '',
+        name: l.nombre,
+        sku: '',
+        qty: l.cantidad,
+        price: l.precio_costo,
+        salePrice: l.precio_venta,
+        wholesalePrice: (l as any).precio_mayorista || 0,
+        taxPercent: (l as any).porcentaje_impuesto || 0,
+      }));
+
+      setPurchaseItems(items);
+      setShowAddForm(true);
+      toast.info(`Editando factura ${detail.codigo}. Modifica productos o sustituye renglones.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al cargar compra para edición');
+    }
+  };
+
   const handleSavePurchase = async () => {
     if (purchaseItems.length === 0) {
       toast.error('Agrega al menos un producto a la compra');
@@ -246,6 +288,60 @@ export default function PurchasesPage() {
 
     setSaving(true);
     try {
+      if (editingPurchaseId) {
+        const updated = await editarCompra(
+          editingPurchaseId,
+          {
+            codigo: invoiceNumber,
+            proveedor_id: supplierId,
+            proveedor_nombre: provName,
+            metodo_pago: paymentMethod,
+            estado: 'recibida',
+            lineas: purchaseItems.map((item) => ({
+              producto_id: item.productId || null,
+              nombre: item.name,
+              cantidad: item.qty,
+              precio_costo: item.price,
+              precio_venta: item.salePrice,
+              precio_mayorista: item.wholesalePrice,
+              porcentaje_impuesto: item.taxPercent,
+            })),
+          },
+          {
+            id: user?.id,
+            nombre: user?.name,
+            role: user?.role,
+          }
+        );
+
+        setPurchasesList((prev) =>
+          prev.map((p) =>
+            p.id === editingPurchaseId || p.code === updated.codigo
+              ? {
+                  ...p,
+                  code: updated.codigo,
+                  supplier: updated.proveedor || provName,
+                  date: updated.fecha || purchaseDate,
+                  items: updated.items,
+                  subtotal: updated.subtotal,
+                  tax: updated.impuesto,
+                  total: updated.total,
+                  status: mapEstadoUi(updated.estado),
+                  payment: paymentMethod,
+                }
+              : p
+          )
+        );
+
+        toast.success(`Factura ${updated.codigo} actualizada exitosamente. Inventario recalculado.`);
+        setShowAddForm(false);
+        setEditingPurchaseId(null);
+        clearItems();
+        setSupplierId('');
+        setInvoiceNumber(nextPurchaseInvoice());
+        return;
+      }
+
       const created = await crearCompra({
         codigo: invoiceNumber,
         proveedor_id: supplierId,
@@ -344,6 +440,7 @@ export default function PurchasesPage() {
     return (
       <>
         <PurchaseCreateView
+          isEditing={Boolean(editingPurchaseId)}
           supplierId={supplierId}
           setSupplierId={setSupplierId}
           proveedores={proveedores}
@@ -361,7 +458,12 @@ export default function PurchasesPage() {
             setModalTab('catalog');
             setShowProductModal(true);
           }}
-          onBack={() => setShowAddForm(false)}
+          onBack={() => {
+            setShowAddForm(false);
+            setEditingPurchaseId(null);
+            clearItems();
+            setInvoiceNumber(nextPurchaseInvoice());
+          }}
           inlineSearch={inlineSearch}
           setInlineSearch={setInlineSearch}
           inlineResults={inlineResults}
@@ -379,6 +481,7 @@ export default function PurchasesPage() {
           onUpdateLineSalePrice={handleUpdateLineSalePrice}
           onUpdateLineWholesalePrice={handleUpdateLineWholesalePrice}
           onRemoveLine={handleRemoveLine}
+          onSubstituteLine={handleSubstituteLine}
           onSavePurchase={handleSavePurchase}
           saving={saving}
           subtotal={subtotal}
@@ -451,12 +554,14 @@ export default function PurchasesPage() {
         setSearch={setSearch}
         filteredPurchases={filteredPurchases}
         onNewPurchase={() => {
+          setEditingPurchaseId(null);
           setInvoiceNumber(nextPurchaseInvoice());
           setPurchaseItems([]);
           setSupplierId('');
           setShowAddForm(true);
         }}
         onViewPurchase={(id) => void handleViewPurchase(id)}
+        onEditPurchase={handleStartEditPurchase}
         onAnularClick={(id) => setConfirmDeleteId(id)}
         onExportPdf={handleExportPdf}
       />

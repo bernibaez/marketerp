@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import AppLayout from '@/components/AppLayout';
 import { toast } from '@/lib/toast';
@@ -9,6 +9,8 @@ import { useAuth } from '@/context/AuthContext';
 import { hasPermission } from '@/lib/permissionsStore';
 import PosReturnModal from '@/pages/point-of-sale-pos/components/PosReturnModal';
 import { syncInvoiceSettingsFromSupabase } from '@/lib/invoiceSettingsStore';
+import { HeldSalesTable } from './sales/components/HeldSalesTable';
+import { obtenerVentasSuspendidas, type HeldSale } from '@/services/ventasSuspendidas.service';
 
 import type { SalesTab } from './sales/types';
 import { SaleDetailView } from './sales/components/SaleDetailView';
@@ -63,6 +65,25 @@ export default function SalesPage() {
   // Pagination State
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(50);
+  const [heldSales, setHeldSales] = useState<HeldSale[]>([]);
+  const [loadingHeldSales, setLoadingHeldSales] = useState(false);
+
+  const fetchHeldSales = useCallback(async () => {
+    setLoadingHeldSales(true);
+    try {
+      const list = await obtenerVentasSuspendidas();
+      setHeldSales(list);
+    } finally {
+      setLoadingHeldSales(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchHeldSales();
+    const handleUpdate = () => void fetchHeldSales();
+    window.addEventListener('mercato_held_sales_updated', handleUpdate);
+    return () => window.removeEventListener('mercato_held_sales_updated', handleUpdate);
+  }, [fetchHeldSales]);
 
   useEffect(() => {
     setPage(1);
@@ -295,7 +316,13 @@ export default function SalesPage() {
   }
 
   const currentCount =
-    tab === 'sales' ? ventas.length : tab === 'quotes' ? cotizaciones.length : devoluciones.length;
+    tab === 'sales'
+      ? ventas.length
+      : tab === 'quotes'
+      ? cotizaciones.length
+      : tab === 'returns'
+      ? devoluciones.length
+      : heldSales.length;
 
   return (
     <AppLayout>
@@ -327,6 +354,7 @@ export default function SalesPage() {
             sales: totalVentas,
             quotes: cotizaciones.length,
             returns: devoluciones.length,
+            held: heldSales.length,
           }}
           search={search}
           onSearchChange={setSearch}
@@ -388,6 +416,16 @@ export default function SalesPage() {
               procesarEstadoDevolucion(id, 'rechazada');
               toast.success('Devolución rechazada');
             }}
+          />
+        )}
+
+        {/* Tab 4: Held Sales Table */}
+        {tab === 'held' && (
+          <HeldSalesTable
+            heldSales={heldSales}
+            loading={loadingHeldSales}
+            onRefresh={fetchHeldSales}
+            canManage={canEditSales || canDeleteSales}
           />
         )}
 

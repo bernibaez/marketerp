@@ -55,6 +55,7 @@ interface PurchasesListViewProps {
   filteredPurchases: Purchase[];
   onNewPurchase: () => void;
   onViewPurchase: (id: string) => void;
+  onEditPurchase?: (id: string) => void;
   onAnularClick: (id: string) => void;
   onExportPdf: () => void;
 }
@@ -70,6 +71,7 @@ export function PurchasesListView({
   filteredPurchases,
   onNewPurchase,
   onViewPurchase,
+  onEditPurchase,
   onAnularClick,
   onExportPdf,
 }: PurchasesListViewProps) {
@@ -209,10 +211,15 @@ export function PurchasesListView({
                         <button
                           type="button"
                           className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                          title="Editar"
-                          onClick={() =>
-                            toast.info('Las compras recibidas no se editan; anula y crea otra')
-                          }
+                          title="Editar compra"
+                          disabled={p.status === 'anulada'}
+                          onClick={() => {
+                            if (onEditPurchase) {
+                              onEditPurchase(p.id);
+                            } else {
+                              toast.info('Las compras recibidas no se editan; anula y crea otra');
+                            }
+                          }}
                         >
                           <Edit2 size={14} />
                         </button>

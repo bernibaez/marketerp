@@ -44,19 +44,30 @@ export default function PosHoldModal({ heldSales, canHold, onHold, onResume, onD
           ) : (
             <div className="space-y-2">
               {heldSales.map((s) => (
-                <div key={s.id} className="border border-border rounded-xl p-3 flex items-center gap-3">
+                <div key={s.id} className="border border-border rounded-xl p-3 flex items-center justify-between gap-3 bg-secondary/10 hover:bg-secondary/20 transition-colors">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground truncate">{s.label}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {(s.cart as unknown[]).length} ítems · {new Date(s.savedAt).toLocaleString('es-DO')}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-foreground truncate">{s.label}</p>
+                      {s.total != null && s.total > 0 && (
+                        <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
+                          RD$ {Number(s.total).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {(s.cart as unknown[]).length} ítem(s) · {new Date(s.savedAt).toLocaleString('es-DO')}
+                      {s.cashierName && <span> · Por: <strong className="text-foreground">{s.cashierName}</strong></span>}
+                      {s.cajaLabel && <span> ({s.cajaLabel})</span>}
                     </p>
                   </div>
-                  <button type="button" className="btn-primary text-xs py-1.5 px-2 flex items-center gap-1" onClick={() => onResume(s)}>
-                    <Play size={12} /> Retomar
-                  </button>
-                  <button type="button" className="p-1.5 text-muted-foreground hover:text-danger" onClick={() => onDelete(s.id)}>
-                    <Trash2 size={14} />
-                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button type="button" className="btn-primary text-xs py-1.5 px-2.5 flex items-center gap-1 cursor-pointer" onClick={() => onResume(s)}>
+                      <Play size={12} /> Retomar
+                    </button>
+                    <button type="button" className="p-1.5 text-muted-foreground hover:text-danger rounded-lg transition cursor-pointer" title="Eliminar venta en espera" onClick={() => onDelete(s.id)}>
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

@@ -91,7 +91,7 @@ const ALL_ROUTES = '*';
 /** Rutas permitidas por rol (`*` = todas) */
 export const ROLE_ROUTES: Record<UserRole, string[] | typeof ALL_ROUTES> = {
   Administrador: ALL_ROUTES,
-  Cajero: ['/point-of-sale-pos', '/cash-closure', '/sales'],
+  Cajero: ['/', '/dashboard', '/point-of-sale-pos', '/cash-closure', '/sales'],
   Vendedor: ['/', '/sales', '/point-of-sale-pos', '/combos', '/contacts', '/accounts-receivable', '/cash-closure', '/settings'],
   Almacenista: [
     '/',
@@ -274,10 +274,10 @@ export function canAccessRoute(role: UserRole, pathname: string): boolean {
   if (norm === 'superadmin' || norm === 'super_admin' || norm === 'super administrador') {
     return true;
   }
+  const cleanPath = pathname.split('?')[0];
+  if (cleanPath === '/' || cleanPath === '/dashboard') return true;
   const fromMatrix = routesFromPermissions(role);
   if (fromMatrix === '*') return true;
-  const cleanPath = pathname.split('?')[0];
-  if (cleanPath === '/') return fromMatrix.includes('/');
   return fromMatrix.some((route) => route !== '/' && cleanPath.startsWith(route));
 }
 

@@ -2,9 +2,10 @@ import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupa
 import { actualizarProducto, crearProducto, invalidarCacheProductos, uiAProductoInsert } from './productos.service';
 import { crearCxpDesdeCompra } from './cxp.service';
 import { movimientoInventarioPresentacion } from './presentaciones.service';
-import { updateProductPurchaseDataInStore, getStoredProducts } from '@/lib/productStore';
+import { updateProductPurchaseDataInStore, updateProductStockInStore, getStoredProducts } from '@/lib/productStore';
 import { initialProducts } from '@/lib/initialProducts';
 import { registrarMovimientoInventario } from './movimientosInventarioCentral.service';
+import { logAuditEvent } from '@/lib/auditStore';
 
 export function isUuid(val: unknown): boolean {
   if (typeof val !== 'string') return false;
@@ -580,6 +581,9 @@ export type CompraDetalle = CompraLista & {
     precio_costo: number;
     precio_venta: number;
     subtotal: number;
+    producto_id?: string | null;
+    porcentaje_impuesto?: number;
+    precio_mayorista?: number;
   }[];
 };
 
@@ -595,7 +599,7 @@ export async function obtenerDetalleCompra(id: string): Promise<CompraDetalle | 
           id, codigo, proveedor_id, subtotal, monto_impuesto, monto_total,
           metodo_pago, estado, notas, creado_en,
           proveedores ( nombre ),
-          detalle_compras ( id, nombre_item, cantidad, precio_costo, precio_venta, subtotal )
+          detalle_compras ( id, producto_id, nombre_item, cantidad, precio_costo, precio_venta, porcentaje_impuesto, subtotal )
         `
         )
         .eq('id', id)
@@ -625,6 +629,8 @@ export async function obtenerDetalleCompra(id: string): Promise<CompraDetalle | 
             precio_costo: Number(d.precio_costo ?? 0),
             precio_venta: Number(d.precio_venta ?? 0),
             subtotal: Number(d.subtotal ?? 0),
+            producto_id: d.producto_id ? String(d.producto_id) : null,
+            porcentaje_impuesto: Number(d.porcentaje_impuesto ?? 0),
           })),
         };
       }
@@ -657,6 +663,9 @@ export async function obtenerDetalleCompra(id: string): Promise<CompraDetalle | 
         precio_costo: l.precio_costo,
         precio_venta: l.precio_venta,
         subtotal: l.subtotal,
+        producto_id: l.producto_id ?? null,
+        porcentaje_impuesto: (l as any).porcentaje_impuesto ?? 0,
+        precio_mayorista: (l as any).precio_mayorista ?? 0,
       })),
     };
   }
@@ -689,4 +698,271 @@ export async function anularCompra(id: string): Promise<void> {
       throw new Error('Compra no encontrada');
     }
   }
+}
+
+export async function editarCompra(
+  id: string,
+  input: NuevaCompraInput,
+  usuarioModificador?: { id?: string; nombre?: string; role?: string }
+): Promise<CompraDetalle> {
+  const existingDetail = await obtenerDetalleCompra(id);
+  if (!existingDetail) {
+    throw new Error(`No se encontró la compra con ID ${id}`);
+  }
+
+  if (existingDetail.estado === 'anulada') {
+    throw new Error('No se puede editar una compra anulada');
+  }
+
+  if (!input.lineas || !input.lineas.length) {
+    throw new Error('La compra no tiene líneas de productos');
+  }
+
+  const subtotal = input.lineas.reduce((s, l) => s + l.cantidad * l.precio_costo, 0);
+  const impuesto = input.lineas.reduce(
+    (s, l) => s + l.cantidad * l.precio_costo * ((l.porcentaje_impuesto || 0) / 100),
+    0
+  );
+  const total = subtotal + impuesto;
+  const codigo = input.codigo?.trim() || existingDetail.codigo;
+
+  const rawProvId = typeof input.proveedor_id === 'string' && input.proveedor_id.trim() ? input.proveedor_id.trim() : null;
+  const cleanProveedorId: string | null = rawProvId && isUuid(rawProvId) ? rawProvId : (existingDetail.proveedor_id || null);
+  const provNombre = input.proveedor_nombre?.trim() || existingDetail.proveedor || 'Sin proveedor';
+
+  const userNombre = usuarioModificador?.nombre || 'Administrador';
+  const userRole = usuarioModificador?.role || 'Administrador';
+
+  // 1. Calcular deltas de inventario entre líneas anteriores y nuevas
+  const oldProductQuantities = new Map<string, { qty: number; name: string }>();
+  for (const oldLine of existingDetail.lineas) {
+    const key = oldLine.producto_id || oldLine.nombre;
+    const cur = oldProductQuantities.get(key) || { qty: 0, name: oldLine.nombre };
+    cur.qty += Number(oldLine.cantidad || 0);
+    oldProductQuantities.set(key, cur);
+  }
+
+  const newProductQuantities = new Map<string, { qty: number; name: string }>();
+  for (const newLine of input.lineas) {
+    const key = newLine.producto_id || newLine.nombre;
+    const cur = newProductQuantities.get(key) || { qty: 0, name: newLine.nombre };
+    cur.qty += Number(newLine.cantidad || 0);
+    newProductQuantities.set(key, cur);
+  }
+
+  // A. Para productos que estaban antes pero ya no están (eliminados o sustituidos) -> revertir stock
+  for (const [key, oldData] of oldProductQuantities.entries()) {
+    if (!newProductQuantities.has(key)) {
+      updateProductStockInStore(key, -oldData.qty);
+      registrarMovimientoInventario({
+        producto_id: key,
+        producto_nombre: oldData.name,
+        tipo: 'Ajuste de inventario',
+        cantidad_salida: oldData.qty,
+        stock_anterior: 0,
+        stock_resultante: 0,
+        documento_referencia: codigo,
+        usuario: userNombre,
+        motivo: `Reversión por eliminación o sustitución en edición de compra ${codigo} (-${oldData.qty} uds)`,
+      });
+    }
+  }
+
+  // B. Para productos nuevos o modificados -> aplicar deltas
+  for (const [key, newData] of newProductQuantities.entries()) {
+    const oldData = oldProductQuantities.get(key);
+    const oldQty = oldData ? oldData.qty : 0;
+    const delta = Math.round((newData.qty - oldQty) * 1000) / 1000;
+
+    const matchingLine = input.lineas.find((l) => (l.producto_id || l.nombre) === key);
+    const costPrice = matchingLine?.precio_costo ?? 0;
+    const salePrice = matchingLine?.precio_venta ?? 0;
+
+    if (delta !== 0) {
+      updateProductPurchaseDataInStore(key, delta, costPrice, salePrice);
+      registrarMovimientoInventario({
+        producto_id: key,
+        producto_nombre: newData.name,
+        tipo: delta > 0 ? 'Compra' : 'Ajuste de inventario',
+        cantidad_entrada: delta > 0 ? delta : undefined,
+        cantidad_salida: delta < 0 ? Math.abs(delta) : undefined,
+        stock_anterior: 0,
+        stock_resultante: 0,
+        documento_referencia: codigo,
+        usuario: userNombre,
+        motivo: `Modificación de cantidad en compra ${codigo} (${delta > 0 ? '+' : ''}${delta} uds)`,
+      });
+    } else {
+      if (costPrice > 0 || salePrice > 0) {
+        updateProductPurchaseDataInStore(key, 0, costPrice, salePrice);
+      }
+    }
+  }
+
+  // 2. Si Supabase está disponible, ejecutar transacción
+  if (isSupabaseConfigured()) {
+    try {
+      const sb = getSupabase();
+      if (isUuid(id)) {
+        const rpcPayload = {
+          subtotal,
+          monto_impuesto: impuesto,
+          monto_total: total,
+          proveedor_id: cleanProveedorId,
+          metodo_pago: mapMetodoPago(input.metodo_pago),
+          notas: input.notas ?? null,
+          usuario_modificador_id: usuarioModificador?.id && isUuid(usuarioModificador.id) ? usuarioModificador.id : null,
+          usuario_modificador_nombre: userNombre,
+          lineas: input.lineas.map((l) => ({
+            producto_id: l.producto_id && isUuid(l.producto_id) ? l.producto_id : null,
+            nombre: l.nombre,
+            cantidad: l.cantidad,
+            precio_costo: l.precio_costo,
+            precio_venta: l.precio_venta,
+            porcentaje_impuesto: l.porcentaje_impuesto || 0,
+            subtotal: l.cantidad * l.precio_costo,
+          })),
+        };
+
+        const { error: rpcErr } = await sb.rpc('editar_compra_transaccional', {
+          p_compra_id: id,
+          p_payload: rpcPayload,
+        });
+
+        if (rpcErr) {
+          console.warn('RPC editar_compra_transaccional falló, aplicando actualización directa en Supabase:', rpcErr);
+
+          // Revertir items viejos
+          for (const oldLine of existingDetail.lineas) {
+            if (oldLine.producto_id && isUuid(oldLine.producto_id)) {
+              const { data: pData } = await sb.from('productos').select('stock_actual').eq('id', oldLine.producto_id).maybeSingle();
+              const cur = Number(pData?.stock_actual || 0);
+              await sb.from('productos').update({ stock_actual: Math.max(0, cur - oldLine.cantidad) }).eq('id', oldLine.producto_id);
+            }
+          }
+          await sb.from('detalle_compras').delete().eq('compra_id', id);
+
+          // Insertar nuevos items
+          for (const newLine of input.lineas) {
+            const prodUuid = newLine.producto_id && isUuid(newLine.producto_id) ? newLine.producto_id : null;
+            await sb.from('detalle_compras').insert({
+              compra_id: id,
+              producto_id: prodUuid,
+              nombre_item: newLine.nombre,
+              cantidad: newLine.cantidad,
+              cantidad_recibida: newLine.cantidad,
+              precio_costo: newLine.precio_costo,
+              precio_venta: newLine.precio_venta,
+              porcentaje_impuesto: newLine.porcentaje_impuesto || 0,
+              subtotal: newLine.cantidad * newLine.precio_costo,
+            });
+
+            if (prodUuid) {
+              const { data: pData } = await sb.from('productos').select('stock_actual').eq('id', prodUuid).maybeSingle();
+              const cur = Number(pData?.stock_actual || 0);
+              await sb.from('productos').update({
+                stock_actual: cur + newLine.cantidad,
+                precio_costo: newLine.precio_costo > 0 ? newLine.precio_costo : undefined,
+                precio_venta: newLine.precio_venta > 0 ? newLine.precio_venta : undefined,
+              }).eq('id', prodUuid);
+            }
+          }
+
+          await sb.from('compras').update({
+            subtotal,
+            monto_impuesto: impuesto,
+            monto_total: total,
+            proveedor_id: cleanProveedorId,
+            metodo_pago: mapMetodoPago(input.metodo_pago),
+            notas: input.notas ?? null,
+            actualizado_en: new Date().toISOString(),
+          }).eq('id', id);
+        }
+      }
+    } catch (sbErr) {
+      console.warn('Excepción al actualizar compra en Supabase:', sbErr);
+    }
+  }
+
+  // 3. Actualizar respaldo local en localStorage
+  const localList = getLocalCompras();
+  const updatedLocal = localList.map((c) => {
+    if (c.id === id || c.codigo === id || c.codigo === codigo) {
+      return {
+        ...c,
+        proveedor: provNombre,
+        proveedor_id: cleanProveedorId,
+        items: input.lineas.reduce((s, l) => s + l.cantidad, 0),
+        subtotal,
+        impuesto,
+        total,
+        metodo_pago: mapMetodoPago(input.metodo_pago),
+        notas: input.notas ?? null,
+        lineas: input.lineas.map((l, idx) => ({
+          id: `${c.id}-item-${idx + 1}`,
+          nombre: l.nombre,
+          cantidad: l.cantidad,
+          precio_costo: l.precio_costo,
+          precio_venta: l.precio_venta,
+          subtotal: l.cantidad * l.precio_costo,
+          producto_id: l.producto_id,
+        })),
+      };
+    }
+    return c;
+  });
+  saveLocalCompras(updatedLocal);
+
+  // 4. Registrar auditoría local
+  logAuditEvent({
+    user: userNombre,
+    role: userRole,
+    action: 'Edición de compra' as any,
+    module: 'Compras',
+    details: `Factura de compra ${codigo} editada por ${userNombre}. Total recalculado: RD$ ${total.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`,
+    before: {
+      codigo: existingDetail.codigo,
+      proveedor: existingDetail.proveedor,
+      total: existingDetail.total,
+      lineas: existingDetail.lineas,
+    },
+    after: {
+      codigo,
+      proveedor: provNombre,
+      total,
+      lineas: input.lineas,
+    },
+  });
+
+  // 5. Invalidar caché reactivamente
+  invalidarCacheProductos();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('mercato_products_updated'));
+  }
+
+  return {
+    id,
+    codigo,
+    proveedor: provNombre,
+    proveedor_id: cleanProveedorId,
+    fecha: existingDetail.fecha,
+    items: input.lineas.reduce((s, l) => s + l.cantidad, 0),
+    subtotal,
+    impuesto,
+    total,
+    estado: existingDetail.estado,
+    metodo_pago: mapMetodoPago(input.metodo_pago),
+    notas: input.notas ?? null,
+    lineas: input.lineas.map((l, idx) => ({
+      id: `${id}-line-${idx + 1}`,
+      nombre: l.nombre,
+      cantidad: l.cantidad,
+      precio_costo: l.precio_costo,
+      precio_venta: l.precio_venta,
+      subtotal: l.cantidad * l.precio_costo,
+      producto_id: l.producto_id,
+      porcentaje_impuesto: l.porcentaje_impuesto,
+      precio_mayorista: l.precio_mayorista,
+    })),
+  };
 }

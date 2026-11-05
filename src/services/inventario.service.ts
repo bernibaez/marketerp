@@ -122,52 +122,60 @@ export async function procesarAjusteStockBloque(
     }
   }
 
+  // Guardar en stockAdjustmentStore para conservar el historial con precios y pérdidas
+  try {
+    const prods = getStoredProducts();
+    const forLocal = items.map((it) => {
+      const found = prods.find((prod) => prod.id === it.producto_id || prod.sku === it.producto_id);
+      const prevStock = found
+        ? found.currentStock
+        : it.cantidad_nueva != null && it.cantidad_variacion != null
+        ? it.cantidad_nueva - it.cantidad_variacion
+        : 0;
+      const p = found
+        ? { ...found, currentStock: prevStock }
+        : ({
+            id: it.producto_id,
+            name: 'Producto',
+            sku: '',
+            category: 'General',
+            currentStock: prevStock,
+            costPrice: it.precio_unitario || 0,
+            salePrice: it.precio_unitario || 0,
+          } as any);
+
+      return {
+        product: p,
+        newQty: it.cantidad_nueva ?? (prevStock + (it.cantidad_variacion ?? 0)),
+        reason: it.motivo,
+        unitPrice: it.precio_unitario ?? p.costPrice ?? p.salePrice ?? 0,
+        code: it.codigo,
+      };
+    });
+    createBlockStockAdjustment(forLocal, 'Sistema', items[0]?.codigo);
+  } catch {
+    // ignore
+  }
+
   if (nonUuidItems.length > 0) {
     nonUuidItems.forEach((it) => {
       const demoProd = initialProducts.find((p) => p.id === it.producto_id || p.sku === it.producto_id);
       if (demoProd && it.cantidad_nueva != null) {
-        const delta = it.cantidad_nueva - demoProd.currentStock;
-        updateProductStockInStore(demoProd.id, delta);
         demoProd.currentStock = it.cantidad_nueva;
       }
     });
   }
 
-  // Sincronizar el store local de productos para mantener la UI al día
+  // Asegurar que el store local quede con la cantidad exacta indicada
   items.forEach((it) => {
     if (it.cantidad_nueva != null) {
       const stored = getStoredProducts().find((p) => p.id === it.producto_id || p.sku === it.producto_id);
-      if (stored) {
+      if (stored && stored.currentStock !== it.cantidad_nueva) {
         const delta = it.cantidad_nueva - stored.currentStock;
         updateProductStockInStore(stored.id, delta);
       }
     }
   });
-
-  // Guardar también en stockAdjustmentStore para conservar el registro con precios y pérdidas
-  try {
-    const prods = getStoredProducts();
-    const forLocal = items.map((it) => {
-      const p = prods.find((prod) => prod.id === it.producto_id || prod.sku === it.producto_id) || {
-        id: it.producto_id,
-        name: 'Producto',
-        sku: '',
-        category: 'General',
-        currentStock: 0,
-        costPrice: it.precio_unitario || 0,
-        salePrice: it.precio_unitario || 0,
-      } as any;
-      return {
-        product: p,
-        newQty: it.cantidad_nueva ?? (p.currentStock + (it.cantidad_variacion ?? 0)),
-        reason: it.motivo,
-        unitPrice: it.precio_unitario ?? p.costPrice ?? p.salePrice ?? 0,
-      };
-    });
-    createBlockStockAdjustment(forLocal, 'Sistema');
-  } catch {
-    // ignore
-  }
 
   // Purgar caché en memoria y notificar a la UI
   invalidarCacheProductos();

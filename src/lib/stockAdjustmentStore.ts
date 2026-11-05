@@ -48,8 +48,10 @@ export function createBlockStockAdjustment(
     newQty: number;
     reason: string;
     unitPrice?: number;
+    code?: string;
   }[],
-  responsibleUser: string = 'Admin General'
+  responsibleUser: string = 'Admin General',
+  batchCode?: string
 ): StockAdjustmentItem[] {
   const currentHistory = getStoredAdjustments();
   const newEntries: StockAdjustmentItem[] = [];
@@ -57,19 +59,22 @@ export function createBlockStockAdjustment(
   const dateStr = now.toISOString().slice(0, 10);
   const timeStr = now.toTimeString().slice(0, 5);
 
+  const defaultSeq = String(currentHistory.length + 1).padStart(3, '0');
+  const sharedCode = batchCode || `AJU-${defaultSeq}`;
+
   adjustmentsToApply.forEach((adj, index) => {
     const delta = adj.newQty - adj.product.currentStock;
     if (delta === 0) return; // No change
 
     const type: 'entrada' | 'salida' | 'perdida' = delta > 0 ? 'entrada' : (adj.reason.toLowerCase().includes('perd') || adj.reason.toLowerCase().includes('venc') ? 'perdida' : 'salida');
-    const seq = String(currentHistory.length + newEntries.length + 1).padStart(3, '0');
+    const entryCode = adj.code || sharedCode;
     const unitPrice = adj.unitPrice ?? adj.product.costPrice ?? adj.product.salePrice ?? 0;
     const absQty = Math.abs(delta);
     const totalLoss = type !== 'entrada' ? Math.round(absQty * unitPrice * 100) / 100 : 0;
 
     const entry: StockAdjustmentItem = {
       id: `adj-${Date.now()}-${index}`,
-      code: `AJU-${seq}`,
+      code: entryCode,
       productId: adj.product.id,
       productName: adj.product.name,
       sku: adj.product.sku,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShoppingCart, FileText, RotateCcw, Search, Download, FileSpreadsheet } from 'lucide-react';
+import { ShoppingCart, FileText, RotateCcw, Search, Download, FileSpreadsheet, Pause } from 'lucide-react';
 import type { SalesTab } from '../types';
 
 interface SalesFilterToolbarProps {
@@ -9,6 +9,7 @@ interface SalesFilterToolbarProps {
     sales: number;
     quotes: number;
     returns: number;
+    held?: number;
   };
   search: string;
   onSearchChange: (val: string) => void;
@@ -41,6 +42,7 @@ export function SalesFilterToolbar({
     { id: 'sales' as SalesTab, label: 'Todas las Ventas', icon: <ShoppingCart size={15} />, count: counts.sales },
     { id: 'quotes' as SalesTab, label: 'Cotizaciones', icon: <FileText size={15} />, count: counts.quotes },
     { id: 'returns' as SalesTab, label: 'Devoluciones', icon: <RotateCcw size={15} />, count: counts.returns },
+    { id: 'held' as SalesTab, label: 'Ventas Suspendidas', icon: <Pause size={15} />, count: counts.held ?? 0 },
   ];
 
   return (

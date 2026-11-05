@@ -11,6 +11,7 @@ export type AuditActionType =
   | 'Apertura de caja'
   | 'Inicio de caja'
   | 'Compra'
+  | 'Edición de compra'
   | 'Pago';
 
 export type AuditLog = {
