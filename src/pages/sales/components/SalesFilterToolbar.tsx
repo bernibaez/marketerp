@@ -1,5 +1,15 @@
 import React from 'react';
-import { ShoppingCart, FileText, RotateCcw, Search, Download, FileSpreadsheet, Pause } from 'lucide-react';
+import {
+  ShoppingCart,
+  FileText,
+  RotateCcw,
+  Search,
+  Download,
+  FileSpreadsheet,
+  Pause,
+  Calendar,
+  X,
+} from 'lucide-react';
 import type { SalesTab } from '../types';
 
 interface SalesFilterToolbarProps {
@@ -13,6 +23,8 @@ interface SalesFilterToolbarProps {
   };
   search: string;
   onSearchChange: (val: string) => void;
+  singleDate?: string;
+  onSingleDateChange?: (val: string) => void;
   dateFrom: string;
   onDateFromChange: (val: string) => void;
   dateTo: string;
@@ -29,6 +41,8 @@ export function SalesFilterToolbar({
   counts,
   search,
   onSearchChange,
+  singleDate = '',
+  onSingleDateChange,
   dateFrom,
   onDateFromChange,
   dateTo,
@@ -44,6 +58,8 @@ export function SalesFilterToolbar({
     { id: 'returns' as SalesTab, label: 'Devoluciones', icon: <RotateCcw size={15} />, count: counts.returns },
     { id: 'held' as SalesTab, label: 'Ventas Suspendidas', icon: <Pause size={15} />, count: counts.held ?? 0 },
   ];
+
+  const hasDateFilter = Boolean(singleDate || dateFrom || dateTo);
 
   return (
     <div className="space-y-4">
@@ -69,7 +85,7 @@ export function SalesFilterToolbar({
       </div>
 
       {/* Integrated Filter Toolbar */}
-      <div className="p-3 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+      <div className="p-3 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3">
         <div className="flex flex-1 items-center gap-2.5 flex-wrap">
           <div className="relative flex-1 min-w-[220px] max-w-md">
             <Search
@@ -88,28 +104,89 @@ export function SalesFilterToolbar({
             />
           </div>
 
-          <div className="flex items-center gap-1.5 text-xs text-slate-500">
-            <span className="text-[11px] font-medium hidden sm:inline">Desde</span>
-            <input
-              type="date"
-              title="Fecha desde"
-              className="py-1.5 px-2.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 focus:bg-white dark:focus:bg-slate-900 outline-none"
-              value={dateFrom}
-              onChange={(e) => onDateFromChange(e.target.value)}
-            />
-            <span className="text-slate-400 text-xs">—</span>
-            <span className="text-[11px] font-medium hidden sm:inline">Hasta</span>
-            <input
-              type="date"
-              title="Fecha hasta"
-              className="py-1.5 px-2.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 focus:bg-white dark:focus:bg-slate-900 outline-none"
-              value={dateTo}
-              onChange={(e) => onDateToChange(e.target.value)}
-            />
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            {onSingleDateChange && (
+              <div className="flex items-center gap-1.5">
+                <Calendar size={14} className="text-slate-400 shrink-0" />
+                <span className="text-[11px] font-semibold">Fecha:</span>
+                <input
+                  type="date"
+                  title="Buscar por fecha específica"
+                  className="py-1.5 px-2.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 focus:bg-white dark:focus:bg-slate-900 outline-none"
+                  value={singleDate}
+                  onChange={(e) => {
+                    onSingleDateChange(e.target.value);
+                    onDateFromChange('');
+                    onDateToChange('');
+                  }}
+                />
+              </div>
+            )}
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-semibold">Desde:</span>
+              <input
+                type="date"
+                title="Fecha desde"
+                className="py-1.5 px-2.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 focus:bg-white dark:focus:bg-slate-900 outline-none"
+                value={dateFrom}
+                onChange={(e) => {
+                  onDateFromChange(e.target.value);
+                  onSingleDateChange?.('');
+                }}
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-semibold">Hasta:</span>
+              <input
+                type="date"
+                title="Fecha hasta"
+                className="py-1.5 px-2.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 focus:bg-white dark:focus:bg-slate-900 outline-none"
+                value={dateTo}
+                onChange={(e) => {
+                  onDateToChange(e.target.value);
+                  onSingleDateChange?.('');
+                }}
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                const today = new Date().toLocaleDateString('en-CA');
+                if (onSingleDateChange) {
+                  onSingleDateChange(today);
+                  onDateFromChange('');
+                  onDateToChange('');
+                } else {
+                  onDateFromChange(today);
+                  onDateToChange(today);
+                }
+              }}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold transition cursor-pointer"
+            >
+              Hoy
+            </button>
+
+            {hasDateFilter && (
+              <button
+                type="button"
+                onClick={() => {
+                  onSingleDateChange?.('');
+                  onDateFromChange('');
+                  onDateToChange('');
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
+              >
+                <X size={13} />
+                Limpiar fechas
+              </button>
+            )}
           </div>
         </div>
 
-        <div className="flex items-center justify-between md:justify-end gap-3 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100 dark:border-slate-800">
+        <div className="flex items-center justify-between xl:justify-end gap-3 pt-2 xl:pt-0 border-t xl:border-t-0 border-slate-100 dark:border-slate-800">
           <span className="text-[11px] text-slate-500 font-medium whitespace-nowrap">
             {currentCount} {currentCount === 1 ? 'registro' : 'registros'}
           </span>

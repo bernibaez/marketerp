@@ -773,11 +773,17 @@ export async function obtenerHistorialVentas(params: {
         );
       });
     }
-    if (params.fechaInicio) {
-      list = list.filter((v) => v.creado_en >= params.fechaInicio!);
-    }
-    if (params.fechaFin) {
-      list = list.filter((v) => v.creado_en <= params.fechaFin! + 'T23:59:59');
+    if (params.fechaInicio || params.fechaFin) {
+      list = list.filter((v) => {
+        const utcD = String(v.creado_en || '').slice(0, 10);
+        const dt = v.creado_en ? new Date(v.creado_en) : null;
+        const localD = dt && !isNaN(dt.getTime()) ? dt.toLocaleDateString('en-CA') : utcD;
+        const afterStart =
+          !params.fechaInicio || localD >= params.fechaInicio || utcD >= params.fechaInicio;
+        const beforeEnd =
+          !params.fechaFin || localD <= params.fechaFin || utcD <= params.fechaFin;
+        return afterStart && beforeEnd;
+      });
     }
     if (params.cajaId) {
       if (Array.isArray(params.cajaId)) {
@@ -833,7 +839,13 @@ export async function obtenerHistorialVentas(params: {
       }
     }
     if (params.fechaInicio) q = q.gte('creado_en', params.fechaInicio);
-    if (params.fechaFin) q = q.lte('creado_en', params.fechaFin + 'T23:59:59');
+    if (params.fechaFin) {
+      const localEnd = new Date(`${params.fechaFin}T23:59:59.999`);
+      const endIso = !isNaN(localEnd.getTime())
+        ? localEnd.toISOString()
+        : `${params.fechaFin}T23:59:59`;
+      q = q.lte('creado_en', endIso);
+    }
     if (params.cajaId) {
       if (Array.isArray(params.cajaId)) {
         if (params.cajaId.length === 1) {
@@ -905,8 +917,16 @@ export async function obtenerHistorialVentas(params: {
 
   const matchingLocal = unmergedLocal.filter((lv) => {
     if (params.excluirAnuladas && (lv.estado === 'anulada' || (lv.estado as string) === 'cancelled')) return false;
-    if (params.fechaInicio && lv.creado_en && lv.creado_en.slice(0, 10) < params.fechaInicio) return false;
-    if (params.fechaFin && lv.creado_en && lv.creado_en.slice(0, 10) > params.fechaFin) return false;
+    if (params.fechaInicio || params.fechaFin) {
+      const utcD = String(lv.creado_en || '').slice(0, 10);
+      const dt = lv.creado_en ? new Date(lv.creado_en) : null;
+      const localD = dt && !isNaN(dt.getTime()) ? dt.toLocaleDateString('en-CA') : utcD;
+      const afterStart =
+        !params.fechaInicio || localD >= params.fechaInicio || utcD >= params.fechaInicio;
+      const beforeEnd =
+        !params.fechaFin || localD <= params.fechaFin || utcD <= params.fechaFin;
+      if (!afterStart || !beforeEnd) return false;
+    }
     if (params.cajaId) {
       const boxIds = Array.isArray(params.cajaId) ? params.cajaId.map(String) : [String(params.cajaId)];
       if (!boxIds.includes(String(lv.caja_id ?? ''))) return false;

@@ -37,8 +37,12 @@ export default function SalesPage() {
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState<SalesTab>('sales');
   const [search, setSearch] = useState(() => searchParams.get('q') ?? '');
+  const [singleDate, setSingleDate] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+
+  const effectiveDateFrom = singleDate || dateFrom;
+  const effectiveDateTo = singleDate || dateTo;
 
   const roleNorm = normalizeRole(user?.role || user?.rolDb);
   const isAdmin = isAdminOrSuperAdmin(user);
@@ -86,7 +90,7 @@ export default function SalesPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, dateFrom, dateTo, tab]);
+  }, [search, singleDate, dateFrom, dateTo, tab]);
 
   // Data Hooks
   const {
@@ -103,14 +107,14 @@ export default function SalesPage() {
     pagina: page,
     limite: limit,
     busqueda: search,
-    fechaInicio: dateFrom || undefined,
-    fechaFin: dateTo || undefined,
+    fechaInicio: effectiveDateFrom || undefined,
+    fechaFin: effectiveDateTo || undefined,
     cajeroId: ownCajeroId,
     cajeroNombre: ownCajeroNombre,
   });
 
   const {
-    cotizaciones,
+    cotizaciones: rawCotizaciones,
     loading: loadingCotizaciones,
     guardarCotizacion,
     convertirAVenta,
@@ -119,13 +123,27 @@ export default function SalesPage() {
   });
 
   const {
-    devoluciones,
+    devoluciones: rawDevoluciones,
     loading: loadingDevoluciones,
     procesarEstado: procesarEstadoDevolucion,
     refetch: refetchDevoluciones,
   } = useDevoluciones({
     busqueda: tab === 'returns' ? search : undefined,
   });
+
+  const matchesDateRange = (rawIsoOrDate?: string) => {
+    if (!effectiveDateFrom && !effectiveDateTo) return true;
+    const utcD = String(rawIsoOrDate || '').slice(0, 10);
+    const dt = rawIsoOrDate ? new Date(rawIsoOrDate) : null;
+    const localD = dt && !isNaN(dt.getTime()) ? dt.toLocaleDateString('en-CA') : utcD;
+    if (effectiveDateFrom && localD < effectiveDateFrom && utcD < effectiveDateFrom) return false;
+    if (effectiveDateTo && localD > effectiveDateTo && utcD > effectiveDateTo) return false;
+    return true;
+  };
+
+  const cotizaciones = rawCotizaciones.filter((c) => matchesDateRange(c.creado_en));
+  const devoluciones = rawDevoluciones.filter((d) => matchesDateRange(d.creado_en));
+  const filteredHeldSales = heldSales.filter((h) => matchesDateRange(h.savedAt));
 
   // Modal and View Coordinator Hook
   const {
@@ -337,7 +355,7 @@ export default function SalesPage() {
       ? cotizaciones.length
       : tab === 'returns'
       ? devoluciones.length
-      : heldSales.length;
+      : filteredHeldSales.length;
 
   return (
     <AppLayout>
@@ -370,10 +388,12 @@ export default function SalesPage() {
             sales: totalVentas,
             quotes: cotizaciones.length,
             returns: devoluciones.length,
-            held: heldSales.length,
+            held: filteredHeldSales.length,
           }}
           search={search}
           onSearchChange={setSearch}
+          singleDate={singleDate}
+          onSingleDateChange={setSingleDate}
           dateFrom={dateFrom}
           onDateFromChange={setDateFrom}
           dateTo={dateTo}
@@ -439,7 +459,7 @@ export default function SalesPage() {
         {/* Tab 4: Held Sales Table */}
         {tab === 'held' && (
           <HeldSalesTable
-            heldSales={heldSales}
+            heldSales={filteredHeldSales}
             loading={loadingHeldSales}
             onRefresh={fetchHeldSales}
             canManage={canEditSales || canDeleteSales}

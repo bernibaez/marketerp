@@ -45,6 +45,9 @@ export default function PurchasesPage() {
   const [loadingList, setLoadingList] = useState(true);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
+  const [singleDate, setSingleDate] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingPurchaseId, setEditingPurchaseId] = useState<string | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState(() => nextPurchaseInvoice());
@@ -223,11 +226,20 @@ export default function PurchasesPage() {
     }
   };
 
-  const filteredPurchases = purchasesList.filter(
-    (p) =>
+  const filteredPurchases = purchasesList.filter((p) => {
+    const matchesText =
+      !search ||
       p.code.toLowerCase().includes(search.toLowerCase()) ||
-      p.supplier.toLowerCase().includes(search.toLowerCase())
-  );
+      p.supplier.toLowerCase().includes(search.toLowerCase());
+    if (!matchesText) return false;
+
+    const itemDate = (p.date || '').slice(0, 10);
+    if (singleDate && itemDate !== singleDate) return false;
+    if (dateFrom && itemDate < dateFrom) return false;
+    if (dateTo && itemDate > dateTo) return false;
+
+    return true;
+  });
 
   const handleStartEditPurchase = async (id: string) => {
     try {
@@ -558,6 +570,12 @@ export default function PurchasesPage() {
         loadingList={loadingList}
         search={search}
         setSearch={setSearch}
+        singleDate={singleDate}
+        setSingleDate={setSingleDate}
+        dateFrom={dateFrom}
+        setDateFrom={setDateFrom}
+        dateTo={dateTo}
+        setDateTo={setDateTo}
         filteredPurchases={filteredPurchases}
         onNewPurchase={() => {
           setEditingPurchaseId(null);

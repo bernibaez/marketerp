@@ -59,6 +59,9 @@ export default function ExpensesPage() {
 
   const [tab, setTab] = useState<Tab>('list');
   const [search, setSearch] = useState('');
+  const [singleDate, setSingleDate] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingGasto, setEditingGasto] = useState<GastoUi | null>(null);
@@ -78,17 +81,26 @@ export default function ExpensesPage() {
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return gastos.filter(
-      (e) =>
+    return gastos.filter((e) => {
+      const matchesText =
+        !q ||
         e.description.toLowerCase().includes(q) ||
         e.category.toLowerCase().includes(q) ||
         e.code.toLowerCase().includes(q) ||
         (e.paymentMethod && e.paymentMethod.toLowerCase().includes(q)) ||
-        (e.responsible && e.responsible.toLowerCase().includes(q))
-    );
-  }, [gastos, search]);
+        (e.responsible && e.responsible.toLowerCase().includes(q));
+      if (!matchesText) return false;
 
-  const totalSpent = gastos.filter((e) => e.status === 'approved').reduce((sum, e) => sum + e.amount, 0);
+      const itemDate = (e.date || '').slice(0, 10);
+      if (singleDate && itemDate !== singleDate) return false;
+      if (dateFrom && itemDate < dateFrom) return false;
+      if (dateTo && itemDate > dateTo) return false;
+
+      return true;
+    });
+  }, [gastos, search, singleDate, dateFrom, dateTo]);
+
+  const totalSpent = filtered.filter((e) => e.status === 'approved').reduce((sum, e) => sum + e.amount, 0);
 
   const handleExportPdf = () => {
     if (tab === 'list') {
@@ -454,20 +466,109 @@ export default function ExpensesPage() {
           ))}
         </div>
 
-        <div className="card p-4 flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              className="input-field pl-9"
-              placeholder="Buscar gastos..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+        <div className="card p-4 space-y-3">
+          <div className="flex flex-col lg:flex-row gap-3">
+            <div className="relative flex-1 min-w-[220px]">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                className="input-field pl-9"
+                placeholder="Buscar gastos por código, descripción, categoría o responsable..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+
+            {tab === 'list' && (
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <Calendar size={14} className="text-muted-foreground shrink-0" />
+                  <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
+                    Fecha:
+                  </span>
+                  <input
+                    type="date"
+                    title="Buscar por fecha específica"
+                    className="input-field py-1.5 px-2.5 text-xs w-auto"
+                    value={singleDate}
+                    onChange={(e) => {
+                      setSingleDate(e.target.value);
+                      setDateFrom('');
+                      setDateTo('');
+                    }}
+                  />
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
+                    Desde:
+                  </span>
+                  <input
+                    type="date"
+                    title="Fecha desde"
+                    className="input-field py-1.5 px-2.5 text-xs w-auto"
+                    value={dateFrom}
+                    onChange={(e) => {
+                      setDateFrom(e.target.value);
+                      setSingleDate('');
+                    }}
+                  />
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
+                    Hasta:
+                  </span>
+                  <input
+                    type="date"
+                    title="Fecha hasta"
+                    className="input-field py-1.5 px-2.5 text-xs w-auto"
+                    value={dateTo}
+                    onChange={(e) => {
+                      setDateTo(e.target.value);
+                      setSingleDate('');
+                    }}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const today = new Date().toLocaleDateString('en-CA');
+                    setSingleDate(today);
+                    setDateFrom('');
+                    setDateTo('');
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg border border-border hover:bg-secondary text-xs font-semibold text-foreground transition cursor-pointer"
+                >
+                  Hoy
+                </button>
+
+                {(singleDate || dateFrom || dateTo) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSingleDate('');
+                      setDateFrom('');
+                      setDateTo('');
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg bg-danger/10 hover:bg-danger/20 text-danger text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
+                  >
+                    <X size={13} />
+                    Limpiar fechas
+                  </button>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleExportPdf}
+              className="btn-secondary flex items-center gap-2 shrink-0"
+            >
+              <Download size={16} />
+              Exportar PDF
+            </button>
           </div>
-          <button type="button" onClick={handleExportPdf} className="btn-secondary flex items-center gap-2">
-            <Download size={16} />
-            Exportar PDF
-          </button>
         </div>
 
         {tab === 'list' && (
@@ -481,7 +582,7 @@ export default function ExpensesPage() {
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden md:table-cell">Categoría</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">Método</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">Responsable</th>
-                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden md:table-cell">Fecha</th>
+                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Fecha</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Monto</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden xl:table-cell">Comprobante</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Estado</th>
@@ -509,7 +610,7 @@ export default function ExpensesPage() {
                         <span className="badge-info text-xs">{formatMetodoPago(e.paymentMethod)}</span>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{e.responsible}</td>
-                      <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{e.date}</td>
+                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{e.date}</td>
                       <td className="px-4 py-3 font-bold text-foreground">RD$ {e.amount.toLocaleString()}</td>
                       <td className="px-4 py-3 hidden xl:table-cell">
                         {e.receipt ? <span className="badge-success">Sí</span> : <span className="badge-danger">No</span>}
