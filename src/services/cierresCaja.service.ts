@@ -2,7 +2,7 @@ import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupa
 import { CIERRE_COLUMNS, type CierreCaja } from '@/types/database';
 import { getCashClosures, saveCashClosure, type CashClosure } from '@/lib/cashClosureStore';
 import { obtenerCajas } from './cajas.service';
-import { obtenerVentasTurno, getLocalVentas } from './ventas.service';
+import { obtenerVentasTurno, getLocalVentas, type VentaConDetalle } from './ventas.service';
 import { obtenerMovimientosCaja } from './movimientosCaja.service';
 
 const isTestEnv =

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import PosCashOpenModal from '@/pages/point-of-sale-pos/components/PosCashOpenModal';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -13,6 +14,13 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
+  const [postLoginCashModalOpen, setPostLoginCashModalOpen] = useState(() => {
+    try {
+      return sessionStorage.getItem('mercato_pending_cash_open') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   const isPosPage = pathname.includes('point-of-sale') || pathname.includes('pos');
 
@@ -77,6 +85,31 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </div>
         </main>
       </div>
+
+      {postLoginCashModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/65 backdrop-blur-md animate-fadeIn print:hidden">
+          <PosCashOpenModal
+            isMandatory={false}
+            onClose={() => {
+              try {
+                sessionStorage.removeItem('mercato_pending_cash_open');
+              } catch {
+                /* ignore */
+              }
+              setPostLoginCashModalOpen(false);
+            }}
+            onSuccess={() => {
+              try {
+                sessionStorage.removeItem('mercato_pending_cash_open');
+                sessionStorage.setItem('mercato_cash_opened_at_login', 'true');
+              } catch {
+                /* ignore */
+              }
+              setPostLoginCashModalOpen(false);
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

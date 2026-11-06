@@ -80,10 +80,10 @@ export default function PosCashOpenModal({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (defaultCajaId && !selectedCajaId) {
+    if (defaultCajaId) {
       setSelectedCajaId(defaultCajaId);
     }
-  }, [defaultCajaId, selectedCajaId]);
+  }, [defaultCajaId]);
 
   const selectedCaja =
     findCashRegister(availableRegisters, selectedCajaId) ||
@@ -99,6 +99,11 @@ export default function PosCashOpenModal({
         window.location.href = '/login';
       }
     } else {
+      try {
+        sessionStorage.removeItem('mercato_pending_cash_open');
+      } catch {
+        /* ignore */
+      }
       onClose();
     }
   };
@@ -140,6 +145,13 @@ export default function PosCashOpenModal({
         details: `Inicio de turno en ${targetLabel} con fondo de RD$ ${monto.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`,
         after: { caja_id: targetCajaId, cajero_id: cajeroId, monto_apertura: monto },
       });
+
+      try {
+        sessionStorage.removeItem('mercato_pending_cash_open');
+        sessionStorage.setItem('mercato_cash_opened_at_login', 'true');
+      } catch {
+        /* ignore */
+      }
 
       toast.success(`¡Caja ${targetLabel} iniciada con RD$ ${monto.toLocaleString('es-DO', { minimumFractionDigits: 2 })}! Listo para facturar.`);
       await refetchRegisters();
@@ -300,7 +312,7 @@ export default function PosCashOpenModal({
             ) : (
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleCancelOrExit}
                 className="px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold transition-all cursor-pointer"
               >
                 Cancelar

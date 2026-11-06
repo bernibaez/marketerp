@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import {
   ShieldCheck,
@@ -11,18 +11,11 @@ import {
   EyeOff,
   ArrowRight,
   X,
-  Banknote,
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/context/AuthContext';
-import { getRoleHome, canAccessRoute, isAdminOrSuperAdmin, type AuthUser } from '@/lib/auth';
+import { getRoleHome, canAccessRoute, normalizeRole } from '@/lib/auth';
 import { isSupabaseConfigured } from '@/services/clienteSupabase';
-import { iniciarCaja, obtenerSesionAbiertaDeUsuario } from '@/services/cierresCaja.service';
-import { obtenerCajas } from '@/services/cajas.service';
-import { CASH_REGISTERS } from '@/lib/cashRegisters';
-import { logAuditEvent } from '@/lib/auditStore';
-
-const PRESET_AMOUNTS = [0, 1000, 2000, 3000, 5000];
 
 const features = [
   { icon: ShoppingCart, label: 'Ventas rápidas' },
@@ -73,102 +66,36 @@ export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [montoApertura, setMontoApertura] = useState('0');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [isProcessingLogin, setIsProcessingLogin] = useState(false);
   const [codeOpen, setCodeOpen] = useState(false);
   const [accessCode, setAccessCode] = useState('');
-  const montoInputRef = useRef<HTMLInputElement>(null);
-
-  const showCashAmountField = Boolean(username.trim().length > 0 && password.length > 0);
 
   if (isAuthenticated && user && !isProcessingLogin) {
-    const target = from && from !== '/login' && canAccessRoute(user.role, from) ? from : getRoleHome(user.role);
+    const isCashier = normalizeRole(user.role).includes('cajer');
+    const target =
+      !isCashier && from && from !== '/login' && canAccessRoute(user.role, from)
+        ? from
+        : getRoleHome(user.role);
     return <Navigate to={target} replace />;
   }
 
   const goHome = (role: NonNullable<typeof user>['role']) => {
-    const target = from && from !== '/login' && canAccessRoute(role, from) ? from : getRoleHome(role);
+    const isCashier = normalizeRole(role).includes('cajer');
+    const target =
+      !isCashier && from && from !== '/login' && canAccessRoute(role, from)
+        ? from
+        : getRoleHome(role);
     navigate(target, { replace: true });
   };
 
-  const autoOpenCashForUser = async (loggedUser: AuthUser, rawAmount: string) => {
-    const monto = Math.max(0, parseFloat(rawAmount) || 0);
+  const markPendingCashOpen = () => {
     try {
-      const sesionActiva = await obtenerSesionAbiertaDeUsuario(loggedUser.id, loggedUser.name).catch(() => null);
-      // Si el usuario ya tiene un turno abierto y dejó el monto en 0 al iniciar sesión, conservar su turno abierto
-      if (sesionActiva && monto === 0) {
-        sessionStorage.setItem('mercato_cash_opened_at_login', 'true');
-        return;
-      }
-
-      let targetCajaId = sesionActiva?.caja_id || '1';
-      let targetLabel = `Caja — ${loggedUser.name || 'Principal'}`;
-
-      try {
-        const dbCajas = await obtenerCajas({ soloActivas: true });
-        const activeCajas = dbCajas.length > 0
-          ? dbCajas.map((c) => ({
-              id: String(c.id),
-              codigo: String(c.codigo || c.id),
-              label: c.nombre || `Caja #${c.codigo || c.id}`,
-              isAdminBox: Boolean(c.es_caja_principal),
-            }))
-          : CASH_REGISTERS.map((c) => ({
-              id: c.id,
-              codigo: c.id,
-              label: c.label,
-              isAdminBox: Boolean(c.isAdminBox),
-            }));
-
-        const uNorm = (loggedUser.name || '').trim().toLowerCase();
-        const byExisting = sesionActiva?.caja_id
-          ? activeCajas.find(
-              (c) => c.id === String(sesionActiva.caja_id) || c.codigo === String(sesionActiva.caja_id)
-            )
-          : undefined;
-        const byName = uNorm
-          ? activeCajas.find(
-              (c) => c.label.toLowerCase().includes(uNorm) || uNorm.includes(c.label.toLowerCase())
-            )
-          : undefined;
-        const isAdmin = isAdminOrSuperAdmin(loggedUser);
-        const byRole = isAdmin
-          ? activeCajas.find((c) => c.isAdminBox) || activeCajas[0]
-          : activeCajas.find((c) => !c.isAdminBox) || activeCajas[0];
-
-        const chosen = byExisting || byName || byRole || activeCajas[0];
-        if (chosen) {
-          targetCajaId = chosen.id;
-          targetLabel = chosen.label;
-        }
-      } catch {
-        // Fallback a Caja Principal
-      }
-
-      await iniciarCaja({
-        caja_id: targetCajaId,
-        caja_label: targetLabel,
-        cajero_id: loggedUser.id || null,
-        cajero_nombre: loggedUser.name || 'Cajero',
-        cajero_username: loggedUser.username || loggedUser.email || '',
-        monto_apertura: monto,
-        forzarNueva: true,
-      });
-
-      logAuditEvent({
-        user: loggedUser.name || 'Cajero',
-        role: loggedUser.role || 'Cajero',
-        action: 'Inicio de caja',
-        module: 'Caja',
-        details: `Inicio de caja automático al iniciar sesión con fondo de RD$ ${monto.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`,
-        after: { caja_id: targetCajaId, cajero_id: loggedUser.id, monto_apertura: monto },
-      });
-
-      sessionStorage.setItem('mercato_cash_opened_at_login', 'true');
-    } catch (err) {
-      console.warn('No se pudo iniciar la caja automáticamente en login:', err);
+      sessionStorage.removeItem('mercato_cash_opened_at_login');
+      sessionStorage.setItem('mercato_pending_cash_open', 'true');
+    } catch {
+      // ignore
     }
   };
 
@@ -177,11 +104,6 @@ export default function LoginPage() {
     setError('');
     if (!username.trim() || !password) {
       setError('Ingresa usuario y contraseña');
-      return;
-    }
-    const parsedMonto = parseFloat(montoApertura);
-    if (isNaN(parsedMonto) || parsedMonto < 0) {
-      setError('Ingresa un monto de inicio de caja válido (0 o mayor)');
       return;
     }
 
@@ -194,10 +116,8 @@ export default function LoginPage() {
         setIsProcessingLogin(false);
         return;
       }
-      await autoOpenCashForUser(result.user, montoApertura);
-      toast.success(
-        `Bienvenido, ${result.user.name} · Caja iniciada con RD$ ${parsedMonto.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`
-      );
+      markPendingCashOpen();
+      toast.success(`Bienvenido, ${result.user.name}`);
       setIsProcessingLogin(false);
       goHome(result.user.role);
     } finally {
@@ -207,7 +127,6 @@ export default function LoginPage() {
 
   const handleCodeAccess = async (e: React.FormEvent) => {
     e.preventDefault();
-    const parsedMonto = Math.max(0, parseFloat(montoApertura) || 0);
     setIsProcessingLogin(true);
     try {
       const result = await loginWithCode(accessCode);
@@ -216,10 +135,8 @@ export default function LoginPage() {
         setIsProcessingLogin(false);
         return;
       }
-      await autoOpenCashForUser(result.user, String(parsedMonto));
-      toast.success(
-        `Acceso con código · ${result.user.name} · Caja iniciada con RD$ ${parsedMonto.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`
-      );
+      markPendingCashOpen();
+      toast.success(`Acceso con código · ${result.user.name}`);
       setCodeOpen(false);
       setIsProcessingLogin(false);
       goHome(result.user.role);
@@ -323,13 +240,6 @@ export default function LoginPage() {
                   placeholder="Ingresa tu contraseña"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && username.trim() && password) {
-                      e.preventDefault();
-                      montoInputRef.current?.focus();
-                      montoInputRef.current?.select();
-                    }
-                  }}
                 />
                 <button
                   type="button"
@@ -341,61 +251,6 @@ export default function LoginPage() {
                 </button>
               </div>
             </div>
-
-            {showCashAmountField && (
-              <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200/90 space-y-3 animate-fadeIn">
-                <div className="flex items-center gap-2">
-                  <Banknote size={17} className="text-emerald-700 flex-shrink-0" />
-                  <div>
-                    <label className="block text-sm font-bold text-gray-900 leading-tight">
-                      Monto de inicio de caja
-                    </label>
-                    <p className="text-[11px] text-gray-500">
-                      Ingresa el efectivo inicial en caja para comenzar a facturar
-                    </p>
-                  </div>
-                </div>
-
-                <div className="relative bg-white rounded-xl border-2 border-emerald-500/80 focus-within:border-emerald-700 px-3.5 py-2.5 flex items-center shadow-2xs">
-                  <span className="text-xl font-black text-emerald-700 mr-2 select-none">
-                    RD$
-                  </span>
-                  <input
-                    ref={montoInputRef}
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    value={montoApertura}
-                    onFocus={(e) => e.currentTarget.select()}
-                    onClick={(e) => e.currentTarget.select()}
-                    onChange={(e) => setMontoApertura(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full bg-transparent font-black text-2xl text-gray-900 focus:outline-none"
-                  />
-                </div>
-
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {PRESET_AMOUNTS.map((amt) => {
-                    const isSelected = montoApertura === String(amt);
-                    return (
-                      <button
-                        key={amt}
-                        type="button"
-                        onClick={() => setMontoApertura(String(amt))}
-                        className={`px-2.5 py-1 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
-                          isSelected
-                            ? 'border-emerald-700 bg-emerald-700 text-white'
-                            : 'border-gray-200 bg-white hover:bg-gray-50 text-gray-700'
-                        }`}
-                      >
-                        RD$ {amt.toLocaleString()}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
             <div className="flex justify-end">
               <button
@@ -425,11 +280,11 @@ export default function LoginPage() {
               {loading ? (
                 <>
                   <span className="inline-block h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                  Iniciando caja y entrando…
+                  Entrando…
                 </>
               ) : (
                 <>
-                  {showCashAmountField ? 'Iniciar sesión y abrir caja' : 'Iniciar sesión'}
+                  Iniciar sesión
                   <ArrowRight size={18} />
                 </>
               )}
@@ -485,7 +340,7 @@ export default function LoginPage() {
               </button>
             </div>
             <p className="text-sm text-gray-500">
-              Ingresa el código de acceso y el monto de inicio de caja.
+              Ingresa tu código de acceso rápido para iniciar sesión.
             </p>
             <form onSubmit={handleCodeAccess} className="space-y-3">
               <input
@@ -495,32 +350,12 @@ export default function LoginPage() {
                 onChange={(e) => setAccessCode(e.target.value)}
                 autoFocus
               />
-              {accessCode.trim().length > 0 && (
-                <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 space-y-2">
-                  <label className="block text-xs font-bold text-gray-800">
-                    Monto de inicio de caja (RD$)
-                  </label>
-                  <div className="relative bg-white rounded-lg border border-emerald-500 px-3 py-2 flex items-center">
-                    <span className="text-base font-black text-emerald-700 mr-1.5 select-none">RD$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={montoApertura}
-                      onFocus={(e) => e.currentTarget.select()}
-                      onClick={(e) => e.currentTarget.select()}
-                      onChange={(e) => setMontoApertura(e.target.value)}
-                      className="w-full bg-transparent font-black text-lg text-gray-900 focus:outline-none"
-                    />
-                  </div>
-                </div>
-              )}
               <button
                 type="submit"
                 className="w-full rounded-xl py-3 text-sm font-semibold text-white"
                 style={{ backgroundColor: '#14532d' }}
               >
-                Iniciar caja y entrar
+                Entrar
               </button>
             </form>
           </div>

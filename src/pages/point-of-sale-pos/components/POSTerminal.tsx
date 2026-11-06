@@ -169,6 +169,13 @@ export default function POSTerminal() {
   const [activeCashId, setActiveCashId] = useState<CashRegisterId>(() =>
     isAdminUser ? '4' : '1'
   );
+  const [pendingPostLoginOpen, setPendingPostLoginOpen] = useState(() => {
+    try {
+      return sessionStorage.getItem('mercato_pending_cash_open') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [shiftOpenedLocally, setShiftOpenedLocally] = useState(() => {
     try {
       return sessionStorage.getItem('mercato_cash_opened_at_login') === 'true';
@@ -210,6 +217,7 @@ export default function POSTerminal() {
     !shiftOpenedLocally;
 
   const cashIsOpen =
+    !pendingPostLoginOpen &&
     !shiftClosedLocally &&
     !isCajaBelongingToOtherCashier &&
     (isMyOpenSession || shiftOpenedLocally || (isAdminUser && Boolean(activeCashSession?.open)));
@@ -594,7 +602,7 @@ export default function POSTerminal() {
       </div>
 
       {/* 2. Pantalla de Verificación o Modal Obligatorio de Apertura de Caja */}
-      {registersLoading && !shiftOpenedLocally ? (
+      {registersLoading && !shiftOpenedLocally && !pendingPostLoginOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-md">
           <div className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl p-8 border border-slate-200/80 dark:border-slate-800 shadow-2xl flex flex-col items-center gap-4 text-center">
             <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-100 dark:border-emerald-900/50 flex items-center justify-center text-emerald-600 dark:text-emerald-400 animate-spin">
@@ -617,9 +625,11 @@ export default function POSTerminal() {
             }}
             onClose={() => {}}
             onSuccess={(cierre) => {
+              setPendingPostLoginOpen(false);
               setShiftClosedLocally(false);
               setShiftOpenedLocally(true);
               try {
+                sessionStorage.removeItem('mercato_pending_cash_open');
                 sessionStorage.setItem('mercato_cash_opened_at_login', 'true');
               } catch { /* ignore */ }
               if (cierre?.caja_id) setActiveCashId(cierre.caja_id);
