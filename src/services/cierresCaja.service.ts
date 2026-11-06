@@ -2,6 +2,7 @@ import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupa
 import { CIERRE_COLUMNS, type CierreCaja } from '@/types/database';
 import { getCashClosures, saveCashClosure, type CashClosure } from '@/lib/cashClosureStore';
 import { obtenerCajas } from './cajas.service';
+import { obtenerUsuarios } from './usuarios.service';
 import { obtenerVentasTurno, getLocalVentas, type VentaConDetalle } from './ventas.service';
 import { obtenerMovimientosCaja } from './movimientosCaja.service';
 
@@ -80,7 +81,7 @@ function localToDb(c: CashClosure): CierreCaja {
 }
 
 export function cierreDbARegistro(
-  c: CierreCaja & { cajero_nombre?: string; cajero_username?: string },
+  c: CierreCaja & { cajero_nombre?: string; cajero_username?: string; caja_label?: string },
   extra?: Partial<Pick<CashClosure, 'userName' | 'username' | 'cashRegisterLabel' | 'notes' | 'baseCash'>>
 ): CashClosure {
   const local = getCashClosures().find((x) => x.id === c.id);
@@ -95,7 +96,7 @@ export function cierreDbARegistro(
     closedAt,
     date: (closedAt || c.abierta_en || new Date().toISOString()).slice(0, 10),
     cashRegisterId: c.caja_id,
-    cashRegisterLabel: extra?.cashRegisterLabel || local?.cashRegisterLabel || `Caja ${c.caja_id}`,
+    cashRegisterLabel: extra?.cashRegisterLabel || c.caja_label || local?.cashRegisterLabel || `Caja ${c.caja_id}`,
     totalSales: Number(c.total_ventas ?? local?.totalSales ?? 0),
     totalCash: Number(c.total_efectivo ?? local?.totalCash ?? 0),
     totalCard: Number(c.total_tarjeta ?? local?.totalCard ?? 0),
@@ -126,26 +127,161 @@ function persistirRegistroCierre(
 
 /** Historial de cierres ya cerrados para la pantalla Cierre de Caja. */
 export async function obtenerRegistrosCierreCaja(): Promise<CashClosure[]> {
-  const rows = await obtenerCierresCaja();
+  const [rows, usuarios, cajasDb] = await Promise.all([
+    obtenerCierresCaja(),
+    obtenerUsuarios().catch(() => []),
+    obtenerCajas({ soloActivas: false }).catch(() => []),
+  ]);
+
+  const userMap = new Map<string, { nombre: string; username: string }>();
+  for (const u of usuarios) {
+    if (u.id) {
+      userMap.set(String(u.id), {
+        nombre: u.nombre_completo || 'Cajero',
+        username: (u.correo || '').split('@')[0] || 'cajero',
+      });
+    }
+  }
+
+  const cajaLabelMap = new Map<string, string>();
+  for (const cj of cajasDb) {
+    const label = cj.nombre?.toUpperCase().includes('CAJA')
+      ? cj.nombre
+      : `Caja #${cj.codigo || cj.id} - ${cj.nombre}`;
+    if (cj.id) cajaLabelMap.set(String(cj.id), label);
+    if (cj.codigo) {
+      cajaLabelMap.set(String(cj.codigo), label);
+      cajaLabelMap.set(`caja-${cj.codigo}`, label);
+    }
+  }
+
   const cerrados = rows.filter((c) => String(c.estado).toLowerCase() === 'cerrada');
-  const mapped = cerrados.map((c) => cierreDbARegistro(c));
+  const mapped = cerrados.map((c) => {
+    const uInfo = c.cajero_id ? userMap.get(String(c.cajero_id)) : undefined;
+    const cLabel = c.caja_id ? cajaLabelMap.get(String(c.caja_id)) : undefined;
+    return cierreDbARegistro(c, {
+      userName: (c as any).cajero_nombre || uInfo?.nombre,
+      username: (c as any).cajero_username || uInfo?.username,
+      cashRegisterLabel: (c as any).caja_label || cLabel,
+    });
+  });
+
   const seen = new Set(mapped.map((c) => c.id));
-  const locales = getCashClosures().filter(
-    (c) => (c.status === 'cerrada' || !!c.closedAt) && !seen.has(c.id)
-  );
-  return [...mapped, ...locales].sort((a, b) => (a.closedAt < b.closedAt ? 1 : -1));
+  const locales = getCashClosures()
+    .filter((c) => (c.status === 'cerrada' || !!c.closedAt) && !seen.has(c.id))
+    .map((c) => {
+      const uInfo = c.userId ? userMap.get(String(c.userId)) : undefined;
+      const cLabel = c.cashRegisterId ? cajaLabelMap.get(String(c.cashRegisterId)) : undefined;
+      return {
+        ...c,
+        userName: c.userName && c.userName !== 'Cajero' ? c.userName : uInfo?.nombre || c.userName || 'Cajero',
+        username: c.username || uInfo?.username || '',
+        cashRegisterLabel: cLabel || c.cashRegisterLabel || `Caja #${c.cashRegisterId}`,
+      };
+    });
+
+  // Recalcular/verificar ventas exactas si un cierre quedó con totalSales === 0 pero tuvo ventas en su turno
+  const allClosures = [...mapped, ...locales];
+  const needsSalesCheck = allClosures.some((c) => c.totalSales === 0 && c.openedAt);
+  if (needsSalesCheck) {
+    try {
+      const oldestOpen = allClosures
+        .map((c) => c.openedAt)
+        .filter(Boolean)
+        .sort()[0];
+      const ventasRecientes = await obtenerVentasTurno({
+        desde: oldestOpen || undefined,
+        limite: 1000,
+      }).catch((): VentaConDetalle[] => []);
+      const localVentas = getLocalVentas();
+      const todasVentasMap = new Map<string, VentaConDetalle>();
+      for (const v of [...ventasRecientes, ...localVentas]) {
+        if (v.id && v.estado !== 'anulada') todasVentasMap.set(v.id, v);
+      }
+      const todasVentas = Array.from(todasVentasMap.values());
+
+      for (const cl of allClosures) {
+        if (cl.totalSales > 0) continue;
+        const tStart = cl.openedAt ? new Date(cl.openedAt).getTime() : 0;
+        const tEnd = cl.closedAt ? new Date(cl.closedAt).getTime() : Date.now();
+        if (!tStart || isNaN(tStart)) continue;
+
+        const ventasDelTurno = todasVentas.filter((v) => {
+          const vt = v.creado_en ? new Date(v.creado_en).getTime() : 0;
+          if (!vt || vt < tStart - 10_000 || (tEnd > 0 && vt > tEnd + 10_000)) return false;
+          const matchUser = cl.userId && v.cajero_id && String(v.cajero_id) === String(cl.userId);
+          const matchName =
+            cl.userName &&
+            v.cajero_nombre &&
+            v.cajero_nombre.trim().toLowerCase() === cl.userName.trim().toLowerCase();
+          const matchBox =
+            cl.cashRegisterId &&
+            v.caja_id &&
+            String(v.caja_id) === String(cl.cashRegisterId);
+          return matchUser || matchName || (!cl.userId && matchBox);
+        });
+
+        if (ventasDelTurno.length > 0) {
+          let sumSales = 0;
+          let sumCash = 0;
+          let sumCard = 0;
+          let sumTransfer = 0;
+          let sumCredit = 0;
+          for (const v of ventasDelTurno) {
+            const monto = Number(v.monto_total || 0);
+            sumSales += monto;
+            const m = String(v.metodo_pago || 'efectivo').toLowerCase();
+            if (m === 'efectivo' || m === 'cash') sumCash += monto;
+            else if (m === 'tarjeta' || m === 'card') sumCard += monto;
+            else if (m === 'transferencia' || m === 'transfer') sumTransfer += monto;
+            else if (m === 'credito' || m === 'credit') sumCredit += monto;
+          }
+          cl.totalSales = Math.round(sumSales * 100) / 100;
+          cl.totalCash = Math.round(sumCash * 100) / 100;
+          cl.totalCard = Math.round(sumCard * 100) / 100;
+          cl.totalTransfer = Math.round(sumTransfer * 100) / 100;
+          cl.totalCredit = Math.round(sumCredit * 100) / 100;
+          if (cl.expectedCash === 0 || cl.expectedCash === (cl.baseCash ?? 0)) {
+            cl.expectedCash = Math.round(((cl.baseCash ?? 0) + cl.totalCash) * 100) / 100;
+            cl.difference = Math.round((cl.countedCash - cl.expectedCash) * 100) / 100;
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return allClosures.sort((a, b) => ((a.closedAt || a.openedAt) < (b.closedAt || b.openedAt) ? 1 : -1));
 }
 
-function mapCierreRowWithPerfil(row: any): CierreCaja & { cajero_nombre?: string; cajero_username?: string } {
+function mapCierreRowWithPerfil(
+  row: any,
+  userMap?: Map<string, { nombre: string; username: string }>,
+  cajaLabelMap?: Map<string, string>
+): CierreCaja & { cajero_nombre?: string; cajero_username?: string; caja_label?: string } {
   const perfil = Array.isArray(row?.perfiles) ? row.perfiles[0] : row?.perfiles;
   const local = getCashClosures().find((x) => x.id === row?.id);
-  const cajeroNombre = perfil?.nombre_completo || row?.cajero_nombre || local?.userName || undefined;
-  const cajeroUsername = perfil?.correo || row?.cajero_username || local?.username || undefined;
+  const uFromMap = row?.cajero_id && userMap ? userMap.get(String(row.cajero_id)) : undefined;
+  const cajeroNombre =
+    perfil?.nombre_completo ||
+    uFromMap?.nombre ||
+    row?.cajero_nombre ||
+    local?.userName ||
+    undefined;
+  const rawCorreo = perfil?.correo || uFromMap?.username || row?.cajero_username || local?.username || undefined;
+  const cajeroUsername = rawCorreo ? String(rawCorreo).split('@')[0] : undefined;
+  const cajaLabel =
+    (row?.caja_id && cajaLabelMap ? cajaLabelMap.get(String(row.caja_id)) : undefined) ||
+    row?.caja_label ||
+    local?.cashRegisterLabel ||
+    undefined;
   const { perfiles: _omitPerfiles, ...rest } = row || {};
   return {
     ...(rest as CierreCaja),
     ...(cajeroNombre ? { cajero_nombre: cajeroNombre } : {}),
     ...(cajeroUsername ? { cajero_username: cajeroUsername } : {}),
+    ...(cajaLabel ? { caja_label: cajaLabel } : {}),
   };
 }
 
@@ -158,12 +294,37 @@ export async function obtenerCierresCaja(params?: {
     return local;
   }
   try {
+    const [usuarios, cajasDb] = await Promise.all([
+      obtenerUsuarios().catch(() => []),
+      obtenerCajas({ soloActivas: false }).catch(() => []),
+    ]);
+    const userMap = new Map<string, { nombre: string; username: string }>();
+    for (const u of usuarios) {
+      if (u.id) {
+        userMap.set(String(u.id), {
+          nombre: u.nombre_completo || 'Cajero',
+          username: (u.correo || '').split('@')[0] || 'cajero',
+        });
+      }
+    }
+    const cajaLabelMap = new Map<string, string>();
+    for (const cj of cajasDb) {
+      const label = cj.nombre?.toUpperCase().includes('CAJA')
+        ? cj.nombre
+        : `Caja #${cj.codigo || cj.id} - ${cj.nombre}`;
+      if (cj.id) cajaLabelMap.set(String(cj.id), label);
+      if (cj.codigo) {
+        cajaLabelMap.set(String(cj.codigo), label);
+        cajaLabelMap.set(`caja-${cj.codigo}`, label);
+      }
+    }
+
     const buildQuery = (cols: string) => {
       let q = sb
         .from('cierres_caja')
         .select(cols)
         .order('abierta_en', { ascending: false })
-        .limit(100);
+        .limit(150);
       if (params?.signal) q = q.abortSignal(params.signal);
       return q;
     };
@@ -174,7 +335,7 @@ export async function obtenerCierresCaja(params?: {
         data = fallback.data;
       }
     }
-    const remote = (data ?? []).map(mapCierreRowWithPerfil);
+    const remote = (data ?? []).map((r) => mapCierreRowWithPerfil(r, userMap, cajaLabelMap));
     const seen = new Set(remote.map((r) => r.id));
     return [...remote, ...local.filter((l) => !seen.has(l.id))];
   } catch {
@@ -460,15 +621,40 @@ async function listarSesionesAbiertas(): Promise<CierreCaja[]> {
     return getCashClosures().map(localToDb).filter((c) => isOpenStatus(c.estado));
   }
   try {
-    const { data, error } = await sb
-      .from('cierres_caja')
-      .select(`${CIERRE_COLUMNS}, perfiles!cajero_id(nombre_completo, correo)`)
-      .eq('estado', 'abierta')
-      .order('abierta_en', { ascending: false })
-      .limit(50);
+    const [usuarios, cajasDb, queryRes] = await Promise.all([
+      obtenerUsuarios().catch(() => []),
+      obtenerCajas({ soloActivas: false }).catch(() => []),
+      sb
+        .from('cierres_caja')
+        .select(`${CIERRE_COLUMNS}, perfiles!cajero_id(nombre_completo, correo)`)
+        .eq('estado', 'abierta')
+        .order('abierta_en', { ascending: false })
+        .limit(50),
+    ]);
 
-    let rows: any[] = data ?? [];
-    if (error) {
+    const userMap = new Map<string, { nombre: string; username: string }>();
+    for (const u of usuarios) {
+      if (u.id) {
+        userMap.set(String(u.id), {
+          nombre: u.nombre_completo || 'Cajero',
+          username: (u.correo || '').split('@')[0] || 'cajero',
+        });
+      }
+    }
+    const cajaLabelMap = new Map<string, string>();
+    for (const cj of cajasDb) {
+      const label = cj.nombre?.toUpperCase().includes('CAJA')
+        ? cj.nombre
+        : `Caja #${cj.codigo || cj.id} - ${cj.nombre}`;
+      if (cj.id) cajaLabelMap.set(String(cj.id), label);
+      if (cj.codigo) {
+        cajaLabelMap.set(String(cj.codigo), label);
+        cajaLabelMap.set(`caja-${cj.codigo}`, label);
+      }
+    }
+
+    let rows: any[] = queryRes.data ?? [];
+    if (queryRes.error) {
       const fallback = await sb
         .from('cierres_caja')
         .select(CIERRE_COLUMNS)
@@ -478,7 +664,7 @@ async function listarSesionesAbiertas(): Promise<CierreCaja[]> {
       rows = fallback.data ?? [];
     }
 
-    const remote = rows.map(mapCierreRowWithPerfil);
+    const remote = rows.map((r) => mapCierreRowWithPerfil(r, userMap, cajaLabelMap));
     const local = getCashClosures().map(localToDb).filter((c) => isOpenStatus(c.estado));
     const seen = new Set(remote.map((c) => c.id));
     return [...remote, ...local.filter((c) => !seen.has(c.id))];
@@ -527,11 +713,18 @@ export async function cerrarSesionesAbiertasDeCaja(cajaId?: string): Promise<num
 export async function obtenerCajaAbierta(
   cajaId?: string,
   cajeroId?: string,
-  cajeroNombre?: string
+  cajeroNombre?: string,
+  cierreId?: string
 ): Promise<CierreCaja | null> {
   const ids = await expandCajaIds(cajaId);
   const abiertas = await listarSesionesAbiertas();
   if (abiertas.length === 0) return null;
+
+  // 0. Si se especificó el ID exacto del turno abierto (cierreId), priorizarlo
+  if (cierreId) {
+    const byCierre = abiertas.find((c) => String(c.id) === String(cierreId));
+    if (byCierre) return byCierre;
+  }
 
   // 1. Coincidencia estricta: misma caja y mismo cajero (por ID o por nombre)
   if (ids.size > 0 && (cajeroId || cajeroNombre)) {
@@ -563,8 +756,8 @@ export async function obtenerCajaAbierta(
     if (matchUser) return matchUser;
   }
 
-  // 3. Coincidencia por caja (solo si no se especificó un cajero)
-  if (ids.size > 0 && !cajeroId && !cajeroNombre) {
+  // 3. Coincidencia por caja (permite al administrador consultar o cerrar cualquier caja activa)
+  if (ids.size > 0) {
     const matchCaja = abiertas.find((c) => ids.has(String(c.caja_id)));
     if (matchCaja) return matchCaja;
   }
@@ -596,19 +789,21 @@ export interface ResumenCajaAbierta {
 export async function calcularResumenCajaAbierta(
   cajaId: string,
   cajeroId?: string,
-  cajeroNombre?: string
+  cajeroNombre?: string,
+  cierreId?: string
 ): Promise<ResumenCajaAbierta> {
   const ids = await expandCajaIds(cajaId);
-  const abierta = await obtenerCajaAbierta(cajaId, cajeroId, cajeroNombre);
+  const abierta = await obtenerCajaAbierta(cajaId, cajeroId, cajeroNombre, cierreId);
   if (abierta?.caja_id) {
     const extraIds = await expandCajaIds(abierta.caja_id);
     extraIds.forEach((x) => ids.add(x));
   }
   const apertura = Number(abierta?.monto_apertura ?? 0);
   const desde = abierta?.abierta_en || `${new Date().toISOString().slice(0, 10)}T00:00:00`;
-  const effectiveCajeroId = abierta?.cajero_id || cajeroId;
-  const effectiveCajeroNombre =
-    (abierta as (CierreCaja & { cajero_nombre?: string }) | null)?.cajero_nombre || cajeroNombre;
+  const effectiveCajeroId = abierta ? abierta.cajero_id || undefined : cajeroId;
+  const effectiveCajeroNombre = abierta
+    ? (abierta as (CierreCaja & { cajero_nombre?: string }) | null)?.cajero_nombre || undefined
+    : cajeroNombre;
 
   let totalVentas = 0;
   let totalEfectivo = 0;

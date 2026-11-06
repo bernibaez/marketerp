@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/context/AuthContext';
+import { isAdminOrSuperAdmin } from '@/lib/auth';
 import type { CashClosure } from '@/lib/cashClosureStore';
+import type { CashRegisterSession } from '@/lib/cashRegisters';
+import { useCashRegisters } from '@/hooks/useCashRegisters';
 import { exportTableToPdf, exportTableToExcel, formatMoneyPdf } from '@/lib/exportPdf';
 import { toast } from '@/lib/toast';
 import { obtenerRegistrosCierreCaja } from '@/services/cierresCaja.service';
@@ -12,16 +15,18 @@ import { CashClosureListView } from './cash-closure/components/CashClosureListVi
 
 export default function CashClosurePage() {
   const { user } = useAuth();
-  const roleNorm = (user?.role || '').trim().toLowerCase();
-  const isAdmin =
-    roleNorm === 'administrador' ||
-    roleNorm === 'super administrador' ||
-    roleNorm === 'admin' ||
-    roleNorm === 'super_admin' ||
-    roleNorm === 'superadmin';
+  const isAdmin = isAdminOrSuperAdmin(user);
+  const {
+    registers,
+    loading: loadingRegisters,
+    refetch: refetchRegisters,
+  } = useCashRegisters();
 
   const [closures, setClosures] = useState<CashClosure[]>([]);
-  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [closeModalTarget, setCloseModalTarget] = useState<{
+    cajaId?: string;
+    cierreId?: string;
+  } | null>(null);
   const [showOpenModal, setShowOpenModal] = useState(false);
   const [viewingClosure, setViewingClosure] = useState<CashClosure | null>(null);
 
@@ -44,20 +49,34 @@ export default function CashClosurePage() {
   };
 
   useEffect(() => {
-    fetchClosures();
-  }, []);
+    void fetchClosures();
+    const handleUpdated = () => {
+      void fetchClosures();
+      void refetchRegisters();
+    };
+    window.addEventListener('mercato_cash_closures_updated', handleUpdated);
+    return () => {
+      window.removeEventListener('mercato_cash_closures_updated', handleUpdated);
+    };
+  }, [refetchRegisters]);
 
   const filteredClosures = useMemo(() => {
     return closures.filter((c) => {
       if (!isAdmin) {
         const uid = user?.id ?? '';
         const uname = (user?.username ?? '').toLowerCase();
+        const ufull = (user?.name ?? '').trim().toLowerCase();
         const matchesUser =
-          (c.userId && uid && c.userId === uid) ||
-          (c.username && uname && c.username.toLowerCase() === uname);
+          (c.userId && uid && String(c.userId) === String(uid)) ||
+          (c.username && uname && c.username.toLowerCase() === uname) ||
+          (c.userName && ufull && c.userName.trim().toLowerCase() === ufull);
         if (!matchesUser) return false;
       }
-      if (searchUser && !c.userName.toLowerCase().includes(searchUser.toLowerCase()) && !c.username.toLowerCase().includes(searchUser.toLowerCase())) {
+      if (
+        searchUser &&
+        !c.userName.toLowerCase().includes(searchUser.toLowerCase()) &&
+        !c.username.toLowerCase().includes(searchUser.toLowerCase())
+      ) {
         return false;
       }
       if (singleDate && c.date !== singleDate) {
@@ -72,24 +91,45 @@ export default function CashClosurePage() {
 
   const handleExportPdf = () => {
     exportTableToPdf({
-      title: 'Reporte de Cierres de Caja Diarios',
-      subtitle: !isAdmin ? `Usuario: ${user?.name}` : 'Todos los usuarios',
+      title: 'Reporte Exacto de Cierres de Caja Diarios',
+      subtitle: !isAdmin ? `Usuario: ${user?.name}` : 'Todos los usuarios y cajas',
       filename: 'cierres-de-caja',
       headers: [
-        'Código', 'Fecha', 'Apertura', 'Cierre', 'Caja', 'Usuario', 'Vendido', 'Efectivo Esperado', 'Contado', 'Diferencia'
+        'Código',
+        'Fecha',
+        'Horario',
+        'Caja',
+        'Cajero',
+        'Fondo Inicial',
+        'Efectivo Ventas',
+        'Total Vendido',
+        'Efectivo Esperado',
+        'Efectivo Contado',
+        'Diferencia',
       ],
-      rows: filteredClosures.map((c) => [
-        c.code,
-        c.date,
-        c.openedAt.split(' ')[1] || c.openedAt,
-        c.closedAt.split(' ')[1] || c.closedAt,
-        c.cashRegisterLabel || `Caja #${c.cashRegisterId}`,
-        c.userName,
-        formatMoneyPdf(c.totalSales),
-        formatMoneyPdf(c.expectedCash),
-        formatMoneyPdf(c.countedCash),
-        formatMoneyPdf(c.difference),
-      ]),
+      rows: filteredClosures.map((c) => {
+        const openTime = c.openedAt.includes('T')
+          ? new Date(c.openedAt).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })
+          : c.openedAt.split(' ')[1] || c.openedAt;
+        const closeTime = c.closedAt
+          ? c.closedAt.includes('T')
+            ? new Date(c.closedAt).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })
+            : c.closedAt.split(' ')[1] || c.closedAt
+          : '—';
+        return [
+          c.code,
+          c.date,
+          `${openTime} - ${closeTime}`,
+          c.cashRegisterLabel || `Caja #${c.cashRegisterId}`,
+          c.userName,
+          formatMoneyPdf(c.baseCash ?? 0),
+          formatMoneyPdf(c.totalCash ?? 0),
+          formatMoneyPdf(c.totalSales),
+          formatMoneyPdf(c.expectedCash),
+          formatMoneyPdf(c.countedCash),
+          formatMoneyPdf(c.difference),
+        ];
+      }),
       landscape: true,
     });
   };
@@ -99,7 +139,21 @@ export default function CashClosurePage() {
       title: 'Reporte de Cierres de Caja Diarios',
       filename: 'cierres-de-caja',
       headers: [
-        'Código', 'Fecha', 'Apertura', 'Cierre', 'Caja', 'Usuario', 'Total Vendido', 'Fondo Inicial', 'Total Efectivo', 'Efectivo Esperado', 'Efectivo Contado', 'Diferencia', 'Total Tarjetas', 'Total Transferencias', 'Total Crédito'
+        'Código',
+        'Fecha',
+        'Apertura',
+        'Cierre',
+        'Caja',
+        'Usuario',
+        'Total Vendido',
+        'Fondo Inicial',
+        'Total Efectivo',
+        'Efectivo Esperado',
+        'Efectivo Contado',
+        'Diferencia',
+        'Total Tarjetas',
+        'Total Transferencias',
+        'Total Crédito',
       ],
       rows: filteredClosures.map((c) => [
         c.code,
@@ -147,6 +201,13 @@ export default function CashClosurePage() {
     });
   };
 
+  const handleCloseActiveRegister = (reg: CashRegisterSession) => {
+    setCloseModalTarget({
+      cajaId: reg.dbId || reg.id,
+      cierreId: reg.cierreId,
+    });
+  };
+
   return (
     <AppLayout>
       {viewingClosure ? (
@@ -159,6 +220,8 @@ export default function CashClosurePage() {
         <>
           <CashClosureListView
             isAdmin={isAdmin}
+            registers={registers}
+            loadingRegisters={loadingRegisters}
             filteredClosures={filteredClosures}
             loading={loading}
             searchUser={searchUser}
@@ -170,19 +233,27 @@ export default function CashClosurePage() {
             endDate={endDate}
             onEndDateChange={setEndDate}
             onOpenOpenModal={() => setShowOpenModal(true)}
-            onOpenCloseModal={() => setShowCloseModal(true)}
+            onOpenCloseModal={() => setCloseModalTarget({})}
+            onCloseActiveRegister={handleCloseActiveRegister}
+            onRefresh={() => {
+              void fetchClosures();
+              void refetchRegisters();
+            }}
             onViewClosure={setViewingClosure}
             onExportPdf={handleExportPdf}
             onExportExcel={handleExportExcel}
           />
 
-          {showCloseModal && (
+          {closeModalTarget !== null && (
             <PosCashCloseModal
+              initialCajaId={closeModalTarget.cajaId}
+              initialCierreId={closeModalTarget.cierreId}
               onSuccess={() => {
                 void fetchClosures();
-                setShowCloseModal(false);
+                void refetchRegisters();
+                setCloseModalTarget(null);
               }}
-              onClose={() => setShowCloseModal(false)}
+              onClose={() => setCloseModalTarget(null)}
             />
           )}
 
@@ -190,6 +261,7 @@ export default function CashClosurePage() {
             <PosCashOpenModal
               onSuccess={() => {
                 void fetchClosures();
+                void refetchRegisters();
                 setShowOpenModal(false);
               }}
               onClose={() => setShowOpenModal(false)}

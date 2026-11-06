@@ -12,6 +12,12 @@ export type CashRegisterSession = {
   isAdminBox?: boolean;
   open: boolean;
   openedAt: string;
+  openedAtIso?: string;
+  baseCash?: number;
+  cashSales?: number;
+  cardSales?: number;
+  transferSales?: number;
+  expectedCash?: number;
   salesToday: number;
   tickets: number;
   cartItems: number;

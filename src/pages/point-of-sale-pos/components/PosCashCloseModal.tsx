@@ -26,12 +26,14 @@ import { logAuditEvent } from '@/lib/auditStore';
 
 interface PosCashCloseModalProps {
   initialCajaId?: string;
+  initialCierreId?: string;
   onSuccess?: (cierre: CierreCaja) => void;
   onClose: () => void;
 }
 
 export default function PosCashCloseModal({
   initialCajaId,
+  initialCierreId,
   onSuccess,
   onClose,
 }: PosCashCloseModalProps) {
@@ -43,14 +45,22 @@ export default function PosCashCloseModal({
     ? registers
     : registers.filter((c) => !c.isAdminBox);
 
-  // Buscar el turno abierto del usuario en TODAS las cajas (incluyendo Caja #1 si fue asignada en login)
+  const openRegisters = registers.filter((c) => c.open);
+
+  // Buscar el turno abierto del usuario en TODAS las cajas
   const userOpenBox = registers.find(
     (c) =>
       c.open &&
       ((c.cashierId && user?.id && String(c.cashierId) === String(user.id)) ||
         (c.cashier && user?.name && c.cashier.trim().toLowerCase() === user.name.trim().toLowerCase()))
   );
+
+  const matchByCierre = initialCierreId
+    ? registers.find((c) => c.cierreId === initialCierreId)
+    : undefined;
+
   const resolvedMatch =
+    matchByCierre ||
     findCashRegister(registers, initialCajaId) ||
     findCashRegister(availableRegisters, initialCajaId);
 
@@ -63,7 +73,10 @@ export default function PosCashCloseModal({
     : undefined;
 
   const resolvedInitial =
+    matchByCierre?.id ||
+    (initialCajaId && resolvedMatch ? resolvedMatch.id : undefined) ||
     userOpenBox?.id ||
+    (isAdmin && openRegisters[0] ? openRegisters[0].id : undefined) ||
     userBoxByName?.id ||
     resolvedMatch?.id ||
     availableRegisters[0]?.id ||
@@ -71,6 +84,39 @@ export default function PosCashCloseModal({
     '1';
 
   const [selectedCajaId, setSelectedCajaId] = useState(resolvedInitial);
+  const [selectedCierreId, setSelectedCierreId] = useState<string | undefined>(
+    initialCierreId || matchByCierre?.cierreId
+  );
+
+  // Sincronizar cuando cargan los registros dinámicos
+  useEffect(() => {
+    if (initialCierreId) {
+      const found = registers.find((c) => c.cierreId === initialCierreId);
+      if (found) {
+        setSelectedCajaId(found.id);
+        setSelectedCierreId(found.cierreId);
+        return;
+      }
+    }
+    if (initialCajaId) {
+      const found = findCashRegister(registers, initialCajaId);
+      if (found) {
+        setSelectedCajaId(found.id);
+        setSelectedCierreId(found.cierreId);
+        return;
+      }
+    }
+    if (!initialCajaId && !initialCierreId) {
+      if (userOpenBox) {
+        setSelectedCajaId(userOpenBox.id);
+        setSelectedCierreId(userOpenBox.cierreId);
+      } else if (isAdmin && openRegisters.length > 0) {
+        setSelectedCajaId(openRegisters[0].id);
+        setSelectedCierreId(openRegisters[0].cierreId);
+      }
+    }
+  }, [initialCajaId, initialCierreId, registers.length, userOpenBox?.id, isAdmin]);
+
   const [summary, setSummary] = useState<ResumenCajaAbierta>({
     caja_id: resolvedInitial,
     caja_label: `Caja #${resolvedInitial}`,
@@ -94,7 +140,8 @@ export default function PosCashCloseModal({
   const [fetchingSummary, setFetchingSummary] = useState(false);
 
   const selectedCaja =
-    userOpenBox ||
+    (selectedCierreId ? registers.find((c) => c.cierreId === selectedCierreId) : undefined) ||
+    (!isAdmin && userOpenBox ? userOpenBox : undefined) ||
     findCashRegister(registers, selectedCajaId) ||
     findCashRegister(availableRegisters, selectedCajaId) ||
     availableRegisters[0] ||
@@ -106,13 +153,29 @@ export default function PosCashCloseModal({
       setFetchingSummary(true);
       try {
         const targetId = selectedCaja?.dbId || selectedCaja?.id || selectedCajaId;
-        const res = await calcularResumenCajaAbierta(targetId, user?.id, user?.name);
+        const targetCajeroId =
+          selectedCaja?.open && selectedCaja?.cashierId
+            ? selectedCaja.cashierId
+            : !isAdmin
+              ? user?.id
+              : undefined;
+        const targetCajeroName =
+          selectedCaja?.open && selectedCaja?.cashier && selectedCaja.cashier !== 'Disponible'
+            ? selectedCaja.cashier
+            : !isAdmin
+              ? user?.name
+              : undefined;
+        const targetCierreId = selectedCierreId || selectedCaja?.cierreId;
+
+        const res = await calcularResumenCajaAbierta(
+          targetId,
+          targetCajeroId,
+          targetCajeroName,
+          targetCierreId
+        );
         if (alive) {
           setSummary(res);
-          // Si el usuario no ha ingresado un monto aún, podemos sugerir o dejar listo
-          if (montoRealInput === '') {
-            setMontoRealInput(String(res.monto_esperado));
-          }
+          setMontoRealInput(String(res.monto_esperado));
         }
       } catch {
         if (alive) {
@@ -128,10 +191,30 @@ export default function PosCashCloseModal({
     return () => {
       alive = false;
     };
-  }, [selectedCajaId, selectedCaja?.dbId, selectedCaja?.id, user?.id, user?.name]);
+  }, [
+    selectedCajaId,
+    selectedCierreId,
+    selectedCaja?.dbId,
+    selectedCaja?.id,
+    selectedCaja?.cierreId,
+    selectedCaja?.cashierId,
+    selectedCaja?.cashier,
+    selectedCaja?.open,
+    isAdmin,
+    user?.id,
+    user?.name,
+  ]);
 
   const countedReal = parseFloat(montoRealInput) || 0;
   const diferencia = Math.round((countedReal - summary.monto_esperado) * 100) / 100;
+
+  const shiftCashierName =
+    summary.cajero_nombre ||
+    (selectedCaja?.open && selectedCaja?.cashier && selectedCaja.cashier !== 'Disponible'
+      ? selectedCaja.cashier
+      : undefined) ||
+    user?.name ||
+    'Cajero';
 
   const handleCloseRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -142,14 +225,26 @@ export default function PosCashCloseModal({
 
     setLoading(true);
     try {
-      const cajeroNombre = user?.name || summary.cajero_nombre || 'Cajero';
-      const cajeroUsername = user?.username || user?.email || summary.cajero_username || '';
-      const cajeroId = user?.id || summary.cajero_id || null;
-      const targetCajaId = String(summary.caja_id || selectedCaja?.dbId || selectedCaja?.id || selectedCajaId);
-      const targetCajaLabel = selectedCaja?.label || summary.caja_label || `Caja #${selectedCajaId}`;
+      const cajeroId =
+        summary.cierre_id && summary.cajero_id
+          ? summary.cajero_id
+          : selectedCaja?.open && selectedCaja?.cashierId
+            ? selectedCaja.cashierId
+            : user?.id || null;
+      const cajeroNombre = shiftCashierName;
+      const cajeroUsername =
+        summary.cajero_username ||
+        (cajeroId && user?.id && String(cajeroId) === String(user.id)
+          ? user?.username || user?.email || ''
+          : '');
+      const targetCajaId = String(
+        summary.caja_id || selectedCaja?.dbId || selectedCaja?.id || selectedCajaId
+      );
+      const targetCajaLabel =
+        selectedCaja?.label || summary.caja_label || `Caja #${selectedCajaId}`;
 
       const result = await cerrarTurnoCaja({
-        cierre_id: summary.cierre_id,
+        cierre_id: summary.cierre_id || selectedCierreId || selectedCaja?.cierreId,
         caja_id: targetCajaId,
         caja_label: targetCajaLabel,
         cajero_id: cajeroId,
@@ -169,7 +264,11 @@ export default function PosCashCloseModal({
         total_entradas: summary.total_entradas,
         total_retiros: summary.total_retiros,
         total_devoluciones: summary.total_devoluciones,
-        notes: notes || 'Cierre de turno en punto de venta POS',
+        notes:
+          notes ||
+          (isAdmin && cajeroNombre !== user?.name
+            ? `Cierre realizado por Administrador (${user?.name}) para el turno de ${cajeroNombre}`
+            : 'Cierre de turno en punto de venta POS'),
       });
 
       try {
@@ -235,13 +334,56 @@ export default function PosCashCloseModal({
         </div>
 
         <form onSubmit={handleCloseRegister} className="space-y-5">
-          {/* Responsable del turno */}
-          <div className="space-y-1">
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-              Responsable del turno
-            </label>
-            <div className="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
-              {user?.name || summary.cajero_nombre || 'Cajero'}
+          {/* Selector de Caja Activa para Administradores */}
+          {isAdmin && openRegisters.length > 0 && (
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                Seleccionar Caja Activa a Cerrar ({openRegisters.length} abierta{openRegisters.length === 1 ? '' : 's'})
+              </label>
+              <select
+                value={selectedCierreId || selectedCaja?.cierreId || selectedCajaId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const reg = openRegisters.find(
+                    (r) => r.cierreId === val || String(r.id) === val || String(r.dbId) === val
+                  );
+                  if (reg) {
+                    setSelectedCajaId(reg.id);
+                    setSelectedCierreId(reg.cierreId);
+                  } else {
+                    setSelectedCajaId(val);
+                    setSelectedCierreId(undefined);
+                  }
+                }}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500/20"
+              >
+                {openRegisters.map((reg) => (
+                  <option key={reg.cierreId || reg.id} value={reg.cierreId || reg.id}>
+                    {reg.label} — Cajero: {reg.cashier} (Apertura: {reg.openedAt} | Ventas: RD${' '}
+                    {(reg.salesToday ?? 0).toLocaleString('es-DO', { minimumFractionDigits: 2 })})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Responsable del turno y Caja */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                Caja Registradora
+              </label>
+              <div className="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
+                {selectedCaja?.label || summary.caja_label || `Caja #${selectedCajaId}`}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                Cajero Responsable del Turno
+              </label>
+              <div className="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
+                {shiftCashierName}
+              </div>
             </div>
           </div>
 
@@ -249,11 +391,15 @@ export default function PosCashCloseModal({
           <div className="p-4 sm:p-5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-slate-200/60 dark:border-slate-700/60">
               <span className="text-xs font-black uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                Movimientos del Turno
+                Movimientos Exactos del Turno
               </span>
-              {fetchingSummary && (
+              {fetchingSummary ? (
                 <span className="text-[10px] font-bold text-emerald-600 animate-pulse">
                   Actualizando saldos...
+                </span>
+              ) : (
+                <span className="text-xs font-black text-slate-900 dark:text-white">
+                  Total Vendido: RD$ {summary.total_ventas.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                 </span>
               )}
             </div>
