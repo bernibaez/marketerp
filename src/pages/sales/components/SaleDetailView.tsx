@@ -114,6 +114,44 @@ export const SaleDetailView: React.FC<SaleDetailViewProps> = ({
               <div className="flex justify-between"><span className="text-muted-foreground">Fecha:</span><span className="font-semibold">{new Date(sale.creado_en).toLocaleString('es-DO')}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Cajera:</span><span className="font-bold">{sale.cajero_nombre || 'Cajera'}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Método:</span><span className="badge-neutral font-medium">{metodoLabel[sale.metodo_pago] || sale.metodo_pago}</span></div>
+              {(sale.metodo_pago === 'mixto' ||
+                [
+                  Number(sale.monto_efectivo || 0),
+                  Number(sale.monto_transferencia || 0),
+                  Number(sale.monto_tarjeta || 0),
+                  Number(sale.monto_credito || 0),
+                ].filter((v) => v > 0).length > 1) && (
+                <div className="mt-2 pt-2 border-t border-border/60 space-y-1.5 bg-secondary/20 p-2.5 rounded-lg">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground font-semibold">Monto en Efectivo:</span>
+                    <span className="font-mono font-bold text-foreground">
+                      RD$ {Number(sale.monto_efectivo || 0).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground font-semibold">Monto Transferencia:</span>
+                    <span className="font-mono font-bold text-foreground">
+                      RD$ {Number(sale.monto_transferencia || 0).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  {Number(sale.monto_tarjeta || 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground font-semibold">Monto en Tarjeta:</span>
+                      <span className="font-mono font-bold text-foreground">
+                        RD$ {Number(sale.monto_tarjeta || 0).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+                  {Number(sale.monto_credito || 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground font-semibold">Monto a Crédito:</span>
+                      <span className="font-mono font-bold text-foreground">
+                        RD$ {Number(sale.monto_credito || 0).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
               {sale.ncf && <div className="flex justify-between"><span className="text-muted-foreground">NCF:</span><span className="font-mono font-bold">{sale.ncf}</span></div>}
             </div>
           </div>

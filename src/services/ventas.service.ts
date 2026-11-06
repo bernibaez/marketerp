@@ -94,6 +94,7 @@ const LOCAL_CAJEROS_MAP_KEY = 'mercato_cajeros_nombre_map';
 type VentaMetaInfo = {
   numero_factura?: string;
   ncf?: string | null;
+  tipo_ncf?: string | null;
   cajero_id?: string | null;
   cajero_nombre?: string | null;
   cliente_id?: string | null;
@@ -104,6 +105,13 @@ type VentaMetaInfo = {
   monto_descuento?: number;
   monto_total?: number;
   costo_total?: number;
+  metodo_pago?: MetodoPago;
+  monto_pagado?: number;
+  monto_efectivo?: number;
+  monto_tarjeta?: number;
+  monto_transferencia?: number;
+  monto_credito?: number;
+  devuelta_entregada?: number;
   detalle_ventas?: Array<DetalleVenta & { sku?: string | null }>;
 };
 
@@ -489,6 +497,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     saveVentaMeta(id, {
       numero_factura: numero,
       ncf: payload.ncf ?? null,
+      tipo_ncf: payload.tipo_ncf ?? null,
       cajero_id: effectiveCajeroId,
       cajero_nombre: effectiveCajeroNombre,
       cliente_id: payload.cliente_id ?? null,
@@ -499,6 +508,13 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
       monto_descuento: exactDiscount,
       monto_total: exactTotal,
       costo_total: exactCostoTotal,
+      metodo_pago: payload.metodo_pago,
+      monto_pagado: round2(payload.monto_pagado || exactTotal),
+      monto_efectivo: round2(payload.monto_efectivo ?? 0),
+      monto_tarjeta: round2(payload.monto_tarjeta ?? 0),
+      monto_transferencia: round2(payload.monto_transferencia ?? 0),
+      monto_credito: round2(payload.monto_credito ?? 0),
+      devuelta_entregada: round2(payload.devuelta_entregada ?? 0),
       detalle_ventas: items,
     });
     saveLocalVentas([venta, ...getLocalVentas().filter((v) => v.id !== id)]);
@@ -660,6 +676,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     saveVentaMeta(resultado.venta_id, {
       numero_factura: resultado.numero_factura,
       ncf: resultado.ncf ?? payload.ncf ?? null,
+      tipo_ncf: payload.tipo_ncf ?? null,
       cajero_id: effectiveCajeroId,
       cajero_nombre: effectiveCajeroNombre,
       cliente_id: payload.cliente_id ?? null,
@@ -670,6 +687,13 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
       monto_descuento: exactDiscount,
       monto_total: exactTotal,
       costo_total: exactCostoTotal,
+      metodo_pago: payload.metodo_pago,
+      monto_pagado: round2(payload.monto_pagado || exactTotal),
+      monto_efectivo: round2(payload.monto_efectivo ?? 0),
+      monto_tarjeta: round2(payload.monto_tarjeta ?? 0),
+      monto_transferencia: round2(payload.monto_transferencia ?? 0),
+      monto_credito: round2(payload.monto_credito ?? 0),
+      devuelta_entregada: round2(payload.devuelta_entregada ?? 0),
       detalle_ventas: localItems,
     });
 
@@ -1012,13 +1036,25 @@ export async function obtenerHistorialVentas(params: {
       monto_descuento: amounts.monto_descuento,
       monto_total: amounts.monto_total,
       costo_total: amounts.costo_total,
-      metodo_pago: row.metodo_pago,
-      monto_pagado: round2(Number(row.monto_pagado || amounts.monto_total)),
-      monto_efectivo: round2(Number(row.monto_efectivo || 0)),
-      monto_tarjeta: round2(Number(row.monto_tarjeta || 0)),
-      monto_transferencia: round2(Number(row.monto_transferencia || 0)),
-      monto_credito: round2(Number(row.monto_credito || 0)),
-      devuelta_entregada: round2(Number(row.devuelta_entregada || 0)),
+      metodo_pago: row.metodo_pago || meta?.metodo_pago || localMirror?.metodo_pago || 'efectivo',
+      monto_pagado: round2(
+        Number(row.monto_pagado || meta?.monto_pagado || localMirror?.monto_pagado || amounts.monto_total)
+      ),
+      monto_efectivo: round2(
+        Number(row.monto_efectivo || meta?.monto_efectivo || localMirror?.monto_efectivo || 0)
+      ),
+      monto_tarjeta: round2(
+        Number(row.monto_tarjeta || meta?.monto_tarjeta || localMirror?.monto_tarjeta || 0)
+      ),
+      monto_transferencia: round2(
+        Number(row.monto_transferencia || meta?.monto_transferencia || localMirror?.monto_transferencia || 0)
+      ),
+      monto_credito: round2(
+        Number(row.monto_credito || meta?.monto_credito || localMirror?.monto_credito || 0)
+      ),
+      devuelta_entregada: round2(
+        Number(row.devuelta_entregada || meta?.devuelta_entregada || localMirror?.devuelta_entregada || 0)
+      ),
       estado: row.estado,
       creado_en: row.creado_en,
       cliente_nombre:
@@ -1459,13 +1495,25 @@ export async function obtenerVentaPorId(ventaId: string): Promise<VentaConDetall
     monto_descuento: amounts.monto_descuento,
     monto_total: amounts.monto_total,
     costo_total: amounts.costo_total,
-    metodo_pago: venta.metodo_pago,
-    monto_pagado: round2(Number(venta.monto_pagado || amounts.monto_total)),
-    monto_efectivo: round2(Number(venta.monto_efectivo || 0)),
-    monto_tarjeta: round2(Number(venta.monto_tarjeta || 0)),
-    monto_transferencia: round2(Number(venta.monto_transferencia || 0)),
-    monto_credito: round2(Number(venta.monto_credito || 0)),
-    devuelta_entregada: round2(Number(venta.devuelta_entregada || 0)),
+    metodo_pago: venta.metodo_pago || meta?.metodo_pago || localFound?.metodo_pago || 'efectivo',
+    monto_pagado: round2(
+      Number(venta.monto_pagado || meta?.monto_pagado || localFound?.monto_pagado || amounts.monto_total)
+    ),
+    monto_efectivo: round2(
+      Number(venta.monto_efectivo || meta?.monto_efectivo || localFound?.monto_efectivo || 0)
+    ),
+    monto_tarjeta: round2(
+      Number(venta.monto_tarjeta || meta?.monto_tarjeta || localFound?.monto_tarjeta || 0)
+    ),
+    monto_transferencia: round2(
+      Number(venta.monto_transferencia || meta?.monto_transferencia || localFound?.monto_transferencia || 0)
+    ),
+    monto_credito: round2(
+      Number(venta.monto_credito || meta?.monto_credito || localFound?.monto_credito || 0)
+    ),
+    devuelta_entregada: round2(
+      Number(venta.devuelta_entregada || meta?.devuelta_entregada || localFound?.devuelta_entregada || 0)
+    ),
     estado: venta.estado,
     creado_en: venta.creado_en,
     cliente_nombre:

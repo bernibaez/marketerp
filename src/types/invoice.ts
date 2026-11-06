@@ -99,6 +99,11 @@ export interface InvoiceData {
   taxRatePercent?: number;
   itbis?: number;
   paymentMethod?: string;
+  montoEfectivo?: number;
+  montoTarjeta?: number;
+  montoTransferencia?: number;
+  montoCredito?: number;
+  paymentBreakdown?: Array<{ method: string; label: string; amount: number }>;
   ncfType?: string | null;
   ncfTypeName?: string | null;
   expirationDate?: string | null;

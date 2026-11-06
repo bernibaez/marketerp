@@ -193,8 +193,13 @@ export default function PaymentPanel({
 
   const buildPayments = (): PaymentSplit | null => {
     if (method === 'split') {
-      if (Math.abs(splitDiff) > 0.01) {
-        toast.error(`La suma de pagos debe igualar el total. Diferencia: ${fmt(splitDiff)}`);
+      if (splitTotal < total - 0.01) {
+        toast.error(`La suma de pagos es insuficiente. Faltan: ${fmt(total - splitTotal)}`);
+        return null;
+      }
+      const nonCashSum = splitNums.card + splitNums.transfer + splitNums.credit;
+      if (nonCashSum > total + 0.01) {
+        toast.error(`El monto en transferencia/tarjeta/crédito no puede superar el total (${fmt(total)})`);
         return null;
       }
       if (splitNums.credit > 0 && !customer) {
@@ -259,7 +264,7 @@ export default function PaymentPanel({
       method === 'cash'
         ? change
         : method === 'split'
-          ? Math.max(0, splitNums.cash - (payments.cash || 0))
+          ? Math.max(0, Math.round((splitTotal - total) * 100) / 100)
           : 0;
     setLastChange(computedChange);
     setCompletedPayments(payments);
@@ -314,7 +319,13 @@ export default function PaymentPanel({
           subtotal: Math.round(subtotalNet * 100) / 100,
           itbis: Math.round(totalItbis * 100) / 100,
           total,
-          paymentMethod: parts.join(' · '),
+          paymentMethod: method === 'split' ? 'mixto' : parts.join(' · '),
+          montoEfectivo: payments.cash,
+          montoTarjeta: payments.card,
+          montoTransferencia: payments.transfer,
+          montoCredito: payments.credit,
+          cashReceived: method === 'split' ? splitTotal : (cashAmount || total),
+          change: computedChange,
           cashier: effectiveCashierName,
           expirationDate,
           items: cart.map((item) => {
@@ -401,17 +412,25 @@ export default function PaymentPanel({
         itbis: Math.round(computedTax * 100) / 100,
         total,
         paymentMethod: method,
-        paymentBreakdown: [
-          payments.cash > 0 ? { method: 'efectivo', label: 'Efectivo', amount: payments.cash } : null,
-          payments.card > 0 ? { method: 'tarjeta', label: 'Tarjeta', amount: payments.card } : null,
-          payments.transfer > 0 ? { method: 'transferencia', label: 'Transferencia bancaria', amount: payments.transfer } : null,
-          payments.credit > 0 ? { method: 'credito', label: 'Crédito', amount: payments.credit } : null,
-        ].filter(Boolean) as any,
+        paymentBreakdown:
+          method === 'split'
+            ? ([
+                { method: 'efectivo', label: 'Monto en Efectivo', amount: payments.cash },
+                { method: 'transferencia', label: 'Monto de Transferencia', amount: payments.transfer },
+                payments.card > 0 ? { method: 'tarjeta', label: 'Monto en Tarjeta', amount: payments.card } : null,
+                payments.credit > 0 ? { method: 'credito', label: 'Monto a Crédito', amount: payments.credit } : null,
+              ].filter(Boolean) as any)
+            : ([
+                payments.cash > 0 ? { method: 'efectivo', label: 'Monto en Efectivo', amount: payments.cash } : null,
+                payments.card > 0 ? { method: 'tarjeta', label: 'Monto en Tarjeta', amount: payments.card } : null,
+                payments.transfer > 0 ? { method: 'transferencia', label: 'Monto de Transferencia', amount: payments.transfer } : null,
+                payments.credit > 0 ? { method: 'credito', label: 'Monto a Crédito', amount: payments.credit } : null,
+              ].filter(Boolean) as any),
         montoEfectivo: payments.cash,
         montoTarjeta: payments.card,
         montoTransferencia: payments.transfer,
         montoCredito: payments.credit,
-        cashReceived: cashAmount || total,
+        cashReceived: method === 'split' ? splitTotal : (cashAmount || total),
         change: computedChange,
       };
 
@@ -664,13 +683,19 @@ export default function PaymentPanel({
               </div>
               <div
                 className={`px-3.5 py-2 rounded-xl text-sm sm:text-base font-black tracking-tight tabular-nums flex items-center justify-between sm:justify-start gap-2 border-2 shadow-xs ${
-                  Math.abs(splitDiff) < 0.01
+                  splitDiff >= -0.01 && (splitNums.card + splitNums.transfer + splitNums.credit) <= total + 0.01
                     ? 'bg-emerald-100 text-emerald-900 border-emerald-400 dark:bg-emerald-950/80 dark:text-emerald-200 dark:border-emerald-600'
                     : 'bg-rose-100 text-rose-900 border-rose-400 dark:bg-rose-950/80 dark:text-rose-200 dark:border-rose-600'
                 }`}
               >
-                <span className="uppercase text-xs font-black">Diferencia:</span>
-                <span className="text-base sm:text-lg font-black">{fmt(splitDiff)}</span>
+                <span className="uppercase text-xs font-black">
+                  {splitDiff > 0.01 && (splitNums.card + splitNums.transfer + splitNums.credit) <= total + 0.01
+                    ? 'Cambio:'
+                    : splitDiff < -0.01
+                      ? 'Falta:'
+                      : 'Diferencia:'}
+                </span>
+                <span className="text-base sm:text-lg font-black">{fmt(Math.abs(splitDiff))}</span>
               </div>
             </div>
           </div>

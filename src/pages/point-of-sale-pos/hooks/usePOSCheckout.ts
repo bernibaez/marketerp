@@ -271,6 +271,12 @@ export function usePOSCheckout({
             itbis: taxTotal,
             total,
             paymentMethod: metodo,
+            montoEfectivo: _payments.cash,
+            montoTarjeta: _payments.card,
+            montoTransferencia: _payments.transfer,
+            montoCredito: _payments.credit,
+            cashReceived: montoPagado,
+            change: Math.max(0, montoPagado - total),
             cashier: effectiveCajeroNombre,
             expirationDate: fiscalInvoice?.expirationDate || '2027-12-31',
             items: activeItems.map((item) => ({

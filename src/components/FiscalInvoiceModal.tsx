@@ -319,6 +319,13 @@ export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceMo
               itbis: invoice.itbis,
               total: invoice.total,
               paymentMethod: invoice.paymentMethod,
+              montoEfectivo: invoice.montoEfectivo,
+              montoTarjeta: invoice.montoTarjeta,
+              montoTransferencia: invoice.montoTransferencia,
+              montoCredito: invoice.montoCredito,
+              cashReceived: invoice.cashReceived,
+              change: invoice.change,
+              paymentBreakdown: invoice.paymentBreakdown,
             }}
             formatOverride={viewFormat}
           />

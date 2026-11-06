@@ -65,6 +65,13 @@ export interface FiscalInvoiceRecord {
   itbis: number;
   total: number;
   paymentMethod: string;
+  montoEfectivo?: number;
+  montoTarjeta?: number;
+  montoTransferencia?: number;
+  montoCredito?: number;
+  cashReceived?: number;
+  change?: number;
+  paymentBreakdown?: Array<{ method: string; label: string; amount: number }>;
   cashier: string;
   expirationDate: string;
   items: {
