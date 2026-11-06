@@ -398,15 +398,14 @@ export default function PurchasesPage() {
       exportTableToPdf({
         title: 'Órdenes de Compra',
         filename: 'compras',
-        headers: ['Orden', 'Fecha', 'Proveedor', 'Ítems', 'Subtotal', 'ITBIS', 'Total', 'Pago', 'Estado'],
+        headers: ['Orden', 'Fecha', 'Proveedor', 'Ítems', 'Subtotal', 'Total', 'Pago', 'Estado'],
         rows: filteredPurchases.map((p) => [
           p.code,
           p.date,
           p.supplier,
           p.items,
           formatMoneyPdf(p.subtotal),
-          formatMoneyPdf(p.tax),
-          formatMoneyPdf(p.total),
+          formatMoneyPdf(p.subtotal || p.total),
           p.payment,
           statusMap[p.status]?.label ?? p.status,
         ]),

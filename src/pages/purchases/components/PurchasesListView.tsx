@@ -173,7 +173,6 @@ export function PurchasesListView({
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Proveedor</th>
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden md:table-cell">Fecha</th>
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">Productos</th>
-                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">ITBIS</th>
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Total</th>
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden md:table-cell">Estado</th>
                   <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Acciones</th>
@@ -191,10 +190,7 @@ export function PurchasesListView({
                     <td className="px-4 py-3 font-medium text-foreground">{p.supplier}</td>
                     <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{p.date}</td>
                     <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{p.items} items</td>
-                    <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">
-                      RD$ {p.tax.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 font-bold text-foreground">RD$ {p.total.toLocaleString()}</td>
+                    <td className="px-4 py-3 font-bold text-foreground">RD$ {(p.subtotal || p.total).toLocaleString()}</td>
                     <td className="px-4 py-3 hidden md:table-cell">
                       <span className={statusMap[p.status].cls}>{statusMap[p.status].label}</span>
                     </td>

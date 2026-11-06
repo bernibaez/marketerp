@@ -492,16 +492,10 @@ export function PurchaseCreateView({
                   RD$ {subtotal.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                 </span>
               </div>
-              <div className="flex justify-between text-xs sm:text-sm">
-                <span className="text-muted-foreground">ITBIS Estimado (18%)</span>
-                <span className="font-bold tabular-nums">
-                  RD$ {taxTotal.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
-                </span>
-              </div>
               <div className="border-t border-border pt-2.5 flex justify-between font-black text-base sm:text-lg text-foreground">
                 <span>Total Final</span>
                 <span className="text-primary tabular-nums">
-                  RD$ {grandTotal.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                  RD$ {subtotal.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                 </span>
               </div>
             </div>

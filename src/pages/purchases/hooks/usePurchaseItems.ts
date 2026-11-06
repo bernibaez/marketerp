@@ -11,18 +11,8 @@ export function usePurchaseItems() {
     [purchaseItems]
   );
 
-  const taxTotal = useMemo(
-    () =>
-      purchaseItems.reduce((sum, item) => {
-        if (item.taxPercent > 0) {
-          return sum + item.qty * item.price * (item.taxPercent / 100);
-        }
-        return sum;
-      }, 0),
-    [purchaseItems]
-  );
-
-  const grandTotal = subtotal + taxTotal;
+  const taxTotal = 0;
+  const grandTotal = subtotal;
 
   const handleUpdateLineQty = (id: string, qty: number) => {
     setPurchaseItems((prev) =>

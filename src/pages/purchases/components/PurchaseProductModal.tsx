@@ -425,33 +425,19 @@ export function PurchaseProductModal({
                     ))}
                   </datalist>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-bold text-muted-foreground mb-1.5">Unidad</label>
-                    <select
-                      className="input-field h-12 text-base cursor-pointer"
-                      value={newUnit}
-                      onChange={(e) => setNewUnit(e.target.value)}
-                    >
-                      {['Unidad', 'Libra', 'Kg', 'Caja', 'Paquete', 'Galón', 'Litro'].map((u) => (
-                        <option key={u} value={u}>
-                          {u}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-muted-foreground mb-1.5">ITBIS %</label>
-                    <select
-                      className="input-field h-12 text-base cursor-pointer"
-                      value={newTax}
-                      onChange={(e) => setNewTax(Number(e.target.value))}
-                    >
-                      <option value={0}>0%</option>
-                      <option value={16}>16%</option>
-                      <option value={18}>18%</option>
-                    </select>
-                  </div>
+                <div>
+                  <label className="block text-sm font-bold text-muted-foreground mb-1.5">Unidad</label>
+                  <select
+                    className="input-field h-12 text-base cursor-pointer"
+                    value={newUnit}
+                    onChange={(e) => setNewUnit(e.target.value)}
+                  >
+                    {['Unidad', 'Libra', 'Kg', 'Caja', 'Paquete', 'Galón', 'Litro'].map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
             </div>

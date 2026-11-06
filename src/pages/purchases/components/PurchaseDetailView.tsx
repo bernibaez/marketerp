@@ -93,7 +93,7 @@ export function PurchaseDetailView({
               <div className="card p-4 space-y-1 bg-primary/5 border-primary/20">
                 <span className="text-xs text-muted-foreground font-semibold">Monto Total Compra</span>
                 <p className="text-xl font-black text-primary font-mono">
-                  RD$ {viewingPurchase.total.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                  RD$ {(viewingPurchase.subtotal || viewingPurchase.total).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                 </p>
               </div>
             </div>
@@ -191,21 +191,15 @@ export function PurchaseDetailView({
 
                 <div className="w-full sm:w-72 space-y-1.5 text-xs">
                   <div className="flex justify-between text-muted-foreground">
-                    <span>Subtotal Neto:</span>
+                    <span>Subtotal:</span>
                     <span className="font-mono font-medium">
-                      RD$ {viewingPurchase.subtotal.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-amber-600 dark:text-amber-400 font-semibold">
-                    <span>ITBIS (Impuesto):</span>
-                    <span className="font-mono">
-                      RD$ {viewingPurchase.impuesto.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                      RD$ {(viewingPurchase.subtotal || viewingPurchase.total).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                     </span>
                   </div>
                   <div className="flex justify-between border-t border-border pt-2 text-base font-black text-foreground">
                     <span>Total General:</span>
                     <span className="text-primary font-mono">
-                      RD$ {viewingPurchase.total.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                      RD$ {(viewingPurchase.subtotal || viewingPurchase.total).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                     </span>
                   </div>
                 </div>
