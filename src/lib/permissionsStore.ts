@@ -91,11 +91,19 @@ export function countModuleEnabled(map: RolePermissionMap, moduleId: string): nu
   return Object.values(mod).filter(Boolean).length;
 }
 
+function normalizeRoleKey(role?: string | null): string {
+  return String(role || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
 function findRolePermissions(matrix: PermissionsMatrix, role: UserRole): RolePermissionMap | undefined {
   if (matrix[role]) return matrix[role];
-  const norm = String(role).trim().toLowerCase();
+  const norm = normalizeRoleKey(role);
   if (matrix[norm]) return matrix[norm];
-  const foundKey = Object.keys(matrix).find((k) => k.trim().toLowerCase() === norm);
+  const foundKey = Object.keys(matrix).find((k) => normalizeRoleKey(k) === norm);
   if (foundKey) return matrix[foundKey];
   return undefined;
 }
@@ -105,32 +113,48 @@ export function hasPermission(
   moduleId: string,
   action: PermissionAction = 'ver'
 ): boolean {
-  const norm = String(role).trim().toLowerCase();
-  // Super Administrador tiene acceso maestro irrestricto por seguridad
-  if (norm === 'superadmin' || norm === 'super_admin' || norm === 'super administrador') {
+  const norm = normalizeRoleKey(role);
+  // Super Administrador y Administrador tienen acceso maestro irrestricto
+  if (
+    norm === 'superadmin' ||
+    norm === 'super_admin' ||
+    norm === 'super administrador' ||
+    norm === 'superadministrador' ||
+    norm === 'admin' ||
+    norm === 'administrador'
+  ) {
     return true;
+  }
+  if (norm.includes('cajer')) {
+    if (moduleId === 'pos' || moduleId === 'ventas') {
+      return action === 'ver' || action === 'crear' || action === 'editar' || action === 'exportar';
+    }
+    return false;
   }
   const matrix = getPermissionsMatrix();
   const perms = findRolePermissions(matrix, role);
-  // Fallback seguro: si es admin y aún no tiene permisos guardados, acceso total
-  if (!perms && (norm === 'admin' || norm === 'administrador')) {
-    return true;
-  }
   return !!perms?.[moduleId]?.[action];
 }
 
 export function routesFromPermissions(role: UserRole): string[] | '*' {
-  const norm = String(role).trim().toLowerCase();
-  // Super Administrador tiene acceso maestro irrestricto por seguridad
-  if (norm === 'superadmin' || norm === 'super_admin' || norm === 'super administrador') {
+  const norm = normalizeRoleKey(role);
+  // Super Administrador y Administrador tienen acceso maestro irrestricto
+  if (
+    norm === 'superadmin' ||
+    norm === 'super_admin' ||
+    norm === 'super administrador' ||
+    norm === 'superadministrador' ||
+    norm === 'admin' ||
+    norm === 'administrador'
+  ) {
     return '*';
+  }
+  // Las cajeras solo ven Punto de Venta (vender) y Ventas (ventas)
+  if (norm.includes('cajer')) {
+    return ['/point-of-sale-pos', '/sales'];
   }
   const matrix = getPermissionsMatrix();
   const rolePerms = findRolePermissions(matrix, role);
-  // Fallback seguro: si es admin y aún no tiene permisos guardados, acceso total
-  if (!rolePerms && (norm === 'admin' || norm === 'administrador')) {
-    return '*';
-  }
   if (!rolePerms) return [];
   const routes: string[] = [];
   for (const mod of PERMISSION_MODULES) {

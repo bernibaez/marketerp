@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/context/AuthContext';
+import { isAdminOrSuperAdmin } from '@/lib/auth';
 import { findCashRegister } from '@/lib/cashRegisters';
 import { useCashRegisters } from '@/hooks/useCashRegisters';
 import {
@@ -36,30 +37,25 @@ export default function PosCashCloseModal({
 }: PosCashCloseModalProps) {
   const { user } = useAuth();
   const { registers, refetch: refetchRegisters } = useCashRegisters();
-  const roleNorm = (user?.role || '').trim().toLowerCase();
-  const isAdmin =
-    roleNorm === 'administrador' ||
-    roleNorm === 'super administrador' ||
-    roleNorm === 'admin' ||
-    roleNorm === 'super_admin' ||
-    roleNorm === 'superadmin';
+  const isAdmin = isAdminOrSuperAdmin(user);
 
   const availableRegisters = isAdmin
     ? registers
     : registers.filter((c) => !c.isAdminBox);
 
-  const userOpenBox = availableRegisters.find(
+  // Buscar el turno abierto del usuario en TODAS las cajas (incluyendo Caja #1 si fue asignada en login)
+  const userOpenBox = registers.find(
     (c) =>
       c.open &&
       ((c.cashierId && user?.id && String(c.cashierId) === String(user.id)) ||
         (c.cashier && user?.name && c.cashier.trim().toLowerCase() === user.name.trim().toLowerCase()))
   );
   const resolvedMatch =
-    findCashRegister(availableRegisters, initialCajaId) ||
-    findCashRegister(registers, initialCajaId);
+    findCashRegister(registers, initialCajaId) ||
+    findCashRegister(availableRegisters, initialCajaId);
 
   const userBoxByName = user?.name
-    ? availableRegisters.find((c) => {
+    ? registers.find((c) => {
         const u = user.name.trim().toLowerCase();
         const l = c.label.toLowerCase();
         return l.includes(u) || u.includes(l);
@@ -98,6 +94,8 @@ export default function PosCashCloseModal({
   const [fetchingSummary, setFetchingSummary] = useState(false);
 
   const selectedCaja =
+    userOpenBox ||
+    findCashRegister(registers, selectedCajaId) ||
     findCashRegister(availableRegisters, selectedCajaId) ||
     availableRegisters[0] ||
     registers[0];
@@ -107,8 +105,8 @@ export default function PosCashCloseModal({
     (async () => {
       setFetchingSummary(true);
       try {
-        const targetId = selectedCaja?.dbId || selectedCajaId;
-        const res = await calcularResumenCajaAbierta(targetId, user?.id);
+        const targetId = selectedCaja?.dbId || selectedCaja?.id || selectedCajaId;
+        const res = await calcularResumenCajaAbierta(targetId, user?.id, user?.name);
         if (alive) {
           setSummary(res);
           // Si el usuario no ha ingresado un monto aún, podemos sugerir o dejar listo
@@ -130,7 +128,7 @@ export default function PosCashCloseModal({
     return () => {
       alive = false;
     };
-  }, [selectedCajaId, selectedCaja?.dbId, user?.id]);
+  }, [selectedCajaId, selectedCaja?.dbId, selectedCaja?.id, user?.id, user?.name]);
 
   const countedReal = parseFloat(montoRealInput) || 0;
   const diferencia = Math.round((countedReal - summary.monto_esperado) * 100) / 100;
@@ -147,8 +145,8 @@ export default function PosCashCloseModal({
       const cajeroNombre = user?.name || summary.cajero_nombre || 'Cajero';
       const cajeroUsername = user?.username || user?.email || summary.cajero_username || '';
       const cajeroId = user?.id || summary.cajero_id || null;
-      const targetCajaId = String(selectedCaja?.dbId || selectedCaja?.id || selectedCajaId);
-      const targetCajaLabel = selectedCaja?.label || `Caja #${selectedCajaId}`;
+      const targetCajaId = String(summary.caja_id || selectedCaja?.dbId || selectedCaja?.id || selectedCajaId);
+      const targetCajaLabel = selectedCaja?.label || summary.caja_label || `Caja #${selectedCajaId}`;
 
       const result = await cerrarTurnoCaja({
         cierre_id: summary.cierre_id,
@@ -173,6 +171,12 @@ export default function PosCashCloseModal({
         total_devoluciones: summary.total_devoluciones,
         notes: notes || 'Cierre de turno en punto de venta POS',
       });
+
+      try {
+        sessionStorage.removeItem('mercato_cash_opened_at_login');
+      } catch {
+        // ignore
+      }
 
       logAuditEvent({
         user: user?.name ?? 'Usuario',
@@ -333,6 +337,8 @@ export default function PosCashCloseModal({
                 required
                 autoFocus
                 value={montoRealInput}
+                onFocus={(e) => e.currentTarget.select()}
+                onClick={(e) => e.currentTarget.select()}
                 onChange={(e) => setMontoRealInput(e.target.value)}
                 placeholder="0.00"
                 className="w-full bg-transparent font-black text-3xl sm:text-4xl text-slate-900 dark:text-white focus:outline-none"

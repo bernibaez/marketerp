@@ -619,6 +619,9 @@ export default function POSTerminal() {
             onSuccess={(cierre) => {
               setShiftClosedLocally(false);
               setShiftOpenedLocally(true);
+              try {
+                sessionStorage.setItem('mercato_cash_opened_at_login', 'true');
+              } catch { /* ignore */ }
               if (cierre?.caja_id) setActiveCashId(cierre.caja_id);
               void refetchRegisters();
             }}

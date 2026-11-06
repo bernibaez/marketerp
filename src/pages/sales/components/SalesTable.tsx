@@ -29,6 +29,7 @@ interface SalesTableProps {
   canSeeAllSales: boolean;
   canEditSales: boolean;
   canDeleteSales: boolean;
+  hideProfit?: boolean;
   page: number;
   limit: number;
   onPageChange: (page: number) => void;
@@ -48,6 +49,7 @@ export const SalesTable: React.FC<SalesTableProps> = ({
   canSeeAllSales,
   canEditSales,
   canDeleteSales,
+  hideProfit = false,
   page,
   limit,
   onPageChange,
@@ -90,7 +92,7 @@ export const SalesTable: React.FC<SalesTableProps> = ({
       )}
       {!canSeeAllSales && (
         <div className="px-5 py-2.5 bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-400 text-xs font-medium border-b border-slate-200 dark:border-slate-800">
-          Mostrando tus ventas emitidas. Puedes editar una factura desde «Acciones → Editar / Cambiar Producto» para cambiar un producto por otro; para anular una factura solicita permiso a un administrador.
+          Mostrando tus ventas emitidas. Puedes editar una compra/factura desde «Acciones → Editar Factura» para modificar productos o cantidades; para anular una factura solicita permiso a un administrador.
         </div>
       )}
       <div className="overflow-x-auto">
@@ -109,7 +111,7 @@ export const SalesTable: React.FC<SalesTableProps> = ({
               <th className="text-left px-4 py-3.5">Productos</th>
               <th className="text-center px-4 py-3.5">Método de Pago</th>
               <th className="text-right px-5 py-3.5">Total</th>
-              <th className="text-right px-5 py-3.5">Ganancia Bruta</th>
+              {!hideProfit && <th className="text-right px-5 py-3.5">Ganancia Bruta</th>}
               <th className="text-center px-4 py-3.5">Estado</th>
               <th className="text-right px-5 py-3.5">Acciones</th>
             </tr>
@@ -117,13 +119,13 @@ export const SalesTable: React.FC<SalesTableProps> = ({
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
             {loading ? (
               <tr>
-                <td colSpan={10} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={hideProfit ? 9 : 10} className="px-4 py-12 text-center text-slate-400">
                   Cargando ventas...
                 </td>
               </tr>
             ) : sales.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={hideProfit ? 9 : 10} className="px-4 py-12 text-center text-slate-400">
                   No se encontraron ventas registradas
                 </td>
               </tr>
@@ -246,14 +248,16 @@ export const SalesTable: React.FC<SalesTableProps> = ({
                       </div>
                     </td>
 
-                    <td className="px-5 py-3.5 text-right">
-                      <div className="font-extrabold text-xs tabular-nums text-emerald-600 dark:text-emerald-400">
-                        RD$ {ganancia.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                      <div className="text-[11px] text-slate-400 font-medium mt-0.5">
-                        {marginPct}%
-                      </div>
-                    </td>
+                    {!hideProfit && (
+                      <td className="px-5 py-3.5 text-right">
+                        <div className="font-extrabold text-xs tabular-nums text-emerald-600 dark:text-emerald-400">
+                          RD$ {ganancia.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <div className="text-[11px] text-slate-400 font-medium mt-0.5">
+                          {marginPct}%
+                        </div>
+                      </td>
+                    )}
 
                     <td className="px-4 py-3.5 text-center">
                       <span
@@ -321,7 +325,7 @@ export const SalesTable: React.FC<SalesTableProps> = ({
                                     className="w-full text-left px-3.5 py-2 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 font-semibold transition-colors cursor-pointer"
                                   >
                                     <Edit size={15} className="text-amber-500" />
-                                    <span>{canSeeAllSales ? 'Editar Factura' : 'Cambiar Producto / Editar'}</span>
+                                    <span>Editar Factura / Compra</span>
                                   </button>
                                 )}
                                 <button

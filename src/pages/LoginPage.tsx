@@ -15,9 +15,9 @@ import {
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/context/AuthContext';
-import { getRoleHome, canAccessRoute, type AuthUser } from '@/lib/auth';
+import { getRoleHome, canAccessRoute, isAdminOrSuperAdmin, type AuthUser } from '@/lib/auth';
 import { isSupabaseConfigured } from '@/services/clienteSupabase';
-import { iniciarCaja } from '@/services/cierresCaja.service';
+import { iniciarCaja, obtenerSesionAbiertaDeUsuario } from '@/services/cierresCaja.service';
 import { obtenerCajas } from '@/services/cajas.service';
 import { CASH_REGISTERS } from '@/lib/cashRegisters';
 import { logAuditEvent } from '@/lib/auditStore';
@@ -96,25 +96,49 @@ export default function LoginPage() {
   const autoOpenCashForUser = async (loggedUser: AuthUser, rawAmount: string) => {
     const monto = Math.max(0, parseFloat(rawAmount) || 0);
     try {
-      let targetCajaId = '1';
-      let targetLabel = 'Caja Principal';
+      const sesionActiva = await obtenerSesionAbiertaDeUsuario(loggedUser.id, loggedUser.name).catch(() => null);
+      // Si el usuario ya tiene un turno abierto y dejó el monto en 0 al iniciar sesión, conservar su turno abierto
+      if (sesionActiva && monto === 0) {
+        sessionStorage.setItem('mercato_cash_opened_at_login', 'true');
+        return;
+      }
+
+      let targetCajaId = sesionActiva?.caja_id || '1';
+      let targetLabel = `Caja — ${loggedUser.name || 'Principal'}`;
 
       try {
         const dbCajas = await obtenerCajas({ soloActivas: true });
         const activeCajas = dbCajas.length > 0
           ? dbCajas.map((c) => ({
               id: String(c.id),
+              codigo: String(c.codigo || c.id),
               label: c.nombre || `Caja #${c.codigo || c.id}`,
+              isAdminBox: Boolean(c.es_caja_principal),
             }))
-          : CASH_REGISTERS.map((c) => ({ id: c.id, label: c.label }));
+          : CASH_REGISTERS.map((c) => ({
+              id: c.id,
+              codigo: c.id,
+              label: c.label,
+              isAdminBox: Boolean(c.isAdminBox),
+            }));
 
         const uNorm = (loggedUser.name || '').trim().toLowerCase();
+        const byExisting = sesionActiva?.caja_id
+          ? activeCajas.find(
+              (c) => c.id === String(sesionActiva.caja_id) || c.codigo === String(sesionActiva.caja_id)
+            )
+          : undefined;
         const byName = uNorm
           ? activeCajas.find(
               (c) => c.label.toLowerCase().includes(uNorm) || uNorm.includes(c.label.toLowerCase())
             )
           : undefined;
-        const chosen = byName || activeCajas[0];
+        const isAdmin = isAdminOrSuperAdmin(loggedUser);
+        const byRole = isAdmin
+          ? activeCajas.find((c) => c.isAdminBox) || activeCajas[0]
+          : activeCajas.find((c) => !c.isAdminBox) || activeCajas[0];
+
+        const chosen = byExisting || byName || byRole || activeCajas[0];
         if (chosen) {
           targetCajaId = chosen.id;
           targetLabel = chosen.label;

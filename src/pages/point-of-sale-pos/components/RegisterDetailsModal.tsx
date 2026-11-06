@@ -43,7 +43,7 @@ export default function RegisterDetailsModal({
     (async () => {
       setLoading(true);
       try {
-        const abierta = await obtenerCajaAbierta(cajaId).catch(() => null);
+        const abierta = await obtenerCajaAbierta(cajaId, user?.id, user?.name).catch(() => null);
         if (!abierta) {
           if (alive) {
             setAbiertaEn('');

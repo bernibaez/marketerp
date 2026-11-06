@@ -6,6 +6,7 @@ import { useVentas } from '@/hooks/useVentas';
 import { useCotizaciones } from '@/hooks/useCotizaciones';
 import { useDevoluciones } from '@/hooks/useDevoluciones';
 import { useAuth } from '@/context/AuthContext';
+import { isAdminOrSuperAdmin, normalizeRole, shouldHideProfit } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissionsStore';
 import PosReturnModal from '@/pages/point-of-sale-pos/components/PosReturnModal';
 import { syncInvoiceSettingsFromSupabase } from '@/lib/invoiceSettingsStore';
@@ -39,20 +40,17 @@ export default function SalesPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
-  const roleNorm = (user?.role ?? '').trim().toLowerCase();
-  const isAdmin =
-    roleNorm === 'administrador' ||
-    roleNorm === 'super administrador' ||
-    roleNorm === 'admin' ||
-    roleNorm === 'super_admin' ||
-    roleNorm === 'superadmin';
+  const roleNorm = normalizeRole(user?.role || user?.rolDb);
+  const isAdmin = isAdminOrSuperAdmin(user);
+  const hideProfit = shouldHideProfit(user);
   const isCajero = roleNorm.includes('cajer');
-  const canSeeAllSales = isAdmin || roleNorm === 'contador';
+  const canSeeAllSales = isAdmin || roleNorm.includes('conta');
   const canEditSales = isAdmin || isCajero || hasPermission(user?.role ?? 'Cajero', 'ventas', 'editar');
   const canDeleteSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'eliminar');
   const canCreateSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'crear');
   const canExportSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'exportar');
   const ownCajeroId = !canSeeAllSales ? user?.id : undefined;
+  const ownCajeroNombre = !canSeeAllSales ? user?.name : undefined;
 
   useEffect(() => {
     void syncInvoiceSettingsFromSupabase();
@@ -108,6 +106,7 @@ export default function SalesPage() {
     fechaInicio: dateFrom || undefined,
     fechaFin: dateTo || undefined,
     cajeroId: ownCajeroId,
+    cajeroNombre: ownCajeroNombre,
   });
 
   const {
@@ -360,6 +359,7 @@ export default function SalesPage() {
           totalVentas={totalVentas}
           cotizaciones={cotizaciones}
           devoluciones={devoluciones}
+          hideProfit={hideProfit}
         />
 
         {/* Tab Navigation and Filter Toolbar */}
@@ -394,6 +394,7 @@ export default function SalesPage() {
             canSeeAllSales={canSeeAllSales}
             canEditSales={canEditSales}
             canDeleteSales={canDeleteSales}
+            hideProfit={hideProfit}
             page={page}
             limit={limit}
             onPageChange={setPage}

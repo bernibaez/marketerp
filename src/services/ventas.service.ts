@@ -735,6 +735,7 @@ export async function obtenerHistorialVentas(params: {
   busqueda?: string;
   cajaId?: string | string[];
   cajeroId?: string;
+  cajeroNombre?: string;
   excluirAnuladas?: boolean;
   signal?: AbortSignal;
 }): Promise<{ datos: VentaConDetalle[]; total: number }> {
@@ -786,8 +787,20 @@ export async function obtenerHistorialVentas(params: {
         list = list.filter((v) => String(v.caja_id ?? '') === String(params.cajaId));
       }
     }
-    if (params.cajeroId) {
-      list = list.filter((v) => String(v.cajero_id ?? '') === String(params.cajeroId));
+    if (params.cajeroId || params.cajeroNombre) {
+      const targetName = (params.cajeroNombre || '').trim().toLowerCase();
+      list = list.filter((v) => {
+        if (params.cajeroId && v.cajero_id && String(v.cajero_id) === String(params.cajeroId)) {
+          return true;
+        }
+        if (targetName && v.cajero_nombre && v.cajero_nombre.trim().toLowerCase() === targetName) {
+          return true;
+        }
+        if (!v.cajero_id && params.cajaId) {
+          return true;
+        }
+        return false;
+      });
     }
     if (params.excluirAnuladas) {
       list = list.filter((v) => v.estado !== 'anulada' && (v.estado as string) !== 'cancelled');
@@ -832,8 +845,10 @@ export async function obtenerHistorialVentas(params: {
         q = q.eq('caja_id', params.cajaId);
       }
     }
-    if (params.cajeroId && cajeroIdIsUuid) {
+    if (params.cajeroId && cajeroIdIsUuid && !params.cajeroNombre) {
       q = q.eq('cajero_id', params.cajeroId);
+    } else if (params.cajeroId && cajeroIdIsUuid && params.cajeroNombre) {
+      q = q.or(`cajero_id.eq.${params.cajeroId},cajero_id.is.null`);
     }
     if (params.excluirAnuladas) q = q.neq('estado', 'anulada');
     if (params.signal) q = q.abortSignal(params.signal);
@@ -996,21 +1011,23 @@ export async function obtenerHistorialVentas(params: {
     };
   });
 
-  if (params.cajeroId && !cajeroIdIsUuid) {
+  if (params.cajeroId || params.cajeroNombre) {
+    const targetName = (params.cajeroNombre || '').trim().toLowerCase();
     datos = datos.filter((v) => {
-      // Si la venta tiene cajero_id explícito, comparar
-      if (v.cajero_id != null && String(v.cajero_id).trim() !== '') {
-        return String(v.cajero_id) === String(params.cajeroId);
+      if (params.cajeroId && v.cajero_id && String(v.cajero_id).trim() === String(params.cajeroId).trim()) {
+        return true;
       }
-      // Si cajero_id es null (típico en ventas Supabase de usuarios locales sin UUID en perfiles),
-      // no descartar si se especificó cajaId ya que la venta pertenece a la registradora
-      if (params.cajaId) return true;
-      return true;
+      if (targetName && v.cajero_nombre && v.cajero_nombre.trim().toLowerCase() === targetName) {
+        return true;
+      }
+      if (!v.cajero_id && params.cajaId) return true;
+      if (!cajeroIdIsUuid && !v.cajero_id && !targetName) return true;
+      return false;
     });
     return { datos, total: datos.length };
   }
 
-  return { datos, total: count ?? datos.length };
+  return { datos, total: Math.max(count ?? 0, datos.length) };
 }
 
 /** Ventas del turno (caja/cajero) con detalle de ítems — para resumen POS / admin. */

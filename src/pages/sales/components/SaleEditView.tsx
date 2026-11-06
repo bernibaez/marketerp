@@ -55,8 +55,8 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
 }) => {
   const { user } = useAuth();
   const isAdmin = isAdminOrSuperAdmin(user);
-  // Las cajeras (usuarios no administradores) solo pueden cambiar un producto por otro en la factura
-  const isCashierSwapOnly = !isAdmin;
+  // Permitir a los cajeros y administradores editar los ítems, cantidades y productos de la compra/factura
+  const isCashierSwapOnly = false;
 
   // General sale state
   const [customerId, setCustomerId] = useState<string>(sale.cliente_id || '');

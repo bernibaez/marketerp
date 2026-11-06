@@ -247,17 +247,24 @@ export default function PurchasesPage() {
       setPaymentMethod(detail.metodo_pago || 'Transferencia');
       setPurchaseDate(detail.fecha || new Date().toISOString().split('T')[0]);
 
-      const items: PurchaseLineItem[] = detail.lineas.map((l, idx) => ({
-        id: l.id || `line-${Date.now()}-${idx}`,
-        productId: l.producto_id || '',
-        name: l.nombre,
-        sku: '',
-        qty: l.cantidad,
-        price: l.precio_costo,
-        salePrice: l.precio_venta,
-        wholesalePrice: (l as any).precio_mayorista || 0,
-        taxPercent: (l as any).porcentaje_impuesto || 0,
-      }));
+      const items: PurchaseLineItem[] = detail.lineas.map((l, idx) => {
+        const matched = catalogProducts.find(
+          (p) => (l.producto_id && p.id === l.producto_id) || p.name.toLowerCase() === l.nombre.toLowerCase()
+        );
+        return {
+          id: l.id || `line-${Date.now()}-${idx}`,
+          productId: l.producto_id || matched?.id || '',
+          name: l.nombre,
+          sku: matched?.sku || '',
+          qty: l.cantidad,
+          price: l.precio_costo,
+          salePrice: l.precio_venta,
+          wholesalePrice: (l as any).precio_mayorista || matched?.wholesalePrice || 0,
+          taxPercent: (l as any).porcentaje_impuesto || 0,
+          currentStock: matched?.currentStock,
+          unit: matched?.unit || 'Und',
+        };
+      });
 
       setPurchaseItems(items);
       setShowAddForm(true);

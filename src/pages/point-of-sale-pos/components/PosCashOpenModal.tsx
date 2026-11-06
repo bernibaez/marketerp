@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/context/AuthContext';
+import { isAdminOrSuperAdmin } from '@/lib/auth';
 import { findCashRegister } from '@/lib/cashRegisters';
 import { useCashRegisters } from '@/hooks/useCashRegisters';
 import { iniciarCaja } from '@/services/cierresCaja.service';
@@ -36,46 +37,41 @@ export default function PosCashOpenModal({
 }: PosCashOpenModalProps) {
   const { user, logout } = useAuth();
   const { registers, refetch: refetchRegisters } = useCashRegisters();
-  const roleNorm = (user?.role || '').trim().toLowerCase();
-  const isAdmin =
-    roleNorm === 'administrador' ||
-    roleNorm === 'super administrador' ||
-    roleNorm === 'admin' ||
-    roleNorm === 'super_admin' ||
-    roleNorm === 'superadmin';
+  const isAdmin = isAdminOrSuperAdmin(user);
 
   const availableRegisters = isAdmin
     ? registers
     : registers.filter((c) => !c.isAdminBox);
 
   // 1. Identificar caja preferida:
-  // a) Si el nombre del usuario coincide con una caja (ej: Cheila, Valentina, Eroly, Beiliz, Elizabeth, Keyla)
-  const userBoxByName = user?.name
-    ? availableRegisters.find((c) => {
-        const u = user.name.trim().toLowerCase();
-        const l = c.label.toLowerCase();
-        return l.includes(u) || u.includes(l);
-      })
-    : undefined;
-
-  // b) Caja que ya tenga abierta el usuario
-  const userOpenBox = availableRegisters.find(
+  // a) Caja que ya tenga abierta el usuario en cualquier registradora
+  const userOpenBox = registers.find(
     (c) =>
       c.open &&
       ((c.cashierId && user?.id && String(c.cashierId) === String(user.id)) ||
         (c.cashier && user?.name && c.cashier.trim().toLowerCase() === user.name.trim().toLowerCase()))
   );
+
+  // b) Si el nombre del usuario coincide con una caja (ej: Cheila, Valentina, Eroly, Beiliz, Elizabeth, Keyla)
+  const userBoxByName = user?.name
+    ? registers.find((c) => {
+        const u = user.name.trim().toLowerCase();
+        const l = c.label.toLowerCase();
+        return l.includes(u) || u.includes(l);
+      })
+    : undefined;
   const resolvedMatch =
     findCashRegister(availableRegisters, initialCajaId) ||
     findCashRegister(registers, initialCajaId);
   const firstFreeBox = availableRegisters.find((c) => !c.open);
 
   const defaultCajaId =
-    userBoxByName?.id ||
     userOpenBox?.id ||
+    userBoxByName?.id ||
     (resolvedMatch && !resolvedMatch.isAdminBox ? resolvedMatch.id : undefined) ||
     firstFreeBox?.id ||
     availableRegisters[0]?.id ||
+    registers[0]?.id ||
     '1';
 
   const [selectedCajaId, setSelectedCajaId] = useState(defaultCajaId);

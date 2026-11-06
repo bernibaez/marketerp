@@ -12,12 +12,16 @@ import {
 } from 'lucide-react';
 import { useDashboard } from '@/hooks/useDashboard';
 import { Skeleton } from '@/components/ui/LoadingSkeleton';
+import { useAuth } from '@/context/AuthContext';
+import { shouldHideProfit } from '@/lib/auth';
 
 function fmt(n: number) {
   return `RD$ ${n.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export default function DashboardBentoGrid() {
+  const { user } = useAuth();
+  const hideProfit = shouldHideProfit(user);
   const [periodo, setPeriodo] = useState<'hoy' | 'semana' | 'mes'>('hoy');
   const { metricas, alertas, loading, refetch } = useDashboard(periodo);
 
@@ -96,7 +100,7 @@ export default function DashboardBentoGrid() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className={`grid grid-cols-1 sm:grid-cols-2 ${hideProfit ? 'lg:grid-cols-3' : 'lg:grid-cols-4'} gap-4`}>
         {/* 1. Ventas del período (Verde / Emerald) */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-xs relative overflow-hidden flex flex-col justify-between hover:shadow-md transition-shadow">
           <div>
@@ -207,60 +211,62 @@ export default function DashboardBentoGrid() {
           </div>
         </div>
 
-        {/* 3. Ganancias brutas (Violeta / Purple) */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-xs relative overflow-hidden flex flex-col justify-between hover:shadow-md transition-shadow">
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-11 h-11 rounded-2xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 flex items-center justify-center flex-shrink-0">
-                <Coins size={22} strokeWidth={2.2} />
+        {/* 3. Ganancias brutas (Violeta / Purple) - Oculto para Elizabeth y Cajeras */}
+        {!hideProfit && (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-xs relative overflow-hidden flex flex-col justify-between hover:shadow-md transition-shadow">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-11 h-11 rounded-2xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 flex items-center justify-center flex-shrink-0">
+                  <Coins size={22} strokeWidth={2.2} />
+                </div>
+                <div className="w-6 h-6 rounded-lg bg-purple-50 dark:bg-purple-950/30 text-purple-600 flex items-center justify-center">
+                  <Activity size={13} />
+                </div>
               </div>
-              <div className="w-6 h-6 rounded-lg bg-purple-50 dark:bg-purple-950/30 text-purple-600 flex items-center justify-center">
-                <Activity size={13} />
+
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                Ganancias brutas
+              </p>
+
+              <div className="text-2xl font-black text-slate-900 dark:text-white tabular-nums tracking-tight mt-1">
+                {loading ? <Skeleton className="h-8 w-28" /> : fmt(gananciaBruta)}
+              </div>
+
+              <div className="flex items-center gap-1 mt-1 text-xs font-bold text-purple-600 dark:text-purple-400">
+                <span>Margen estimado: {margenPct.toFixed(1)}%</span>
               </div>
             </div>
 
-            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              Ganancias brutas
-            </p>
-
-            <div className="text-2xl font-black text-slate-900 dark:text-white tabular-nums tracking-tight mt-1">
-              {loading ? <Skeleton className="h-8 w-28" /> : fmt(gananciaBruta)}
+            {/* Sparkline Decorativo */}
+            <div className="absolute right-3 bottom-9 w-24 h-10 pointer-events-none opacity-80">
+              <svg viewBox="0 0 100 40" className="w-full h-full overflow-visible">
+                <path
+                  d="M0,36 Q30,32 50,22 T80,16 T100,6"
+                  fill="none"
+                  stroke="#8b5cf6"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M0,36 Q30,32 50,22 T80,16 T100,6 L100,40 L0,40 Z"
+                  fill="url(#purpleCardGrad)"
+                  opacity="0.3"
+                />
+                <defs>
+                  <linearGradient id="purpleCardGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#8b5cf6" />
+                    <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+              </svg>
             </div>
 
-            <div className="flex items-center gap-1 mt-1 text-xs font-bold text-purple-600 dark:text-purple-400">
-              <span>Margen estimado: {margenPct.toFixed(1)}%</span>
+            <div className="pt-4 mt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
+              <TrendingUp size={14} className="text-slate-400" />
+              <span>Margen: {margenPct.toFixed(1)}%</span>
             </div>
           </div>
-
-          {/* Sparkline Decorativo */}
-          <div className="absolute right-3 bottom-9 w-24 h-10 pointer-events-none opacity-80">
-            <svg viewBox="0 0 100 40" className="w-full h-full overflow-visible">
-              <path
-                d="M0,36 Q30,32 50,22 T80,16 T100,6"
-                fill="none"
-                stroke="#8b5cf6"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-              />
-              <path
-                d="M0,36 Q30,32 50,22 T80,16 T100,6 L100,40 L0,40 Z"
-                fill="url(#purpleCardGrad)"
-                opacity="0.3"
-              />
-              <defs>
-                <linearGradient id="purpleCardGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#8b5cf6" />
-                  <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-            </svg>
-          </div>
-
-          <div className="pt-4 mt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
-            <TrendingUp size={14} className="text-slate-400" />
-            <span>Margen: {margenPct.toFixed(1)}%</span>
-          </div>
-        </div>
+        )}
 
         {/* 4. Stock bajo (Naranja / Amber) */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-xs relative overflow-hidden flex flex-col justify-between hover:shadow-md transition-shadow">

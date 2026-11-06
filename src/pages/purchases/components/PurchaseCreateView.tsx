@@ -5,6 +5,7 @@ import ModalShell from '@/components/ui/ModalShell';
 import { crearProveedor } from '@/services/proveedores.service';
 import { toast } from '@/lib/toast';
 import { getStoredProducts, type ProductItem } from '@/lib/productStore';
+import { useProductos } from '@/hooks/useProductos';
 import type { Proveedor } from '@/services/proveedores.service';
 
 export interface PurchaseLineItem {
@@ -17,6 +18,8 @@ export interface PurchaseLineItem {
   salePrice: number;
   wholesalePrice: number;
   taxPercent: number;
+  currentStock?: number;
+  unit?: string;
 }
 
 interface PurchaseCreateViewProps {
@@ -118,9 +121,16 @@ export function PurchaseCreateView({
   const [substituteSearch, setSubstituteSearch] = useState('');
   const [keepCurrentPriceAndQty, setKeepCurrentPriceAndQty] = useState(true);
 
+  const { productosUi } = useProductos({ pagina: 1, limite: 5000 });
+
   const allCatalogProducts = useMemo(() => {
-    return getStoredProducts();
-  }, [substitutingLine]);
+    const stored = getStoredProducts();
+    if (productosUi.length === 0) return stored;
+    const map = new Map<string, ProductItem>();
+    for (const p of stored) map.set(p.id, p);
+    for (const p of productosUi) map.set(p.id, p);
+    return Array.from(map.values());
+  }, [substitutingLine, productosUi]);
 
   const filteredSubstitutes = useMemo(() => {
     if (!substituteSearch.trim()) return allCatalogProducts.slice(0, 15);
@@ -661,6 +671,10 @@ export function PurchaseCreateView({
               <thead>
                 <tr className="border-b border-border bg-secondary/40 text-slate-600 dark:text-slate-300">
                   <th className="text-left py-2.5 px-3 font-bold min-w-[150px]">Producto</th>
+                  <th className="text-center py-2.5 px-2 font-bold w-24 sm:w-28">
+                    Stock
+                    <span className="block text-[9px] font-normal text-muted-foreground">existencia</span>
+                  </th>
                   <th className="text-center py-2.5 px-2 font-bold w-20 sm:w-24">Cant.</th>
                   <th className="text-right py-2.5 px-2 font-bold w-28 sm:w-32">
                     P. Compra
@@ -691,7 +705,7 @@ export function PurchaseCreateView({
               <tbody className="divide-y divide-border/60">
                 {purchaseItems.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="text-center py-10 text-muted-foreground">
+                    <td colSpan={10} className="text-center py-10 text-muted-foreground">
                       No has agregado ningún producto a esta compra. Escribe en el buscador superior o haz clic en{' '}
                       <strong>Agregar producto</strong>.
                     </td>
@@ -703,6 +717,18 @@ export function PurchaseCreateView({
                     const wholesaleMarginAmt = (item.wholesalePrice || 0) - item.price;
                     const wholesaleMarginPct =
                       item.price > 0 && item.wholesalePrice ? (wholesaleMarginAmt / item.price) * 100 : 0;
+                    const matchedProd = allCatalogProducts.find(
+                      (p) =>
+                        (item.productId && p.id === item.productId) ||
+                        (item.sku && p.sku && p.sku.toLowerCase() === item.sku.toLowerCase()) ||
+                        p.name.toLowerCase() === item.name.toLowerCase()
+                    );
+                    const currentStock =
+                      item.currentStock !== undefined
+                        ? item.currentStock
+                        : (matchedProd?.currentStock ?? 0);
+                    const unitLabel = item.unit || matchedProd?.unit || 'Und';
+                    const projectedStock = Math.round((currentStock + (Number(item.qty) || 0)) * 1000) / 1000;
 
                     return (
                       <tr
@@ -716,7 +742,30 @@ export function PurchaseCreateView({
                           <p className="font-bold text-foreground text-xs truncate max-w-[220px]" title={item.name}>
                             {item.name}
                           </p>
-                          <p className="text-[10px] font-mono text-muted-foreground mt-0.5">{item.sku}</p>
+                          <p className="text-[10px] font-mono text-muted-foreground mt-0.5">
+                            {item.sku || matchedProd?.sku || '—'} · Stock: <strong className="text-foreground">{currentStock} {unitLabel}</strong>
+                          </p>
+                        </td>
+
+                        {/* Stock Actual y Nuevo */}
+                        <td className="py-2 px-2 text-center">
+                          <div className="flex flex-col items-center justify-center gap-0.5">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold font-mono border ${
+                                currentStock <= 0
+                                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                                  : currentStock <= 5
+                                    ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30'
+                                    : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30'
+                              }`}
+                              title="Existencia actual en inventario"
+                            >
+                              {currentStock} {unitLabel}
+                            </span>
+                            <span className="text-[9px] font-mono text-muted-foreground">
+                              Nuevo: <strong className="text-foreground">{projectedStock}</strong>
+                            </span>
+                          </div>
                         </td>
 
                         {/* Cantidad */}

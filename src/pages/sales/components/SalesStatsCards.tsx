@@ -10,6 +10,7 @@ interface SalesStatsCardsProps {
   totalVentas: number;
   cotizaciones: CotizacionConDetalle[];
   devoluciones: DevolucionConDetalle[];
+  hideProfit?: boolean;
 }
 
 export function SalesStatsCards({
@@ -18,13 +19,14 @@ export function SalesStatsCards({
   totalVentas,
   cotizaciones,
   devoluciones,
+  hideProfit = false,
 }: SalesStatsCardsProps) {
   const ventasValidas = ventas.filter(
     (v) => (v.estado as string) !== 'anulada' && (v.estado as string) !== 'cancelled'
   );
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+    <div className={`grid grid-cols-2 ${hideProfit && tab !== 'returns' && tab !== 'quotes' ? 'lg:grid-cols-3' : 'lg:grid-cols-4'} gap-3`}>
       {tab === 'returns' ? (
         <>
           <div className="p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">
@@ -114,17 +116,19 @@ export function SalesStatsCards({
                 .toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
-          <div className="p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Ganancia Bruta Estimada
-            </p>
-            <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-slate-900 dark:text-white mt-0.5">
-              RD${' '}
-              {ventasValidas
-                .reduce((s, x) => s + (Number(x.monto_total || 0) - Number(x.costo_total || 0)), 0)
-                .toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </p>
-          </div>
+          {!hideProfit && (
+            <div className="p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Ganancia Bruta Estimada
+              </p>
+              <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-slate-900 dark:text-white mt-0.5">
+                RD${' '}
+                {ventasValidas
+                  .reduce((s, x) => s + (Number(x.monto_total || 0) - Number(x.costo_total || 0)), 0)
+                  .toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+          )}
           <div className="p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
               ITBIS (18% Transparentado)

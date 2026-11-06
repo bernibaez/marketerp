@@ -84,6 +84,8 @@ export function usePurchaseItems() {
           salePrice: salePrice > 0 ? salePrice : copy[existingIdx].salePrice,
           wholesalePrice: wholesalePrice > 0 ? wholesalePrice : copy[existingIdx].wholesalePrice,
           taxPercent,
+          currentStock: product.currentStock ?? copy[existingIdx].currentStock ?? 0,
+          unit: product.unit || copy[existingIdx].unit || 'Und',
         };
         toast.success(`+${qty} "${product.name}" (Total en orden: ${newQty})`);
         return copy;
@@ -99,6 +101,8 @@ export function usePurchaseItems() {
         salePrice: salePrice,
         wholesalePrice: wholesalePrice,
         taxPercent,
+        currentStock: product.currentStock ?? 0,
+        unit: product.unit || 'Und',
       };
       toast.success(`"${product.name}" agregado a la compra`);
       return [...prev, newItem];
@@ -136,6 +140,8 @@ export function usePurchaseItems() {
           salePrice: newSale,
           wholesalePrice: newWholesale,
           taxPercent: newTax,
+          currentStock: newProduct.currentStock ?? 0,
+          unit: newProduct.unit || 'Und',
         };
       })
     );

@@ -211,16 +211,15 @@ export function buildDefaultMatrix(): PermissionsMatrix {
   const admin = getFullRolePermissions();
 
   const cajero = empty();
-  for (const id of ['pos', 'cierre_caja', 'ventas']) {
+  for (const id of ['pos', 'ventas']) {
     const mod = PERMISSION_MODULES.find((m) => m.id === id);
     if (!mod) continue;
     cajero[id] = {
       ...Object.fromEntries(mod.actions.map((a) => [a, false])),
       ver: true,
-      crear: id === 'pos' || id === 'cierre_caja',
-      editar: id === 'pos' || id === 'ventas',
+      crear: true,
+      editar: true,
       exportar: id === 'ventas',
-      aprobar: id === 'cierre_caja',
     };
   }
 
@@ -289,7 +288,9 @@ export function buildDefaultMatrix(): PermissionsMatrix {
     Administrador: admin,
     admin: admin,
     'Super Administrador': admin,
+    'Súper Administrador': admin,
     superadmin: admin,
+    super_admin: admin,
     Cajero: cajero,
     cajero: cajero,
     Vendedor: vendedor,

@@ -18,6 +18,7 @@ export function useVentas(params: {
   fechaFin?: string;
   busqueda?: string;
   cajeroId?: string;
+  cajeroNombre?: string;
   cajaId?: string;
 } = {}) {
   const [ventas, setVentas] = useState<VentaConDetalle[]>([]);
@@ -59,6 +60,7 @@ export function useVentas(params: {
     params.fechaFin,
     params.busqueda,
     params.cajeroId,
+    params.cajeroNombre,
     params.cajaId,
   ]);
 
