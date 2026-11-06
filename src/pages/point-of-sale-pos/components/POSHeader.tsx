@@ -188,17 +188,7 @@ export default function POSHeader({
             <Undo2 size={18} strokeWidth={2.5} />
           </button>
 
-          {/* 6. Purple Drawer / Cambiar Caja */}
-          <button
-            type="button"
-            onClick={onSwitchCash}
-            className="w-10 h-10 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-750 flex items-center justify-center shadow-xs transition-all active:scale-95 text-indigo-600 hover:text-indigo-700 cursor-pointer"
-            title="Cambiar de Caja / Terminal"
-          >
-            <Monitor size={18} strokeWidth={2.4} />
-          </button>
-
-          {/* 7. Grey/Blue Pause / Ventas en Espera */}
+          {/* 6. Grey/Blue Pause / Ventas en Espera */}
           <button
             type="button"
             onClick={onHold}

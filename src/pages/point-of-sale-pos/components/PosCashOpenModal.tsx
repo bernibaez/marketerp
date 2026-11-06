@@ -198,50 +198,23 @@ export default function PosCashOpenModal({
 
         {/* Formulario */}
         <form onSubmit={handleStart} className="space-y-5">
-          {/* Fila: Cajero y Caja */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Cajero */}
-            <div className="space-y-1.5">
-              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
-                <User size={14} className="text-emerald-600" />
-                <span>Cajero Responsable</span>
-              </label>
-              <div className="p-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white font-black text-sm flex items-center justify-center flex-shrink-0 shadow-xs">
-                  {activeUserName.charAt(0).toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                    {activeUserName}
-                  </p>
-                  <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 truncate">
-                    {activeUserRole}
-                  </p>
-                </div>
+          {/* Cajero Responsable */}
+          <div className="space-y-1.5">
+            <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
+              <User size={14} className="text-emerald-600" />
+              <span>Cajero Responsable</span>
+            </label>
+            <div className="p-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white font-black text-sm flex items-center justify-center flex-shrink-0 shadow-xs">
+                {activeUserName.charAt(0).toUpperCase()}
               </div>
-            </div>
-
-            {/* Caja Registradora */}
-            <div className="space-y-1.5">
-              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
-                <Monitor size={14} className="text-emerald-600" />
-                <span>Caja Registradora</span>
-              </label>
-              <div className="relative">
-                <select
-                  value={selectedCajaId}
-                  onChange={(e) => setSelectedCajaId(e.target.value)}
-                  className="w-full appearance-none bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30 cursor-pointer shadow-2xs"
-                >
-                  {availableRegisters.map((caja) => (
-                    <option key={caja.id} value={caja.id}>
-                      {caja.label} {caja.open ? '(En turno)' : '(Disponible)'}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-slate-400">
-                  <Monitor size={16} />
-                </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                  {activeUserName}
+                </p>
+                <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 truncate">
+                  {activeUserRole}
+                </p>
               </div>
             </div>
           </div>
@@ -269,6 +242,8 @@ export default function PosCashOpenModal({
                 required
                 autoFocus
                 value={montoApertura}
+                onFocus={(e) => e.currentTarget.select()}
+                onClick={(e) => e.currentTarget.select()}
                 onChange={(e) => setMontoApertura(e.target.value)}
                 placeholder="0.00"
                 className="w-full bg-transparent font-black text-3xl sm:text-4xl text-slate-900 dark:text-white focus:outline-none"

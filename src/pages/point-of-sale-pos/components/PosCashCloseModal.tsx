@@ -231,33 +231,13 @@ export default function PosCashCloseModal({
         </div>
 
         <form onSubmit={handleCloseRegister} className="space-y-5">
-          {/* Fila: Caja a cerrar y Cajero */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-            <div className="space-y-1">
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                Caja a cerrar
-              </label>
-              <select
-                value={selectedCajaId}
-                onChange={(e) => setSelectedCajaId(e.target.value)}
-                disabled={!isAdmin && availableRegisters.length <= 1}
-                className="w-full bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
-              >
-                {availableRegisters.map((reg) => (
-                  <option key={reg.id} value={reg.id}>
-                    {reg.label} {reg.open ? '(Abierta)' : '(Cerrada)'}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                Responsable del turno
-              </label>
-              <div className="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
-                {user?.name || summary.cajero_nombre || 'Cajero'}
-              </div>
+          {/* Responsable del turno */}
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+              Responsable del turno
+            </label>
+            <div className="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
+              {user?.name || summary.cajero_nombre || 'Cajero'}
             </div>
           </div>
 

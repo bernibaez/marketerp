@@ -39,13 +39,16 @@ function resolvePreferredBoxId(
 ): CashRegisterId {
   if (regs.length === 0) return (currentId as CashRegisterId) || '1';
 
-  // 1. Si es admin, seleccionar caja de administración
-  if (isAdmin) {
-    const adminBox = regs.find((c) => c.isAdminBox || c.label.toLowerCase().includes('admin'));
-    if (adminBox) return adminBox.id;
-  }
+  // 1. Si el usuario ya tiene un turno abierto en cualquier caja, seleccionar esa primero
+  const openBox = regs.find(
+    (c) =>
+      c.open &&
+      ((c.cashierId && uId && String(c.cashierId) === String(uId)) ||
+        (c.cashier && uName && c.cashier.trim().toLowerCase() === uName.trim().toLowerCase()))
+  );
+  if (openBox) return openBox.id;
 
-  // 2. Si el nombre del usuario coincide con una caja (ej: Cheila, Valentina, Eroly, Beiliz, Elizabeth, Keyla)
+  // 2. Si el nombre del usuario coincide con una caja
   if (uName) {
     const norm = uName.trim().toLowerCase();
     const byName = regs.find((c) => !c.isAdminBox && (
@@ -54,15 +57,11 @@ function resolvePreferredBoxId(
     if (byName) return byName.id;
   }
 
-  // 3. Si el usuario ya tiene un turno abierto
-  const openBox = regs.find(
-    (c) =>
-      c.open &&
-      !c.isAdminBox &&
-      ((c.cashierId && uId && String(c.cashierId) === String(uId)) ||
-        (c.cashier && uName && c.cashier.trim().toLowerCase() === uName.trim().toLowerCase()))
-  );
-  if (openBox) return openBox.id;
+  // 3. Si es admin, seleccionar caja de administración o primera abierta
+  if (isAdmin) {
+    const adminBox = regs.find((c) => c.isAdminBox || c.label.toLowerCase().includes('admin'));
+    if (adminBox) return adminBox.id;
+  }
 
   // 4. Si la caja actual es operativa y válida, conservarla
   if (currentId) {
@@ -170,7 +169,13 @@ export default function POSTerminal() {
   const [activeCashId, setActiveCashId] = useState<CashRegisterId>(() =>
     isAdminUser ? '4' : '1'
   );
-  const [shiftOpenedLocally, setShiftOpenedLocally] = useState(false);
+  const [shiftOpenedLocally, setShiftOpenedLocally] = useState(() => {
+    try {
+      return sessionStorage.getItem('mercato_cash_opened_at_login') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [shiftClosedLocally, setShiftClosedLocally] = useState(false);
 
   useEffect(() => {
@@ -691,6 +696,9 @@ export default function POSTerminal() {
         onSuccessOpenCash={(cierre) => {
           setShiftClosedLocally(false);
           setShiftOpenedLocally(true);
+          try {
+            sessionStorage.setItem('mercato_cash_opened_at_login', 'true');
+          } catch { /* ignore */ }
           if (cierre?.caja_id) setActiveCashId(cierre.caja_id);
           void refetchRegisters();
         }}
@@ -700,6 +708,9 @@ export default function POSTerminal() {
         onSuccessCloseCash={() => {
           setShiftOpenedLocally(false);
           setShiftClosedLocally(true);
+          try {
+            sessionStorage.removeItem('mercato_cash_opened_at_login');
+          } catch { /* ignore */ }
           markRegisterClosed(String(activeCash.dbId || activeCashId));
           clearCart();
           resetOrderState();
