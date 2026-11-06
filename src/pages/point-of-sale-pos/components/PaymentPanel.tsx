@@ -37,6 +37,7 @@ interface PaymentPanelProps {
   taxTotal?: number;
   discountTotal?: number;
   registerNumber?: string;
+  cashierName?: string;
   cart: CartItem[];
   customer: Customer | null;
   onComplete: (payments: PaymentSplit, fiscalInvoice?: FiscalInvoiceRecord) => any;
@@ -68,6 +69,7 @@ export default function PaymentPanel({
   taxTotal,
   discountTotal,
   registerNumber,
+  cashierName,
   cart,
   customer,
   onComplete,
@@ -270,10 +272,26 @@ export default function PaymentPanel({
         payments.credit > 0 ? `Crédito ${fmt(payments.credit)}` : null,
       ].filter(Boolean);
 
+      const effectiveCashierName =
+        (user?.name && user.name.trim()) ||
+        (cashierName && cashierName.trim()) ||
+        (user?.username && user.username.trim()) ||
+        'Cajera';
+      const now = new Date();
+      const formattedIssueDate = now.toLocaleDateString('es-DO', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+      const formattedIssueTime = now.toLocaleTimeString('es-DO', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+
       let fiscalInvoice: FiscalInvoiceRecord | undefined;
 
       if (fiscalEnabled) {
-        const now = new Date();
         const subtotalNet = total / 1.18;
         const totalItbis = total - subtotalNet;
 
@@ -291,13 +309,13 @@ export default function PaymentPanel({
           ncfType,
           rncClient: rncClient.trim() || customer?.phone || undefined,
           companyName: companyName.trim() || customer?.name || 'Consumidor Final',
-          issueDate: now.toLocaleDateString('es-DO'),
-          issueTime: now.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' }),
+          issueDate: formattedIssueDate,
+          issueTime: formattedIssueTime,
           subtotal: Math.round(subtotalNet * 100) / 100,
           itbis: Math.round(totalItbis * 100) / 100,
           total,
           paymentMethod: parts.join(' · '),
-          cashier: 'Caja #1 (Admin)',
+          cashier: effectiveCashierName,
           expirationDate,
           items: cart.map((item) => {
             const itemNet = item.price / 1.18;
@@ -316,8 +334,8 @@ export default function PaymentPanel({
       }
 
       logAuditEvent({
-        user: 'Admin General',
-        role: 'Administrador',
+        user: effectiveCashierName,
+        role: user?.role || 'Cajero',
         action: 'Venta',
         module: 'POS',
         details: fiscalInvoice
@@ -332,7 +350,6 @@ export default function PaymentPanel({
       }
 
       const effectiveRes = res && typeof res === 'object' ? res : completedSaleResult;
-      const now = new Date();
       const computedSubtotal =
         typeof subtotal === 'number'
           ? subtotal
@@ -358,9 +375,9 @@ export default function PaymentPanel({
         ncfType: fiscalEnabled ? ncfType : null,
         ncfTypeName: fiscalEnabled && ncfType ? NCF_TYPES[ncfType]?.name : null,
         expirationDate: '31/12/2027',
-        issueDate: now.toLocaleDateString('es-DO'),
-        issueTime: now.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' }),
-        cashier: user?.name || user?.username || 'Caja POS',
+        issueDate: formattedIssueDate,
+        issueTime: formattedIssueTime,
+        cashier: effectiveCashierName,
         registerNumber: registerNumber || 'POS-01',
         customerName: customer?.name || (companyName.trim() || 'Consumidor Final'),
         customerRnc: customer?.rnc_cedula || rncClient.trim() || undefined,

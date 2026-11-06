@@ -47,7 +47,7 @@ export default function FiscalInvoiceModal({ invoice, onClose }: FiscalInvoiceMo
   const handleExportPdf = () => {
     exportTableToPdf({
       title: `FACTURA FISCAL DGII - NCF ${invoice.ncf}`,
-      subtitle: `Emisor: SUPERMERCADO REMANENTE S.R.L. (RNC: 131-45678-9) | Cliente: ${invoice.companyName || 'Consumidor Final'} (${invoice.rncClient || 'N/A'})`,
+      subtitle: `Fecha: ${invoice.issueDate} ${invoice.issueTime || ''} | Cajera: ${invoice.cashier || 'Cajera'} | Cliente: ${invoice.companyName || 'Consumidor Final'} (${invoice.rncClient || 'N/A'})`,
       filename: `factura-fiscal-${invoice.ncf}`,
       headers: ['#', 'SKU', 'Descripción', 'Cant.', 'Precio Unit.', 'ITBIS (18%)', 'Subtotal'],
       rows: invoice.items.map((item, idx) => [

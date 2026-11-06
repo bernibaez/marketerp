@@ -281,23 +281,50 @@ export default function PrintableInvoice({
     computedPaymentBreakdown.length === 1 ? computedPaymentBreakdown[0].method : invoiceData.paymentMethod
   );
 
-  const formattedDateTime = useMemo(() => {
-    if (invoiceData.issueDate && invoiceData.issueTime) {
-      return `${invoiceData.issueDate} ${invoiceData.issueTime}`;
+  const effectiveCashierName = useMemo(() => {
+    const raw = (invoiceData.cashier || '').trim();
+    const genericSet = new Set(['cajero', 'caja pos', 'caja #1 (admin)', 'usuario', 'sin turno activo']);
+    if (raw && !genericSet.has(raw.toLowerCase())) {
+      return raw;
     }
-    if (invoiceData.issueDate) {
-      return invoiceData.issueDate;
+    try {
+      const authRaw = localStorage.getItem('mercato_auth_user');
+      if (authRaw) {
+        const parsed = JSON.parse(authRaw) as { name?: string; username?: string };
+        if (parsed?.name && parsed.name.trim()) return parsed.name.trim();
+        if (parsed?.username && parsed.username.trim()) return parsed.username.trim();
+      }
+    } catch {
+      // ignore
     }
-    const now = new Date();
-    return now.toLocaleString('es-DO', {
-      day: 'numeric',
-      month: 'numeric',
+    return raw || 'Cajera';
+  }, [invoiceData.cashier]);
+
+  const effectiveIssueDate = useMemo(() => {
+    if (invoiceData.issueDate && invoiceData.issueDate.trim()) {
+      return invoiceData.issueDate.trim();
+    }
+    return new Date().toLocaleDateString('es-DO', {
+      day: '2-digit',
+      month: '2-digit',
       year: 'numeric',
+    });
+  }, [invoiceData.issueDate]);
+
+  const effectiveIssueTime = useMemo(() => {
+    if (invoiceData.issueTime && invoiceData.issueTime.trim()) {
+      return invoiceData.issueTime.trim();
+    }
+    return new Date().toLocaleTimeString('es-DO', {
       hour: '2-digit',
       minute: '2-digit',
       hour12: true,
     });
-  }, [invoiceData.issueDate, invoiceData.issueTime]);
+  }, [invoiceData.issueTime]);
+
+  const formattedDateTime = useMemo(() => {
+    return `${effectiveIssueDate} ${effectiveIssueTime}`.trim();
+  }, [effectiveIssueDate, effectiveIssueTime]);
 
   // -------------------------------------------------------------
   // RENDER 1 & 2: TICKET TÉRMICO PROFESIONAL (58MM / 80MM / ANCHO PERSONALIZADO)
@@ -313,9 +340,9 @@ export default function PrintableInvoice({
       ncf: invoiceData.ncf,
       ncfType: invoiceData.ncfType,
       ncfTypeName: invoiceData.ncfTypeName,
-      fecha: invoiceData.issueDate || formattedDateTime,
-      hora: invoiceData.issueTime || '',
-      cajero: invoiceData.cashier,
+      fecha: effectiveIssueDate,
+      hora: effectiveIssueTime,
+      cajero: effectiveCashierName,
       cliente: invoiceData.customerName,
       clienteRnc: invoiceData.customerRnc,
       items: (invoiceData.items || []).map((it) => ({
@@ -475,16 +502,15 @@ export default function PrintableInvoice({
 
         <div className="space-y-1 sm:text-right" style={{ fontSize: `${baseFontPt - 0.5}px` }}>
           <div className="flex sm:justify-end gap-2">
-            <span className="text-slate-500">Fecha / Hora:</span>
-            <span className="font-semibold text-slate-900">
-              {invoiceData.issueDate}{' '}
-              {settings.showIssueTime && invoiceData.issueTime ? invoiceData.issueTime : ''}
+            <span className="text-slate-500 font-semibold">Fecha:</span>
+            <span className="font-bold text-slate-900">
+              {effectiveIssueDate} {effectiveIssueTime}
             </span>
           </div>
           <div className="flex sm:justify-end gap-2">
-            <span className="text-slate-500 font-semibold">Cajero responsable:</span>
-            <span className="font-semibold text-slate-900">
-              {invoiceData.cashier || 'Cajero'}
+            <span className="text-slate-500 font-semibold">Cajera:</span>
+            <span className="font-bold text-slate-900">
+              {effectiveCashierName}
             </span>
           </div>
           {settings.showRegisterNumber && (

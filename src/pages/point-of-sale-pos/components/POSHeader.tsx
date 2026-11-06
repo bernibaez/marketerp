@@ -19,6 +19,7 @@ import {
   Monitor,
   CheckCircle2,
   ScanLine,
+  FileText,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { canAccessRoute } from '@/lib/auth';
@@ -221,6 +222,18 @@ export default function POSHeader({
             <MinusCircle size={15} className="text-slate-800 dark:text-slate-200" strokeWidth={2.3} />
             <span>Agregar gasto</span>
           </button>
+
+          {/* 9. Mis Facturas / Editar Factura */}
+          {canSales && (
+            <Link
+              to="/sales"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-300 dark:border-emerald-700 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 text-xs font-bold hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-all shadow-2xs active:scale-95 cursor-pointer"
+              title="Ver facturas emitidas y cambiar productos en facturas"
+            >
+              <FileText size={15} className="text-emerald-600 dark:text-emerald-400" strokeWidth={2.3} />
+              <span>Facturas</span>
+            </Link>
+          )}
         </div>
 
         {/* Right Section: Inicio/Cierre de Caja & User Profile */}

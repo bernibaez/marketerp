@@ -46,8 +46,9 @@ export default function SalesPage() {
     roleNorm === 'admin' ||
     roleNorm === 'super_admin' ||
     roleNorm === 'superadmin';
+  const isCajero = roleNorm.includes('cajer');
   const canSeeAllSales = isAdmin || roleNorm === 'contador';
-  const canEditSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'editar');
+  const canEditSales = isAdmin || isCajero || hasPermission(user?.role ?? 'Cajero', 'ventas', 'editar');
   const canDeleteSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'eliminar');
   const canCreateSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'crear');
   const canExportSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'exportar');
@@ -172,6 +173,16 @@ export default function SalesPage() {
     convertirAVenta,
   });
 
+  useEffect(() => {
+    const editId = searchParams.get('edit');
+    if (editId && ventas.length > 0 && !editingSale) {
+      const target = ventas.find((v) => String(v.id) === String(editId));
+      if (target) {
+        void handleOpenEditSale(target);
+      }
+    }
+  }, [searchParams, ventas, editingSale]);
+
   const handleCreateSaleSubmit = async (payload: Parameters<typeof cobrar>[0]) => {
     try {
       const res = await cobrar({
@@ -262,6 +273,11 @@ export default function SalesPage() {
         <SaleDetailView
           sale={viewingSale}
           loadingDetail={loadingSaleDetail}
+          canEdit={canEditSales}
+          onEdit={(s) => {
+            setViewingSale(null);
+            void handleOpenEditSale(s);
+          }}
           onPrint={(s) => {
             setViewingSale(null);
             void handleOpenPrintSale(s);

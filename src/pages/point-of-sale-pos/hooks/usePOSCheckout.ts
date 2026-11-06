@@ -144,6 +144,10 @@ export function usePOSCheckout({
     taxTotal,
     discountTotal: globalDiscountAmount,
     registerNumber: activeCashLabel,
+    cashierName:
+      (user?.name && user.name.trim()) ||
+      (activeCashCashierName && activeCashCashierName.trim()) ||
+      'Cajera',
     cart,
     customer: selectedCustomer,
     orderCompleted,

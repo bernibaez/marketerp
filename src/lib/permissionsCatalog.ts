@@ -218,7 +218,7 @@ export function buildDefaultMatrix(): PermissionsMatrix {
       ...Object.fromEntries(mod.actions.map((a) => [a, false])),
       ver: true,
       crear: id === 'pos' || id === 'cierre_caja',
-      editar: id === 'pos',
+      editar: id === 'pos' || id === 'ventas',
       exportar: id === 'ventas',
       aprobar: id === 'cierre_caja',
     };
@@ -337,12 +337,12 @@ export const ROLE_META: Record<
     accent: 'border-emerald-600/40',
   },
   Cajero: {
-    description: 'POS, consulta de sus ventas y cierre de caja (sin editar/anular facturas)',
+    description: 'POS, consulta de sus ventas, cambio de productos en facturas y cierre de caja',
     color: 'bg-sky-500/15 text-sky-700 dark:text-sky-400',
     accent: 'border-sky-500/40',
   },
   cajero: {
-    description: 'POS, consulta de sus ventas y cierre de caja',
+    description: 'POS, consulta de sus ventas, cambio de productos en facturas y cierre de caja',
     color: 'bg-sky-500/15 text-sky-700 dark:text-sky-400',
     accent: 'border-sky-500/40',
   },

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { X, Printer, Download, Briefcase } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { X, Printer, Download, Briefcase, Edit } from 'lucide-react';
 import { exportTableToPdf, formatMoneyPdf } from '@/lib/exportPdf';
 import { useAuth } from '@/context/AuthContext';
 import { obtenerVentasTurno, type VentaConDetalle } from '@/services/ventas.service';
@@ -27,6 +28,7 @@ export default function RegisterDetailsModal({
   locationName = 'SUPERMERCADO REMANENTE',
 }: RegisterDetailsModalProps) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const modalRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [ventas, setVentas] = useState<VentaConDetalle[]>([]);
@@ -278,15 +280,16 @@ export default function RegisterDetailsModal({
                     <thead>
                       <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 font-bold border-b border-slate-200 dark:border-slate-700">
                         <th className="py-2.5 px-3">Factura</th>
-                        <th className="py-2.5 px-3">Hora</th>
-                        <th className="py-2.5 px-3">Cajero</th>
+                        <th className="py-2.5 px-3">Fecha / Hora</th>
+                        <th className="py-2.5 px-3">Cajera</th>
                         <th className="py-2.5 px-3 text-right">Total</th>
+                        <th className="py-2.5 px-3 text-right print:hidden">Acción</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                       {ventas.length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="px-3 py-8 text-center text-slate-400">
+                          <td colSpan={5} className="px-3 py-8 text-center text-slate-400">
                             Aún no hay ventas en este turno
                           </td>
                         </tr>
@@ -295,6 +298,11 @@ export default function RegisterDetailsModal({
                           <tr key={v.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
                             <td className="py-2 px-3 font-mono font-bold text-xs">{v.numero_factura}</td>
                             <td className="py-2 px-3 text-xs">
+                              {new Date(v.creado_en).toLocaleDateString('es-DO', {
+                                day: '2-digit',
+                                month: '2-digit',
+                                year: 'numeric',
+                              })}{' '}
                               {new Date(v.creado_en).toLocaleTimeString('es-DO', {
                                 hour: '2-digit',
                                 minute: '2-digit',
@@ -305,6 +313,20 @@ export default function RegisterDetailsModal({
                             </td>
                             <td className="py-2 px-3 text-right font-mono font-semibold">
                               {money(v.monto_total)}
+                            </td>
+                            <td className="py-2 px-3 text-right print:hidden">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onClose();
+                                  navigate(`/sales?edit=${encodeURIComponent(v.id)}`);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-bold text-[11px] transition-colors cursor-pointer"
+                                title="Cambiar un producto por otro en esta factura"
+                              >
+                                <Edit size={12} />
+                                <span>Cambiar prod.</span>
+                              </button>
                             </td>
                           </tr>
                         ))

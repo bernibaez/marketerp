@@ -90,7 +90,7 @@ export const SalesTable: React.FC<SalesTableProps> = ({
       )}
       {!canSeeAllSales && (
         <div className="px-5 py-2.5 bg-slate-50 dark:bg-slate-900/50 text-slate-600 dark:text-slate-400 text-xs font-medium border-b border-slate-200 dark:border-slate-800">
-          Mostrando solo tus ventas. Para editar o anular una factura, solicita permiso a un administrador.
+          Mostrando tus ventas emitidas. Puedes editar una factura desde «Acciones → Editar / Cambiar Producto» para cambiar un producto por otro; para anular una factura solicita permiso a un administrador.
         </div>
       )}
       <div className="overflow-x-auto">
@@ -311,7 +311,7 @@ export const SalesTable: React.FC<SalesTableProps> = ({
                                   <Eye size={15} className="text-emerald-600" />
                                   <span>Ver Detalle</span>
                                 </button>
-                                {canEditSales && (
+                                {canEditSales && s.estado !== 'anulada' && (
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -321,7 +321,7 @@ export const SalesTable: React.FC<SalesTableProps> = ({
                                     className="w-full text-left px-3.5 py-2 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 font-semibold transition-colors cursor-pointer"
                                   >
                                     <Edit size={15} className="text-amber-500" />
-                                    <span>Editar Factura</span>
+                                    <span>{canSeeAllSales ? 'Editar Factura' : 'Cambiar Producto / Editar'}</span>
                                   </button>
                                 )}
                                 <button

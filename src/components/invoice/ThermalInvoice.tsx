@@ -404,28 +404,21 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
           </div>
         )}
 
-        {/* Cajero */}
-        {settings.showCashier && cashierName && (
-          <div className="flex justify-between items-baseline">
-            <span className="text-slate-800">Cajero:</span>
-            <span className="font-medium truncate max-w-[75%] text-right text-black">{cashierName}</span>
-          </div>
-        )}
+        {/* Cajera / Cajero que emite la factura */}
+        <div className="flex justify-between items-baseline">
+          <span className="text-slate-800">Cajera:</span>
+          <span className="font-bold truncate max-w-[75%] text-right text-black">
+            {cashierName || 'Cajera'}
+          </span>
+        </div>
 
-        {/* Fecha y Hora */}
-        {settings.showIssueTime ? (
-          <div className="flex justify-between items-baseline">
-            <span className="text-slate-800">{isNarrow ? 'Fecha:' : 'Fecha / Hora:'}</span>
-            <span className="tabular-nums font-mono text-right text-black">
-              {`${formattedDate} ${formattedTime}`}
-            </span>
-          </div>
-        ) : (
-          <div className="flex justify-between items-baseline">
-            <span className="text-slate-800">Fecha:</span>
-            <span className="tabular-nums font-mono text-right text-black">{formattedDate}</span>
-          </div>
-        )}
+        {/* Fecha y Hora de emisión */}
+        <div className="flex justify-between items-baseline">
+          <span className="text-slate-800">{isNarrow ? 'Fecha:' : 'Fecha / Hora:'}</span>
+          <span className="tabular-nums font-mono font-semibold text-right text-black">
+            {formattedTime ? `${formattedDate} ${formattedTime}` : formattedDate}
+          </span>
+        </div>
 
         {/* NCF si está habilitado y presente */}
         {settings.showNcf && ncfValue && (

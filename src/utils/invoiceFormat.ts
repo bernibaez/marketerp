@@ -61,9 +61,10 @@ export function formatDate(input: string | Date | null | undefined): string {
   }
 
   const trimmed = input.trim();
-  // Si ya viene con formato DD/MM/YYYY o DD-MM-YYYY
-  if (/^\d{2}[/-]\d{2}[/-]\d{4}$/.test(trimmed)) {
-    return trimmed.replace(/-/g, '/');
+  // Si ya viene con formato D/M/YYYY, DD/MM/YYYY o DD-MM-YYYY
+  if (/^\d{1,2}[/-]\d{1,2}[/-]\d{4}$/.test(trimmed)) {
+    const [d, m, y] = trimmed.split(/[/-]/);
+    return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`;
   }
 
   // Si viene en formato ISO (YYYY-MM-DD...)

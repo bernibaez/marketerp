@@ -1,11 +1,13 @@
 import React from 'react';
-import { FileText, Printer, RotateCcw } from 'lucide-react';
+import { FileText, Printer, RotateCcw, Edit } from 'lucide-react';
 import type { VentaConDetalle } from '@/services/ventas.service';
 import { metodoLabel } from '../types';
 
 interface SaleDetailViewProps {
   sale: VentaConDetalle;
   loadingDetail: boolean;
+  canEdit?: boolean;
+  onEdit?: (sale: VentaConDetalle) => void;
   onPrint: (sale: VentaConDetalle) => void;
   onReturn: (sale: VentaConDetalle) => void;
   onClose: () => void;
@@ -14,6 +16,8 @@ interface SaleDetailViewProps {
 export const SaleDetailView: React.FC<SaleDetailViewProps> = ({
   sale,
   loadingDetail,
+  canEdit = false,
+  onEdit,
   onPrint,
   onReturn,
   onClose,
@@ -27,10 +31,19 @@ export const SaleDetailView: React.FC<SaleDetailViewProps> = ({
             Detalle de Factura {sale.numero_factura}
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {sale.ncf ? `Comprobante Fiscal: ${sale.ncf}` : 'Factura de Venta'} · Emitida el {new Date(sale.creado_en).toLocaleString('es-DO')}
+            {sale.ncf ? `Comprobante Fiscal: ${sale.ncf}` : 'Factura de Venta'} · Emitida el {new Date(sale.creado_en).toLocaleString('es-DO')} · Cajera: <span className="font-semibold text-foreground">{sale.cajero_nombre || 'Cajera'}</span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {canEdit && onEdit && sale.estado !== 'anulada' && (
+            <button
+              type="button"
+              onClick={() => onEdit(sale)}
+              className="btn-secondary flex items-center gap-1.5 font-bold text-xs py-2 px-3.5 text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-800"
+            >
+              <Edit size={15} /> Editar / Cambiar Producto
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onPrint(sale)}
@@ -98,8 +111,8 @@ export const SaleDetailView: React.FC<SaleDetailViewProps> = ({
             </h3>
             <div className="space-y-2 text-xs">
               <div className="flex justify-between"><span className="text-muted-foreground">Cliente:</span><span className="font-bold">{sale.cliente_nombre || 'Cliente general'}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Fecha:</span><span>{new Date(sale.creado_en).toLocaleString('es-DO')}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Cajero:</span><span>{sale.cajero_nombre || 'Cajero'}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Fecha:</span><span className="font-semibold">{new Date(sale.creado_en).toLocaleString('es-DO')}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Cajera:</span><span className="font-bold">{sale.cajero_nombre || 'Cajera'}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Método:</span><span className="badge-neutral font-medium">{metodoLabel[sale.metodo_pago] || sale.metodo_pago}</span></div>
               {sale.ncf && <div className="flex justify-between"><span className="text-muted-foreground">NCF:</span><span className="font-mono font-bold">{sale.ncf}</span></div>}
             </div>

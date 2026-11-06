@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Edit,
   CheckCircle,
@@ -8,13 +8,14 @@ import {
   AlertCircle,
   ArrowLeft,
   Search,
-  Check,
   Lock,
+  ArrowLeftRight,
+  X,
 } from 'lucide-react';
 import type { Cliente, Producto, MetodoPago, TipoItemVenta } from '@/types/database';
 import type { VentaConDetalle, ActualizarVentaPayload, EditarVentaItem } from '@/services/ventas.service';
 import { useAuth } from '@/context/AuthContext';
-import { canChangePrice } from '@/lib/auth';
+import { canChangePrice, isAdminOrSuperAdmin } from '@/lib/auth';
 import { getStoredProducts } from '@/lib/productStore';
 import { toast } from '@/lib/toast';
 
@@ -32,6 +33,7 @@ interface EditableSaleItem {
   combo_id: string | null;
   tipo_item: TipoItemVenta;
   nombre_item: string;
+  original_nombre_item?: string;
   sku: string | null;
   precio_unitario: number;
   costo_unitario: number;
@@ -52,6 +54,9 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
   onClose,
 }) => {
   const { user } = useAuth();
+  const isAdmin = isAdminOrSuperAdmin(user);
+  // Las cajeras (usuarios no administradores) solo pueden cambiar un producto por otro en la factura
+  const isCashierSwapOnly = !isAdmin;
 
   // General sale state
   const [customerId, setCustomerId] = useState<string>(sale.cliente_id || '');
@@ -73,11 +78,15 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
           combo_id: null,
           tipo_item: 'producto',
           nombre_item: 'Producto / Venta rápida',
+          original_nombre_item: 'Producto / Venta rápida',
           sku: null,
           precio_unitario: sale.subtotal || sale.monto_total || 0,
           costo_unitario: 0,
           cantidad: 1,
-          porcentaje_impuesto: sale.monto_impuesto && sale.subtotal ? round2((sale.monto_impuesto / sale.subtotal) * 100) : 18,
+          porcentaje_impuesto:
+            sale.monto_impuesto && sale.subtotal
+              ? round2((sale.monto_impuesto / sale.subtotal) * 100)
+              : 18,
           subtotal: sale.subtotal || sale.monto_total || 0,
         },
       ];
@@ -88,6 +97,7 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
       combo_id: d.combo_id ?? null,
       tipo_item: d.tipo_item,
       nombre_item: d.nombre_item,
+      original_nombre_item: d.nombre_item,
       sku: (d as any).sku ?? null,
       precio_unitario: Number(d.precio_unitario || 0),
       costo_unitario: Number(d.costo_unitario || 0),
@@ -97,12 +107,27 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
     }));
   });
 
-  // Adding product state
+  // Adding product state (Admin only)
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [productSearch, setProductSearch] = useState<string>('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
-  const userCanChangePrice = canChangePrice(user);
+  const userCanChangePrice = canChangePrice(user) && !isCashierSwapOnly;
+
+  // Product swap state (Available for both Cashiers and Admins on each row)
+  const [swappingRowIndex, setSwappingRowIndex] = useState<number | null>(null);
+  const [swapSearch, setSwapSearch] = useState<string>('');
+  const swapInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (swappingRowIndex !== null) {
+      const t = setTimeout(() => {
+        swapInputRef.current?.focus();
+        swapInputRef.current?.select();
+      }, 40);
+      return () => clearTimeout(t);
+    }
+  }, [swappingRowIndex]);
 
   const allAvailableProducts = useMemo(() => {
     const list = Array.isArray(products) ? [...products] : [];
@@ -142,6 +167,19 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
       .slice(0, 50);
   }, [allAvailableProducts, productSearch]);
 
+  const filteredSwapProducts = useMemo(() => {
+    if (!swapSearch.trim()) return allAvailableProducts.slice(0, 60);
+    const q = swapSearch.toLowerCase().trim();
+    return allAvailableProducts
+      .filter((p) => {
+        const name = (p.nombre || '').toLowerCase();
+        const barcode = (p.codigo_barras || '').toLowerCase();
+        const sku = (p.sku || '').toLowerCase();
+        return name.includes(q) || barcode.includes(q) || sku.includes(q);
+      })
+      .slice(0, 60);
+  }, [allAvailableProducts, swapSearch]);
+
   // Recalculations
   const subtotal = useMemo(() => {
     return round2(items.reduce((sum, it) => sum + it.precio_unitario * it.cantidad, 0));
@@ -164,8 +202,41 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
     return round2(Math.max(0, subtotal + montoImpuesto - (Number(montoDescuento) || 0)));
   }, [subtotal, montoImpuesto, montoDescuento]);
 
+  // Handler for swapping a product on a specific line item
+  const handleSwapProduct = (index: number, newProd: Producto) => {
+    const currentItem = items[index];
+    if (!currentItem) return;
+
+    const unitPrice = round2(newProd.precio_venta);
+    setItems((prev) =>
+      prev.map((it, idx) => {
+        if (idx !== index) return it;
+        return {
+          ...it,
+          producto_id: newProd.id,
+          combo_id: null,
+          tipo_item: 'producto',
+          nombre_item: newProd.nombre,
+          sku: newProd.sku || newProd.codigo_barras || null,
+          precio_unitario: unitPrice,
+          costo_unitario: round2(newProd.precio_costo || 0),
+          porcentaje_impuesto: Number(newProd.porcentaje_impuesto ?? 18),
+          subtotal: round2(unitPrice * it.cantidad),
+        };
+      })
+    );
+
+    setSwappingRowIndex(null);
+    setSwapSearch('');
+    toast.success(`Producto cambiado: "${currentItem.nombre_item}" → "${newProd.nombre}"`);
+  };
+
   // Handlers for modifying items
   const handleQuantityChange = (index: number, newQty: number) => {
+    if (isCashierSwapOnly) {
+      toast.error('Las cajeras solo pueden cambiar un producto por otro en la factura');
+      return;
+    }
     if (newQty < 0.001) return;
     setItems((prev) =>
       prev.map((it, idx) => {
@@ -200,6 +271,10 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
   };
 
   const handleRemoveItem = (index: number) => {
+    if (isCashierSwapOnly) {
+      toast.error('Las cajeras solo pueden cambiar un producto por otro en la factura');
+      return;
+    }
     if (items.length <= 1) {
       toast.error('La factura debe tener al menos un producto');
       return;
@@ -209,7 +284,7 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
   };
 
   const addProductDirectly = (prod: Producto) => {
-    // Check if product is already in items with same SKU/presentation
+    if (isCashierSwapOnly) return;
     const targetSku = prod.sku || prod.codigo_barras;
     const existingIndex = items.findIndex(
       (it) => it.producto_id === prod.id && (!targetSku || it.sku === targetSku)
@@ -229,6 +304,7 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
       combo_id: null,
       tipo_item: 'producto',
       nombre_item: prod.nombre,
+      original_nombre_item: prod.nombre,
       sku: prod.sku || prod.codigo_barras || null,
       precio_unitario: round2(prod.precio_venta),
       costo_unitario: round2(prod.precio_costo || 0),
@@ -245,6 +321,7 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
   };
 
   const handleAddProduct = () => {
+    if (isCashierSwapOnly) return;
     if (!selectedProductId) {
       if (filteredProducts.length === 1) {
         addProductDirectly(filteredProducts[0]);
@@ -288,8 +365,11 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
       return;
     }
 
-    const selectedClient = clients.find((c) => c.id === customerId);
-    const clienteNombre = selectedClient ? selectedClient.nombre : 'Cliente general (Contado)';
+    const effectiveCustomerId = isCashierSwapOnly ? (sale.cliente_id || '') : customerId;
+    const selectedClient = clients.find((c) => c.id === effectiveCustomerId);
+    const clienteNombre = selectedClient
+      ? selectedClient.nombre
+      : (sale.cliente_nombre || 'Cliente general (Contado)');
 
     setIsSubmitting(true);
     try {
@@ -308,20 +388,20 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
       }));
 
       await onSave({
-        cliente_id: customerId || null,
+        cliente_id: effectiveCustomerId || null,
         cliente_nombre: clienteNombre,
-        metodo_pago: paymentMethod,
-        tipo_ncf: tipoNcf || null,
-        ncf: ncf || null,
+        metodo_pago: isCashierSwapOnly ? sale.metodo_pago : paymentMethod,
+        tipo_ncf: isCashierSwapOnly ? (sale.tipo_ncf || null) : (tipoNcf || null),
+        ncf: isCashierSwapOnly ? (sale.ncf || null) : (ncf || null),
         subtotal,
         monto_impuesto: montoImpuesto,
-        monto_descuento: Number(montoDescuento) || 0,
+        monto_descuento: isCashierSwapOnly ? Number(sale.monto_descuento || 0) : (Number(montoDescuento) || 0),
         monto_total: nuevoMontoTotal,
         costo_total: costoTotal,
-        estado: estado as any,
+        estado: (isCashierSwapOnly ? sale.estado : estado) as any,
         items: itemsPayload,
         usuario_modificador_id: user?.id || null,
-        usuario_modificador_nombre: user?.name || 'Administrador',
+        usuario_modificador_nombre: user?.name || (isCashierSwapOnly ? 'Cajera' : 'Administrador'),
       });
     } finally {
       setIsSubmitting(false);
@@ -335,10 +415,14 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
             <Edit className="text-amber-500" size={26} />
-            Editar Factura {sale.numero_factura}
+            {isCashierSwapOnly
+              ? `Cambiar Producto en Factura ${sale.numero_factura}`
+              : `Editar Factura ${sale.numero_factura}`}
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Modifica productos, cantidades, cliente y comprobantes. El inventario y los totales se actualizarán automáticamente.
+            {isCashierSwapOnly
+              ? 'Modo Cajera: Haz clic en «Cambiar por otro» en el producto que deseas reemplazar. El inventario y los totales se ajustarán automáticamente.'
+              : 'Modifica productos, cámbialos por otros, ajusta cantidades, cliente y comprobantes. El inventario y los totales se actualizarán automáticamente.'}
           </p>
         </div>
         <button
@@ -350,17 +434,39 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
         </button>
       </div>
 
+      {/* Aviso de modo Cajera */}
+      {isCashierSwapOnly && (
+        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3 text-xs text-amber-800 dark:text-amber-300">
+          <ArrowLeftRight size={18} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+          <div className="space-y-0.5">
+            <p className="font-bold">Permiso de Cajera: Solo cambio de producto por otro</p>
+            <p>
+              Como cajera, puedes sustituir un producto de la factura por otro del catálogo usando el botón{' '}
+              <span className="font-bold">«Cambiar por otro»</span> en la tabla de productos. Los demás campos de la factura están protegidos.
+            </p>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Sección 1: Datos de la Venta (Cliente, Pago, NCF, Estado) */}
         <div className="card p-5 space-y-4">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-            1. Datos del Cliente y Facturación
-          </h2>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              1. Datos del Cliente y Facturación
+            </h2>
+            {isCashierSwapOnly && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-muted-foreground bg-secondary px-2.5 py-1 rounded-full">
+                <Lock size={12} /> Solo lectura para cajera
+              </span>
+            )}
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
             <div>
               <label className="font-bold text-muted-foreground mb-1 block">Cliente Asociado</label>
               <select
-                className="input-field w-full"
+                className={`input-field w-full ${isCashierSwapOnly ? 'opacity-70 bg-muted cursor-not-allowed' : ''}`}
+                disabled={isCashierSwapOnly}
                 value={customerId}
                 onChange={(e) => setCustomerId(e.target.value)}
               >
@@ -376,7 +482,8 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
             <div>
               <label className="font-bold text-muted-foreground mb-1 block">Método de Pago</label>
               <select
-                className="input-field w-full"
+                className={`input-field w-full ${isCashierSwapOnly ? 'opacity-70 bg-muted cursor-not-allowed' : ''}`}
+                disabled={isCashierSwapOnly}
                 value={paymentMethod}
                 onChange={(e) => setPaymentMethod(e.target.value as MetodoPago)}
               >
@@ -390,7 +497,8 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
             <div>
               <label className="font-bold text-muted-foreground mb-1 block">Tipo de Comprobante (NCF)</label>
               <select
-                className="input-field w-full"
+                className={`input-field w-full ${isCashierSwapOnly ? 'opacity-70 bg-muted cursor-not-allowed' : ''}`}
+                disabled={isCashierSwapOnly}
                 value={tipoNcf}
                 onChange={(e) => setTipoNcf(e.target.value)}
               >
@@ -405,7 +513,8 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
               <label className="font-bold text-muted-foreground mb-1 block">Número NCF</label>
               <input
                 type="text"
-                className="input-field w-full font-mono uppercase"
+                disabled={isCashierSwapOnly}
+                className={`input-field w-full font-mono uppercase ${isCashierSwapOnly ? 'opacity-70 bg-muted cursor-not-allowed' : ''}`}
                 placeholder="Ej: B0200000001"
                 value={ncf}
                 onChange={(e) => setNcf(e.target.value)}
@@ -415,7 +524,8 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
             <div>
               <label className="font-bold text-muted-foreground mb-1 block">Estado de la Factura</label>
               <select
-                className="input-field w-full"
+                disabled={isCashierSwapOnly}
+                className={`input-field w-full ${isCashierSwapOnly ? 'opacity-70 bg-muted cursor-not-allowed' : ''}`}
                 value={estado}
                 onChange={(e) => setEstado(e.target.value)}
               >
@@ -430,7 +540,8 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
                 type="number"
                 step="0.01"
                 min="0"
-                className="input-field w-full font-mono"
+                disabled={isCashierSwapOnly}
+                className={`input-field w-full font-mono ${isCashierSwapOnly ? 'opacity-70 bg-muted cursor-not-allowed' : ''}`}
                 value={montoDescuento}
                 onChange={(e) => setMontoDescuento(Math.max(0, Number(e.target.value)))}
               />
@@ -438,127 +549,129 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
 
             <div className="lg:col-span-2 flex flex-col justify-end">
               <div className="bg-secondary/40 p-2.5 rounded-lg text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">Fecha original: </span>
+                <span className="font-medium text-foreground">Fecha de emisión: </span>
                 {new Date(sale.creado_en).toLocaleString('es-DO')}
-                {sale.cajero_nombre && (
-                  <span className="block mt-0.5">
-                    <span className="font-medium text-foreground">Cajero responsable: </span>
-                    {sale.cajero_nombre}
-                  </span>
-                )}
+                <span className="block mt-0.5">
+                  <span className="font-medium text-foreground">Cajera emisora: </span>
+                  {sale.cajero_nombre || user?.name || 'Cajera'}
+                </span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Sección 2: Productos y Cantidades */}
+        {/* Sección 2: Productos y Cambio de Producto */}
         <div className="card p-5 space-y-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
               <Package size={16} /> 2. Productos de la Factura ({items.length})
             </h2>
             <div className="text-xs text-muted-foreground">
-              Ajusta las cantidades o elimina/agrega productos según corresponda.
+              {isCashierSwapOnly
+                ? 'Haz clic en «Cambiar por otro» en la fila del producto que deseas sustituir.'
+                : 'Cambia un producto por otro, ajusta cantidades o agrega/elimina productos.'}
             </div>
           </div>
 
-          {/* Buscador y agregador de productos */}
-          <div className="bg-secondary/20 p-3.5 rounded-xl border border-border/60 space-y-2">
-            <div className="flex flex-col sm:flex-row gap-2.5">
-              <div className="relative flex-1" ref={searchContainerRef}>
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  type="text"
-                  className="input-field pl-9 w-full text-xs"
-                  placeholder="Buscar por nombre, código de barras o SKU (presiona Enter para agregar)..."
-                  value={productSearch}
-                  onFocus={() => setIsDropdownOpen(true)}
-                  onChange={(e) => {
-                    setProductSearch(e.target.value);
-                    setIsDropdownOpen(true);
-                  }}
-                  onKeyDown={handleSearchKeyDown}
-                />
+          {/* Buscador y agregador de productos adicionales (Solo Administradores) */}
+          {!isCashierSwapOnly && (
+            <div className="bg-secondary/20 p-3.5 rounded-xl border border-border/60 space-y-2">
+              <div className="flex flex-col sm:flex-row gap-2.5">
+                <div className="relative flex-1" ref={searchContainerRef}>
+                  <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="text"
+                    className="input-field pl-9 w-full text-xs"
+                    placeholder="Buscar por nombre, código de barras o SKU (presiona Enter para agregar)..."
+                    value={productSearch}
+                    onFocus={() => setIsDropdownOpen(true)}
+                    onChange={(e) => {
+                      setProductSearch(e.target.value);
+                      setIsDropdownOpen(true);
+                    }}
+                    onKeyDown={handleSearchKeyDown}
+                  />
 
-                {/* Dropdown de resultados interactivo */}
-                {isDropdownOpen && productSearch.trim().length > 0 && (
-                  <div className="absolute left-0 right-0 top-full mt-1 bg-card border border-border rounded-xl shadow-xl z-50 max-h-60 overflow-y-auto divide-y divide-border">
-                    {filteredProducts.length === 0 ? (
-                      <div className="p-3 text-xs text-center text-muted-foreground">
-                        No se encontraron productos que coincidan con "{productSearch}".
-                      </div>
-                    ) : (
-                      filteredProducts.map((p) => (
-                        <div
-                          key={p.id}
-                          onClick={() => addProductDirectly(p)}
-                          className="p-2.5 hover:bg-secondary/40 transition-colors flex items-center justify-between cursor-pointer gap-2 text-xs"
-                        >
-                          <div className="min-w-0">
-                            <p className="font-bold text-foreground truncate">{p.nombre}</p>
-                            <p className="text-[10px] text-muted-foreground font-mono">
-                              SKU: {p.sku || 'N/A'} {p.codigo_barras ? `| Barcode: ${p.codigo_barras}` : ''} | Stock: {p.stock_actual}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <span className="font-black text-foreground">
-                              RD$ {p.precio_venta.toLocaleString('es-DO')}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                addProductDirectly(p);
-                              }}
-                              className="btn-primary text-[11px] py-1 px-2.5 flex items-center gap-1 font-bold"
-                            >
-                              <Plus size={12} /> Agregar
-                            </button>
-                          </div>
+                  {/* Dropdown de resultados interactivo */}
+                  {isDropdownOpen && productSearch.trim().length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-card border border-border rounded-xl shadow-xl z-50 max-h-60 overflow-y-auto divide-y divide-border">
+                      {filteredProducts.length === 0 ? (
+                        <div className="p-3 text-xs text-center text-muted-foreground">
+                          No se encontraron productos que coincidan con "{productSearch}".
                         </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
+                      ) : (
+                        filteredProducts.map((p) => (
+                          <div
+                            key={p.id}
+                            onClick={() => addProductDirectly(p)}
+                            className="p-2.5 hover:bg-secondary/40 transition-colors flex items-center justify-between cursor-pointer gap-2 text-xs"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-bold text-foreground truncate">{p.nombre}</p>
+                              <p className="text-[10px] text-muted-foreground font-mono">
+                                SKU: {p.sku || 'N/A'} {p.codigo_barras ? `| Barcode: ${p.codigo_barras}` : ''} | Stock: {p.stock_actual}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <span className="font-black text-foreground">
+                                RD$ {p.precio_venta.toLocaleString('es-DO')}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  addProductDirectly(p);
+                                }}
+                                className="btn-primary text-[11px] py-1 px-2.5 flex items-center gap-1 font-bold"
+                              >
+                                <Plus size={12} /> Agregar
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
 
-              <select
-                className="input-field sm:w-72 text-xs"
-                value={selectedProductId}
-                onChange={(e) => {
-                  setSelectedProductId(e.target.value);
-                  const p = allAvailableProducts.find((it) => it.id === e.target.value);
-                  if (p) addProductDirectly(p);
-                }}
-              >
-                <option value="">O selecciona de la lista...</option>
-                {filteredProducts.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.nombre} — RD$ {p.precio_venta.toLocaleString('es-DO')} (Stock: {p.stock_actual})
-                  </option>
-                ))}
-              </select>
+                <select
+                  className="input-field sm:w-72 text-xs"
+                  value={selectedProductId}
+                  onChange={(e) => {
+                    setSelectedProductId(e.target.value);
+                    const p = allAvailableProducts.find((it) => it.id === e.target.value);
+                    if (p) addProductDirectly(p);
+                  }}
+                >
+                  <option value="">O selecciona de la lista...</option>
+                  {filteredProducts.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nombre} — RD$ {p.precio_venta.toLocaleString('es-DO')} (Stock: {p.stock_actual})
+                    </option>
+                  ))}
+                </select>
 
-              <button
-                type="button"
-                onClick={handleAddProduct}
-                className="btn-secondary text-xs flex items-center justify-center gap-1.5 font-bold whitespace-nowrap px-4"
-              >
-                <Plus size={15} /> Agregar Producto
-              </button>
-            </div>
-            {isDropdownOpen && productSearch.trim().length > 0 && (
-              <div className="flex justify-end">
                 <button
                   type="button"
-                  onClick={() => setIsDropdownOpen(false)}
-                  className="text-[11px] text-muted-foreground hover:text-foreground"
+                  onClick={handleAddProduct}
+                  className="btn-secondary text-xs flex items-center justify-center gap-1.5 font-bold whitespace-nowrap px-4"
                 >
-                  Cerrar resultados
+                  <Plus size={15} /> Agregar Producto
                 </button>
               </div>
-            )}
-          </div>
+              {isDropdownOpen && productSearch.trim().length > 0 && (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setIsDropdownOpen(false)}
+                    className="text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    Cerrar resultados
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Tabla de ítems */}
           <div className="overflow-x-auto border border-border rounded-xl">
@@ -570,88 +683,245 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
                   <th className="px-3.5 py-2.5 font-semibold text-center w-36">Cantidad</th>
                   <th className="px-3.5 py-2.5 font-semibold text-center w-20">ITBIS</th>
                   <th className="px-3.5 py-2.5 font-semibold text-right w-32">Subtotal (RD$)</th>
-                  <th className="px-3.5 py-2.5 text-center w-12">Acción</th>
+                  <th className="px-3.5 py-2.5 text-center w-44">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {items.map((item, idx) => (
-                  <tr key={item.id} className="hover:bg-secondary/20 transition-colors">
-                    <td className="px-3.5 py-2.5">
-                      <div className="font-bold text-foreground">{item.nombre_item}</div>
-                      {item.sku && (
-                        <span className="text-[10px] text-muted-foreground font-mono">
-                          SKU / Barcode: {item.sku}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3.5 py-2.5 text-right font-mono font-medium">
-                      <div className="inline-flex items-center gap-1 justify-end">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          disabled={!userCanChangePrice}
-                          className={`input-field text-right w-24 py-1 px-1.5 text-xs font-mono inline-block ${
-                            !userCanChangePrice ? 'opacity-70 bg-muted cursor-not-allowed' : ''
-                          }`}
-                          value={item.precio_unitario}
-                          onChange={(e) => handlePriceChange(idx, Number(e.target.value))}
-                          title={!userCanChangePrice ? 'Solo Administradores pueden cambiar precios' : 'Precio unitario'}
-                        />
-                        {!userCanChangePrice && (
-                          <span title="Precio bloqueado para cajeras">
-                            <Lock size={12} className="text-muted-foreground" />
+                {items.map((item, idx) => {
+                  const isSwappingThisRow = swappingRowIndex === idx;
+                  const wasChanged =
+                    item.original_nombre_item && item.original_nombre_item !== item.nombre_item;
+
+                  return (
+                    <React.Fragment key={item.id}>
+                      <tr className="hover:bg-secondary/20 transition-colors">
+                        <td className="px-3.5 py-2.5">
+                          <div className="font-bold text-foreground flex items-center gap-2 flex-wrap">
+                            <span>{item.nombre_item}</span>
+                            {wasChanged && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
+                                Reemplaza a: {item.original_nombre_item}
+                              </span>
+                            )}
+                          </div>
+                          {item.sku && (
+                            <span className="text-[10px] text-muted-foreground font-mono">
+                              SKU / Barcode: {item.sku}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3.5 py-2.5 text-right font-mono font-medium">
+                          <div className="inline-flex items-center gap-1 justify-end">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              disabled={!userCanChangePrice}
+                              className={`input-field text-right w-24 py-1 px-1.5 text-xs font-mono inline-block ${
+                                !userCanChangePrice ? 'opacity-70 bg-muted cursor-not-allowed' : ''
+                              }`}
+                              value={item.precio_unitario}
+                              onChange={(e) => handlePriceChange(idx, Number(e.target.value))}
+                              title={!userCanChangePrice ? 'Solo Administradores pueden cambiar precios' : 'Precio unitario'}
+                            />
+                            {!userCanChangePrice && (
+                              <span title="Precio bloqueado para cajeras">
+                                <Lock size={12} className="text-muted-foreground" />
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3.5 py-2.5 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              className="w-7 h-7 rounded border border-border bg-card hover:bg-secondary flex items-center justify-center font-bold text-muted-foreground hover:text-foreground text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                              onClick={() => handleQuantityChange(idx, item.cantidad - 1)}
+                              disabled={isCashierSwapOnly || item.cantidad <= 1}
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              step="any"
+                              min="0.001"
+                              disabled={isCashierSwapOnly}
+                              className={`input-field text-center w-16 py-1 px-1 text-xs font-mono font-bold ${
+                                isCashierSwapOnly ? 'opacity-70 bg-muted cursor-not-allowed' : ''
+                              }`}
+                              value={item.cantidad}
+                              onChange={(e) => handleQuantityChange(idx, Number(e.target.value))}
+                            />
+                            <button
+                              type="button"
+                              className="w-7 h-7 rounded border border-border bg-card hover:bg-secondary flex items-center justify-center font-bold text-muted-foreground hover:text-foreground text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                              onClick={() => handleQuantityChange(idx, item.cantidad + 1)}
+                              disabled={isCashierSwapOnly}
+                            >
+                              +
+                            </button>
+                          </div>
+                        </td>
+                        <td className="px-3.5 py-2.5 text-center">
+                          <span className="badge-neutral text-[10px]">
+                            {item.porcentaje_impuesto > 0 ? `${item.porcentaje_impuesto}%` : 'Exento'}
                           </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-3.5 py-2.5 text-center">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <button
-                          type="button"
-                          className="w-7 h-7 rounded border border-border bg-card hover:bg-secondary flex items-center justify-center font-bold text-muted-foreground hover:text-foreground text-sm"
-                          onClick={() => handleQuantityChange(idx, item.cantidad - 1)}
-                          disabled={item.cantidad <= 1}
-                        >
-                          -
-                        </button>
-                        <input
-                          type="number"
-                          step="any"
-                          min="0.001"
-                          className="input-field text-center w-16 py-1 px-1 text-xs font-mono font-bold"
-                          value={item.cantidad}
-                          onChange={(e) => handleQuantityChange(idx, Number(e.target.value))}
-                        />
-                        <button
-                          type="button"
-                          className="w-7 h-7 rounded border border-border bg-card hover:bg-secondary flex items-center justify-center font-bold text-muted-foreground hover:text-foreground text-sm"
-                          onClick={() => handleQuantityChange(idx, item.cantidad + 1)}
-                        >
-                          +
-                        </button>
-                      </div>
-                    </td>
-                    <td className="px-3.5 py-2.5 text-center">
-                      <span className="badge-neutral text-[10px]">
-                        {item.porcentaje_impuesto > 0 ? `${item.porcentaje_impuesto}%` : 'Exento'}
-                      </span>
-                    </td>
-                    <td className="px-3.5 py-2.5 text-right font-mono font-bold text-foreground">
-                      RD$ {item.subtotal.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-3.5 py-2.5 text-center">
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveItem(idx)}
-                        className="p-1.5 text-muted-foreground hover:text-danger hover:bg-danger/10 rounded-lg transition-colors"
-                        title="Eliminar producto"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                        </td>
+                        <td className="px-3.5 py-2.5 text-right font-mono font-bold text-foreground">
+                          RD$ {item.subtotal.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-3.5 py-2.5 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (isSwappingThisRow) {
+                                  setSwappingRowIndex(null);
+                                  setSwapSearch('');
+                                } else {
+                                  setSwappingRowIndex(idx);
+                                  setSwapSearch('');
+                                }
+                              }}
+                              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                                isSwappingThisRow
+                                  ? 'bg-amber-500 text-white shadow-xs'
+                                  : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 border border-amber-500/30'
+                              }`}
+                              title="Cambiar este producto por otro del catálogo"
+                            >
+                              <ArrowLeftRight size={13} />
+                              <span>{isSwappingThisRow ? 'Cancelar' : 'Cambiar por otro'}</span>
+                            </button>
+
+                            {!isCashierSwapOnly && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItem(idx)}
+                                className="p-1.5 text-muted-foreground hover:text-danger hover:bg-danger/10 rounded-lg transition-colors cursor-pointer"
+                                title="Eliminar producto"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+
+                      {/* Panel desplegable en línea para elegir el nuevo producto que reemplazará al actual */}
+                      {isSwappingThisRow && (
+                        <tr className="bg-amber-500/5 border-b border-amber-500/30">
+                          <td colSpan={6} className="p-3.5">
+                            <div className="space-y-2.5">
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <span className="text-xs font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                                  <ArrowLeftRight size={14} />
+                                  Selecciona el nuevo producto para reemplazar a «{item.nombre_item}»:
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSwappingRowIndex(null);
+                                    setSwapSearch('');
+                                  }}
+                                  className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 cursor-pointer"
+                                >
+                                  <X size={14} /> Cerrar
+                                </button>
+                              </div>
+
+                              <div className="flex flex-col sm:flex-row gap-2.5">
+                                <div className="relative flex-1">
+                                  <Search
+                                    size={15}
+                                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                                  />
+                                  <input
+                                    ref={swapInputRef}
+                                    type="text"
+                                    className="input-field pl-9 w-full text-xs"
+                                    placeholder="Escribe el nombre, código de barras o SKU del nuevo producto..."
+                                    value={swapSearch}
+                                    onChange={(e) => setSwapSearch(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        if (filteredSwapProducts.length === 1) {
+                                          handleSwapProduct(idx, filteredSwapProducts[0]);
+                                        } else if (filteredSwapProducts.length > 1) {
+                                          toast.info('Haz clic en el producto de la lista por el que deseas cambiarlo');
+                                        }
+                                      } else if (e.key === 'Escape') {
+                                        setSwappingRowIndex(null);
+                                        setSwapSearch('');
+                                      }
+                                    }}
+                                  />
+                                </div>
+
+                                <select
+                                  className="input-field sm:w-80 text-xs"
+                                  value=""
+                                  onChange={(e) => {
+                                    const chosen = allAvailableProducts.find((p) => p.id === e.target.value);
+                                    if (chosen) handleSwapProduct(idx, chosen);
+                                  }}
+                                >
+                                  <option value="">O elígelo directamente de la lista...</option>
+                                  {filteredSwapProducts.map((p) => (
+                                    <option key={p.id} value={p.id}>
+                                      {p.nombre} — RD$ {p.precio_venta.toLocaleString('es-DO')} (Stock: {p.stock_actual})
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div className="max-h-48 overflow-y-auto bg-card border border-border rounded-xl divide-y divide-border shadow-inner">
+                                {filteredSwapProducts.length === 0 ? (
+                                  <div className="p-3 text-center text-xs text-muted-foreground">
+                                    No se encontraron productos con "{swapSearch}".
+                                  </div>
+                                ) : (
+                                  filteredSwapProducts.map((p) => (
+                                    <div
+                                      key={p.id}
+                                      onClick={() => handleSwapProduct(idx, p)}
+                                      className="px-3 py-2 hover:bg-amber-500/10 transition-colors flex items-center justify-between cursor-pointer gap-2 text-xs"
+                                    >
+                                      <div className="min-w-0">
+                                        <p className="font-bold text-foreground truncate">{p.nombre}</p>
+                                        <p className="text-[10px] text-muted-foreground font-mono">
+                                          SKU: {p.sku || 'N/A'}{' '}
+                                          {p.codigo_barras ? `| Código: ${p.codigo_barras}` : ''} | Stock:{' '}
+                                          {p.stock_actual}
+                                        </p>
+                                      </div>
+                                      <div className="flex items-center gap-2.5 flex-shrink-0">
+                                        <span className="font-black text-foreground font-mono">
+                                          RD$ {p.precio_venta.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleSwapProduct(idx, p);
+                                          }}
+                                          className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                                        >
+                                          <ArrowLeftRight size={11} /> Cambiar por este
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -665,10 +935,10 @@ export const SaleEditView: React.FC<SaleEditViewProps> = ({
             <div className="space-y-1">
               <p className="font-bold">Aviso de Auditoría y Control de Inventario</p>
               <p>
-                Al confirmar, el sistema calculará automáticamente las diferencias de existencias (delta) y reajustará el stock de cada producto.
+                Al guardar, el producto anterior volverá al stock y se descontará el nuevo producto seleccionado automáticamente.
               </p>
               <p className="text-[11px] text-muted-foreground">
-                Responsable de edición: <span className="font-semibold text-foreground">{user?.name || 'Administrador'}</span>.
+                Responsable de edición: <span className="font-semibold text-foreground">{user?.name || 'Cajera'}</span>.
               </p>
             </div>
           </div>
