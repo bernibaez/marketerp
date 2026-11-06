@@ -91,20 +91,16 @@ const ALL_ROUTES = '*';
 /** Rutas permitidas por rol (`*` = todas) */
 export const ROLE_ROUTES: Record<UserRole, string[] | typeof ALL_ROUTES> = {
   Administrador: ALL_ROUTES,
-  Cajero: ['/', '/dashboard', '/point-of-sale-pos', '/cash-closure', '/sales'],
-  Vendedor: ['/', '/sales', '/point-of-sale-pos', '/combos', '/contacts', '/accounts-receivable', '/cash-closure', '/settings'],
+  Cajero: ['/point-of-sale-pos', '/cash-closure', '/sales'],
+  Vendedor: ['/sales', '/point-of-sale-pos', '/combos', '/contacts', '/accounts-receivable', '/cash-closure'],
   Almacenista: [
-    '/',
     '/product-management',
     '/combos',
     '/stock-transfers',
     '/stock-adjustments',
-    '/cajas',
     '/purchases',
-    '/settings',
   ],
   Contador: [
-    '/',
     '/reports',
     '/expenses',
     '/accounts-receivable',
@@ -112,7 +108,6 @@ export const ROLE_ROUTES: Record<UserRole, string[] | typeof ALL_ROUTES> = {
     '/sales',
     '/purchases',
     '/cash-closure',
-    '/settings',
   ],
 };
 
@@ -271,14 +266,41 @@ export function authenticateByCode(
 
 export function canAccessRoute(role: UserRole, pathname: string): boolean {
   const norm = String(role).trim().toLowerCase();
-  if (norm === 'superadmin' || norm === 'super_admin' || norm === 'super administrador') {
+  if (
+    norm === 'superadmin' ||
+    norm === 'super_admin' ||
+    norm === 'super administrador' ||
+    norm === 'admin' ||
+    norm === 'administrador'
+  ) {
     return true;
   }
   const cleanPath = pathname.split('?')[0];
-  if (cleanPath === '/' || cleanPath === '/dashboard') return true;
+
+  // Dashboard solo si el rol tiene permiso explícito sobre el módulo 'dashboard'
+  if (cleanPath === '/' || cleanPath === '/dashboard') {
+    const matrixRoutes = routesFromPermissions(role);
+    if (matrixRoutes === '*') return true;
+    if (Array.isArray(matrixRoutes) && matrixRoutes.includes('/')) return true;
+    const staticRoutes = ROLE_ROUTES[role as UserRole];
+    if (Array.isArray(staticRoutes) && (staticRoutes.includes('/') || staticRoutes.includes('/dashboard'))) {
+      return true;
+    }
+    return false;
+  }
+
   const fromMatrix = routesFromPermissions(role);
   if (fromMatrix === '*') return true;
-  return fromMatrix.some((route) => route !== '/' && cleanPath.startsWith(route));
+  if (Array.isArray(fromMatrix) && fromMatrix.some((r) => r !== '/' && (cleanPath === r || cleanPath.startsWith(`${r}/`)))) {
+    return true;
+  }
+
+  const staticFallback = ROLE_ROUTES[role as UserRole];
+  if (Array.isArray(staticFallback) && staticFallback.some((r) => r !== '/' && (cleanPath === r || cleanPath.startsWith(`${r}/`)))) {
+    return true;
+  }
+
+  return false;
 }
 
 export function canAccessNav(role: UserRole, href: string): boolean {

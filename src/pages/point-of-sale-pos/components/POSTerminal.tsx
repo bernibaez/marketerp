@@ -19,7 +19,7 @@ import { usePOSHeldSales } from '../hooks/usePOSHeldSales';
 import { usePOSCheckout } from '../hooks/usePOSCheckout';
 import { usePOSScanner } from '../hooks/usePOSScanner';
 
-import { findCashRegister, getCashRegister, type CashRegisterId } from '@/lib/cashRegisters';
+import { findCashRegister, getCashRegister, type CashRegisterId, type CashRegisterSession } from '@/lib/cashRegisters';
 import { useCashRegisters } from '@/hooks/useCashRegisters';
 import type { NCFType } from '@/lib/ncfStore';
 import { useAuth } from '@/context/AuthContext';
@@ -29,7 +29,54 @@ import { useCombos } from '@/hooks/useCombos';
 import { syncInvoiceSettingsFromSupabase } from '@/lib/invoiceSettingsStore';
 
 const ADMIN_OWN_CASH: CashRegisterId = '1';
-const DEFAULT_CASHIER_CASH: CashRegisterId = '2';
+
+function resolvePreferredBoxId(
+  regs: CashRegisterSession[],
+  isAdmin: boolean,
+  uName?: string,
+  uId?: string,
+  currentId?: string
+): CashRegisterId {
+  if (regs.length === 0) return (currentId as CashRegisterId) || '1';
+
+  // 1. Si es admin, seleccionar caja de administración
+  if (isAdmin) {
+    const adminBox = regs.find((c) => c.isAdminBox || c.label.toLowerCase().includes('admin'));
+    if (adminBox) return adminBox.id;
+  }
+
+  // 2. Si el nombre del usuario coincide con una caja (ej: Cheila, Valentina, Eroly, Beiliz, Elizabeth, Keyla)
+  if (uName) {
+    const norm = uName.trim().toLowerCase();
+    const byName = regs.find((c) => !c.isAdminBox && (
+      c.label.toLowerCase().includes(norm) || norm.includes(c.label.toLowerCase())
+    ));
+    if (byName) return byName.id;
+  }
+
+  // 3. Si el usuario ya tiene un turno abierto
+  const openBox = regs.find(
+    (c) =>
+      c.open &&
+      !c.isAdminBox &&
+      ((c.cashierId && uId && String(c.cashierId) === String(uId)) ||
+        (c.cashier && uName && c.cashier.trim().toLowerCase() === uName.trim().toLowerCase()))
+  );
+  if (openBox) return openBox.id;
+
+  // 4. Si la caja actual es operativa y válida, conservarla
+  if (currentId) {
+    const curr = regs.find((c) => c.id === currentId);
+    if (curr && !curr.isAdminBox) return curr.id;
+  }
+
+  // 5. Primera caja operativa disponible (no admin)
+  const firstFree = regs.find((c) => !c.isAdminBox && !c.open);
+  if (firstFree) return firstFree.id;
+
+  const firstNonAdmin = regs.find((c) => !c.isAdminBox);
+  return firstNonAdmin?.id || regs[0]?.id || '1';
+}
 
 export interface CartItem {
   id: string;
@@ -78,7 +125,7 @@ export interface Customer {
 }
 
 export default function POSTerminal() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const isAdminUser = isAdminOrSuperAdmin(user);
   const { registers, loading: registersLoading, refetch: refetchRegisters, markRegisterClosed } = useCashRegisters();
@@ -121,7 +168,7 @@ export default function POSTerminal() {
 
   // 3. Cash Session State
   const [activeCashId, setActiveCashId] = useState<CashRegisterId>(() =>
-    isAdminUser ? '4' : DEFAULT_CASHIER_CASH
+    isAdminUser ? '4' : '1'
   );
   const [shiftOpenedLocally, setShiftOpenedLocally] = useState(false);
   const [shiftClosedLocally, setShiftClosedLocally] = useState(false);
@@ -132,65 +179,11 @@ export default function POSTerminal() {
 
   useEffect(() => {
     if (registers.length === 0) return;
-
-    // 1. Si este usuario ya tiene una caja abierta registrada a su nombre o ID, seleccionarla y recuperarla automáticamente
-    const userOpenRegister = registers.find(
-      (c) =>
-        c.open &&
-        (isAdminUser || !c.isAdminBox) &&
-        ((c.cashierId && user?.id && String(c.cashierId) === String(user.id)) ||
-          (c.cashier && user?.name && c.cashier.trim().toLowerCase() === user.name.trim().toLowerCase()))
-    );
-    if (userOpenRegister) {
-      if (activeCashId !== userOpenRegister.id) {
-        setActiveCashId(userOpenRegister.id);
-      }
-      return;
+    const targetId = resolvePreferredBoxId(registers, isAdminUser, user?.name, user?.id, activeCashId);
+    if (targetId && targetId !== activeCashId) {
+      setActiveCashId(targetId);
     }
-
-    // 2. Si es admin y la caja actual no es de admin, seleccionar la caja de administración
-    if (isAdminUser) {
-      const current = findCashRegister(registers, activeCashId);
-      if (!current || !current.isAdminBox) {
-        const adminBox = registers.find((c) => c.isAdminBox || c.label.toLowerCase().includes('admin'));
-        if (adminBox) {
-          setActiveCashId(adminBox.id);
-          return;
-        }
-      }
-    }
-
-    // 3. Si es cajero regular:
-    // Evitar asignar una caja que ya esté abierta por otro usuario
-    if (!isAdminUser) {
-      const current = findCashRegister(registers, activeCashId);
-      const isOccupiedByOther = Boolean(
-        current?.open &&
-          current?.cashierId &&
-          user?.id &&
-          String(current.cashierId) !== String(user.id) &&
-          (!user?.name || !current.cashier || current.cashier.toLowerCase() !== user.name.toLowerCase())
-      );
-      if (!current || current.isAdminBox || isOccupiedByOther) {
-        // Buscar la primera caja disponible (cerrada) o que ya pertenezca al usuario actual
-        const availableBox =
-          registers.find(
-            (c) =>
-              !c.isAdminBox &&
-              (!c.open ||
-                (c.cashierId && String(c.cashierId) === String(user?.id)) ||
-                (c.cashier && user?.name && c.cashier.toLowerCase() === user.name.toLowerCase()))
-          ) ||
-          registers.find((c) => !c.isAdminBox && !c.open) ||
-          registers.find((c) => !c.isAdminBox) ||
-          registers[0];
-        if (availableBox && availableBox.id !== activeCashId) {
-          setActiveCashId(availableBox.id);
-          return;
-        }
-      }
-    }
-  }, [isAdminUser, registers, activeCashId, user?.id, user?.name]);
+  }, [isAdminUser, registers, user?.id, user?.name]);
 
   const activeCashSession = findCashRegister(registers, activeCashId);
   const activeCash = activeCashSession || getCashRegister(activeCashId);
@@ -477,7 +470,7 @@ export default function POSTerminal() {
           awaitingDelete={awaitingDeleteScan}
           onToggleDeleteMode={toggleDeleteMode}
           cashLabel={activeCash.label}
-          cashierName={activeCash.cashier}
+          cashierName={user?.name || activeCash.cashier || 'Cajero'}
           isRemoteAdmin={isRemoteAdmin}
           onClear={clearCart}
           onHold={() => setHoldOpen(true)}
@@ -613,14 +606,16 @@ export default function POSTerminal() {
           <PosCashOpenModal
             isMandatory={true}
             initialCajaId={String(activeCash.dbId || activeCashId)}
-            onExit={() => navigate('/')}
+            onExit={async () => {
+              await logout();
+              navigate('/login', { replace: true });
+            }}
             onClose={() => {}}
             onSuccess={(cierre) => {
               setShiftClosedLocally(false);
               setShiftOpenedLocally(true);
               if (cierre?.caja_id) setActiveCashId(cierre.caja_id);
               void refetchRegisters();
-              toast.success('¡Caja abierta exitosamente! Listo para facturar.');
             }}
           />
         </div>

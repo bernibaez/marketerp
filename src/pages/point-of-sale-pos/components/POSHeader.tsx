@@ -124,7 +124,7 @@ export default function POSHeader({
               Ubicación:
             </span>
             <span className="font-bold text-slate-700 dark:text-slate-300 uppercase tracking-tight text-[11px] sm:text-xs">
-              SUPERMERCADO {cashLabel || 'REMANENTE'}
+              {cashLabel ? (cashLabel.toUpperCase().includes('CAJA') ? cashLabel : `CAJA: ${cashLabel}`) : 'CAJA PRINCIPAL'}
             </span>
           </div>
 

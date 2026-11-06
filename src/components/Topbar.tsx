@@ -6,6 +6,7 @@ import {
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/context/AuthContext';
+import { canAccessNav } from '@/lib/auth';
 import { ChangePasswordModal } from '@/pages/users/components/ChangePasswordModal';
 
 interface TopbarProps {
@@ -273,7 +274,7 @@ export default function Topbar({
 
       {/* Dynamic Contextual Action Buttons Tailored to Current Module */}
       <div className="hidden md:flex items-center gap-2 ml-2">
-        {currentModule.actions.map((act) => {
+        {currentModule.actions.filter((act) => canAccessNav(user?.role ?? 'Cajero', act.href)).map((act) => {
           let btnClass = 'btn-secondary text-xs font-bold py-1.5 px-3 flex items-center gap-1.5 transition-all shadow-xs';
           if (act.variant === 'primary') {
             btnClass = 'btn-primary text-xs font-bold py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 transition-all shadow-xs';
@@ -416,7 +417,7 @@ export default function Topbar({
               {[
                 { icon: <User size={18} />, label: 'Mi Perfil', href: '/settings' },
                 { icon: <Settings size={18} />, label: 'Configuración', href: '/settings' },
-              ].map((item) => (
+              ].filter((item) => canAccessNav(user?.role ?? 'Cajero', item.href)).map((item) => (
                 <Link
                   key={`profile-${item.label}`}
                   to={item.href}

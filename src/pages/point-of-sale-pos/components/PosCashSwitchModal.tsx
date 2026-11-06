@@ -55,7 +55,7 @@ export default function PosCashSwitchModal({ currentId, onSelect, onClose }: Pro
       return;
     }
     onSelect(reg.id);
-    toast.success(`Entraste a ${reg.label} (${reg.cashier})`);
+    toast.success(`Entraste a ${reg.label}`);
     onClose();
   };
 

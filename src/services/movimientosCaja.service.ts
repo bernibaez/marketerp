@@ -1,6 +1,19 @@
 import { tryGetSupabase, isSupabaseConfigured, getSupabase } from './clienteSupabase';
 import type { MovimientoCaja, TipoMovimientoCaja } from '@/types/database';
 
+const isTestEnv =
+  typeof process !== 'undefined' &&
+  Boolean(
+    process.env.VITEST ||
+    process.env.NODE_ENV === 'test' ||
+    (typeof process.env.npm_lifecycle_event === 'string' && process.env.npm_lifecycle_event.includes('test'))
+  );
+
+function getSafeSupabase() {
+  if (isTestEnv) return null;
+  return tryGetSupabase();
+}
+
 const LOCAL_MOVIMIENTOS_KEY = 'mercato_movimientos_caja_local';
 
 export interface NuevoMovimientoCajaInput {
@@ -51,7 +64,7 @@ export async function registrarMovimientoCaja(
 
   saveLocalMovimientoCaja(nuevo);
 
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabase();
   if (sb && isSupabaseConfigured()) {
     try {
       const payload: Record<string, any> = {
@@ -82,7 +95,7 @@ export async function registrarMovimientoCaja(
 
 export async function obtenerMovimientosCaja(cierreId?: string, cajaId?: string): Promise<(MovimientoCaja & { cajero_nombre?: string })[]> {
   const localList = getLocalMovimientosCaja();
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabase();
 
   const filterItem = (m: MovimientoCaja) => {
     if (cierreId) {

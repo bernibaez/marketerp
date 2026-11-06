@@ -56,12 +56,16 @@ export function useCashRegisters() {
         const dbId = String(caja.id);
         const codigo = String(caja.codigo || caja.id);
         const cajaId = codigo as CashRegisterId;
+        const formattedLabel = caja.nombre?.toUpperCase().includes('CAJA')
+          ? caja.nombre
+          : `Caja #${codigo} - ${caja.nombre}`;
         const keys = new Set(
           [
             dbId,
             codigo,
             cajaId,
             caja.nombre,
+            formattedLabel,
             `Caja #${codigo}`,
             `Caja ${codigo}`,
             `caja-${codigo}`,
@@ -137,7 +141,7 @@ export function useCashRegisters() {
           return {
             id: cajaId,
             ...ids,
-            label: caja.nombre,
+            label: formattedLabel,
             cashier: cashierName,
             cashierId: sessionAbierta.cajero_id || undefined,
             cierreId: sessionAbierta.id,
@@ -163,7 +167,7 @@ export function useCashRegisters() {
           return {
             id: cajaId,
             ...ids,
-            label: caja.nombre,
+            label: formattedLabel,
             cashier: user?.name || 'Administrador General',
             role: user?.role || 'Administrador General',
             isAdminBox: true,
@@ -181,7 +185,7 @@ export function useCashRegisters() {
         return {
           id: cajaId,
           ...ids,
-          label: caja.nombre,
+          label: formattedLabel,
           cashier: 'Disponible',
           cashierId: undefined,
           role: 'Disponible',

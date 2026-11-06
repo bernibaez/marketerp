@@ -73,16 +73,20 @@ describe('Correcciones e Implementaciones Solicitadas', () => {
   });
 
   describe('2. Apertura de Caja, Menú Principal y Aislamiento de Usuarios', () => {
-    it('permite que un Cajero acceda a la ruta "/" y "/dashboard" para salir al menú principal', () => {
-      expect(canAccessRoute('Cajero', '/')).toBe(true);
-      expect(canAccessRoute('Cajero', '/dashboard')).toBe(true);
-      expect(ROLE_ROUTES['Cajero']).toContain('/');
+    it('bloquea que un Cajero acceda al Dashboard ("/" y "/dashboard") para proteger información administrativa', () => {
+      expect(canAccessRoute('Cajero', '/')).toBe(false);
+      expect(canAccessRoute('Cajero', '/dashboard')).toBe(false);
+      expect(ROLE_ROUTES['Cajero']).not.toContain('/');
+      expect(ROLE_ROUTES['Cajero']).not.toContain('/dashboard');
     });
 
-    it('la lista de rutas de Cajero contiene el inicio sin atrapar al usuario en bucle', () => {
+    it('la lista de rutas de Cajero contiene únicamente sus módulos autorizados (POS, cierre de caja, ventas)', () => {
       const routes = ROLE_ROUTES['Cajero'];
-      expect(routes).toContain('/');
       expect(routes).toContain('/point-of-sale-pos');
+      expect(routes).toContain('/cash-closure');
+      expect(routes).toContain('/sales');
+      expect(routes).not.toContain('/purchases');
+      expect(routes).not.toContain('/settings');
     });
   });
 

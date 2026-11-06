@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/context/AuthContext';
-import { getRoleHome } from '@/lib/auth';
+import { getRoleHome, canAccessRoute } from '@/lib/auth';
 import { isSupabaseConfigured } from '@/services/clienteSupabase';
 
 const features = [
@@ -72,11 +72,13 @@ export default function LoginPage() {
   const [accessCode, setAccessCode] = useState('');
 
   if (isAuthenticated && user) {
-    return <Navigate to={from && from !== '/login' ? from : getRoleHome(user.role)} replace />;
+    const target = from && from !== '/login' && canAccessRoute(user.role, from) ? from : getRoleHome(user.role);
+    return <Navigate to={target} replace />;
   }
 
   const goHome = (role: NonNullable<typeof user>['role']) => {
-    navigate(from && from !== '/login' ? from : getRoleHome(role), { replace: true });
+    const target = from && from !== '/login' && canAccessRoute(role, from) ? from : getRoleHome(role);
+    navigate(target, { replace: true });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
