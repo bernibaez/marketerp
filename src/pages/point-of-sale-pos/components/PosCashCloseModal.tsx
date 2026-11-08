@@ -19,6 +19,7 @@ import { useCashRegisters } from '@/hooks/useCashRegisters';
 import {
   cerrarTurnoCaja,
   calcularResumenCajaAbierta,
+  extractCashierFromCajaLabel,
   type ResumenCajaAbierta,
 } from '@/services/cierresCaja.service';
 import type { CierreCaja } from '@/types/database';
@@ -147,6 +148,10 @@ export default function PosCashCloseModal({
     availableRegisters[0] ||
     registers[0];
 
+  const selectedBoxHasOwnCashierName = selectedCaja?.label
+    ? extractCashierFromCajaLabel(selectedCaja.label)
+    : undefined;
+
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -160,11 +165,12 @@ export default function PosCashCloseModal({
               ? user?.id
               : undefined;
         const targetCajeroName =
-          selectedCaja?.open && selectedCaja?.cashier && selectedCaja.cashier !== 'Disponible'
+          selectedCaja?.open &&
+          selectedCaja?.cashier &&
+          selectedCaja.cashier !== 'Disponible' &&
+          selectedCaja.cashier !== 'Cajero Activo'
             ? selectedCaja.cashier
-            : !isAdmin
-              ? user?.name
-              : undefined;
+            : selectedBoxHasOwnCashierName || (!isAdmin ? user?.name : undefined);
         const targetCierreId = selectedCierreId || selectedCaja?.cierreId;
 
         const res = await calcularResumenCajaAbierta(
@@ -200,6 +206,7 @@ export default function PosCashCloseModal({
     selectedCaja?.cashierId,
     selectedCaja?.cashier,
     selectedCaja?.open,
+    selectedBoxHasOwnCashierName,
     isAdmin,
     user?.id,
     user?.name,
@@ -210,9 +217,13 @@ export default function PosCashCloseModal({
 
   const shiftCashierName =
     summary.cajero_nombre ||
-    (selectedCaja?.open && selectedCaja?.cashier && selectedCaja.cashier !== 'Disponible'
+    (selectedCaja?.open &&
+    selectedCaja?.cashier &&
+    selectedCaja.cashier !== 'Disponible' &&
+    selectedCaja.cashier !== 'Cajero Activo'
       ? selectedCaja.cashier
       : undefined) ||
+    selectedBoxHasOwnCashierName ||
     user?.name ||
     'Cajero';
 

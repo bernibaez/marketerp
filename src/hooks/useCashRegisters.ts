@@ -144,10 +144,26 @@ export function useCashRegisters() {
         const sameBoxOpenShifts = abiertas.filter((a) => keys.has(String(a.caja_id)));
         const multipleShiftsOnSameBox = sameBoxOpenShifts.length > 1;
 
+        const boxCashierSuffix = isBoxNamedAfterCashier(formattedLabel)
+          ? formattedLabel.split('-').slice(1).join('-').trim()
+          : undefined;
+
         const shiftOwnerName =
-          matchedUser?.nombre_completo || rawCajeroNombre || localClosure?.userName || '';
+          matchedUser?.nombre_completo ||
+          rawCajeroNombre ||
+          localClosure?.userName ||
+          boxCashierSuffix ||
+          '';
 
         const ventasTurno = ventasHoy.filter((v) => {
+          const saleCajaId = String(v.caja_id ?? '').trim();
+          const matchesBox = saleCajaId ? keys.has(saleCajaId) : false;
+
+          // Regla estricta: si la venta tiene asignada otra caja distinta, NUNCA mezclarla
+          if (saleCajaId && !matchesBox) {
+            return false;
+          }
+
           const matchesCashierId =
             Boolean(sessionAbierta.cajero_id) &&
             String(v.cajero_id ?? '') === String(sessionAbierta.cajero_id);
@@ -159,7 +175,6 @@ export function useCashRegisters() {
             Boolean(shiftOwnerName) &&
             hasSpecificRowName &&
             isSameCashierName(rowName, shiftOwnerName);
-          const matchesBox = keys.has(String(v.caja_id ?? ''));
 
           if (shiftOwnerName && hasSpecificRowName && !matchesCashierName && !matchesCashierId) {
             return false;
@@ -198,16 +213,12 @@ export function useCashRegisters() {
         const expectedCash = Math.round((baseCash + cashSales) * 100) / 100;
         const ticketsCount = ventasTurno.length;
 
-        const ventaCajeroNombre = ventasTurno.find(
-          (v) => v.cajero_nombre && v.cajero_nombre !== 'No especificado' && v.cajero_nombre !== 'Cajero'
-        )?.cajero_nombre;
-
         const cashierName =
           matchedUser?.nombre_completo ||
           rawCajeroNombre ||
           localClosure?.userName ||
-          ventaCajeroNombre ||
           (sessionAbierta.cajero_id && user?.id === sessionAbierta.cajero_id ? user?.name : undefined) ||
+          boxCashierSuffix ||
           'Cajero Activo';
 
         if (sessionAbierta.cajero_id && cashierName) {
@@ -298,15 +309,14 @@ export function useCashRegisters() {
           : undefined;
 
         // 2. Si no, buscar por coincidencia de caja_id (pero si la caja lleva el nombre de una cajera específica como Keila,
-        //    no asignarle el turno de otra cajera distinta ni turnos huérfanos sin cajero)
+        //    no asignarle el turno de otra cajera distinta)
         if (!sessionAbierta) {
           sessionAbierta = abiertas.find((c) => {
             if (usedCierreIds.has(c.id)) return false;
             if (!keys.has(String(c.caja_id))) return false;
             const cName = resolveSessionCashierName(c);
             if (boxHasSpecificCashierName) {
-              // Una caja con nombre propio (ej. Keila) solo se muestra abierta si el turno realmente es de esa cajera
-              return Boolean(cName && doesRegisterMatchUser(caja.nombre, cName));
+              return !cName || doesRegisterMatchUser(caja.nombre, cName);
             }
             // Si el turno pertenece a un cajero que tiene su propia caja con su nombre en baseCajasList, reservarlo para su caja
             if (cName) {
@@ -320,7 +330,7 @@ export function useCashRegisters() {
             return true;
           });
         }
-        const isAdminBox = Boolean(caja.es_caja_principal);
+        const isAdminBox = Boolean(caja.es_caja_principal) && !boxHasSpecificCashierName;
         const ids = { dbId, codigo };
 
         if (sessionAbierta) {

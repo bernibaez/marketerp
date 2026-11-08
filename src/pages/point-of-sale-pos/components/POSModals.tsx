@@ -56,7 +56,7 @@ interface POSModalsProps {
 
   closeCashModalOpen: boolean;
   onCloseCloseCash: () => void;
-  onSuccessCloseCash: () => void;
+  onSuccessCloseCash: (cierre?: any) => void;
 
   weightScanOpen: boolean;
   onCloseWeightScan: () => void;
@@ -190,6 +190,7 @@ export const POSModals: React.FC<POSModalsProps> = ({
       {closeCashModalOpen && (
         <PosCashCloseModal
           initialCajaId={String(activeCashDbId || activeCashId)}
+          initialCierreId={activeCashCierreId}
           onSuccess={onSuccessCloseCash}
           onClose={onCloseCloseCash}
         />

@@ -112,6 +112,7 @@ type VentaMetaInfo = {
   monto_transferencia?: number;
   monto_credito?: number;
   devuelta_entregada?: number;
+  creado_en?: string;
   detalle_ventas?: Array<DetalleVenta & { sku?: string | null }>;
 };
 
@@ -317,15 +318,19 @@ function resolveCajeroForRow(
     if (matchingClosure?.userName) return matchingClosure.userName.trim();
   }
 
-  // 6. Usuario autenticado actual
+  // 6. Usuario autenticado actual ÚNICAMENTE si el cajero_id de la venta coincide con su ID
   const authUser = getCurrentAuthUser();
-  if (authUser?.name && isValidCashierName(authUser.name)) {
-    if (!cajeroId || String(authUser.id) === String(cajeroId)) {
-      return authUser.name.trim();
-    }
+  if (
+    cajeroId &&
+    authUser?.id &&
+    String(authUser.id) === String(cajeroId) &&
+    authUser?.name &&
+    isValidCashierName(authUser.name)
+  ) {
+    return authUser.name.trim();
   }
 
-  return (meta?.cajero_nombre && meta.cajero_nombre.trim()) || authUser?.name || 'Cajero';
+  return (meta?.cajero_nombre && meta.cajero_nombre.trim()) || 'Cajero';
 }
 
 function normalizeVentaAmounts(row: any, detalles: DetalleVenta[], meta?: VentaMetaInfo) {
@@ -386,22 +391,61 @@ function normalizeVentaAmounts(row: any, detalles: DetalleVenta[], meta?: VentaM
   };
 }
 
+function inferDateFromInvoiceNum(numeroFactura?: string | null): string | null {
+  if (!numeroFactura) return null;
+  const m = String(numeroFactura).match(/(?:FAC|VEN|VNT|VTA)-(\d{4})(\d{2})(\d{2})-/i);
+  if (!m) return null;
+  return `${m[1]}-${m[2]}-${m[3]}T12:00:00.000Z`;
+}
+
 export function getLocalVentas(): VentaConDetalle[] {
   try {
     const raw = localStorage.getItem(LOCAL_VENTAS_KEY);
-    const list: VentaConDetalle[] = raw ? (JSON.parse(raw) as VentaConDetalle[]) : [];
+    let list: VentaConDetalle[] = raw ? (JSON.parse(raw) as VentaConDetalle[]) : [];
     const metaMap = getVentasMetaMap();
+    let modified = false;
+
+    // Corregir entradas que fueron reconstruidas previamente desde metaMap con la fecha de hoy en vez de la fecha real de su factura
+    if (list.length > 0) {
+      const cleanedList: VentaConDetalle[] = [];
+      for (const v of list) {
+        const meta = metaMap[String(v.id)];
+        const inferredIso = inferDateFromInvoiceNum(v.numero_factura);
+        if (inferredIso && v.creado_en && v.creado_en.slice(0, 10) !== inferredIso.slice(0, 10)) {
+          cleanedList.push({ ...v, creado_en: inferredIso, caja_id: meta?.caja_id ?? null });
+          modified = true;
+          continue;
+        }
+        // Si fue reconstruida sin numero_factura real (FAC-<id8>) y sin meta.creado_en, descartar el duplicado sintético sin fecha
+        const isSyntheticIdFactura =
+          Boolean(v.id) &&
+          String(v.numero_factura || '').toUpperCase() === `FAC-${String(v.id).slice(0, 8).toUpperCase()}`;
+        if (meta && !meta.creado_en && isSyntheticIdFactura) {
+          modified = true;
+          continue;
+        }
+        cleanedList.push(v);
+      }
+      if (modified) {
+        list = cleanedList;
+      }
+    }
+
     const existingIds = new Set(list.map((v) => String(v.id)));
     const existingNums = new Set(
       list.map((v) => String(v.numero_factura || '').trim().toUpperCase()).filter(Boolean)
     );
-    let added = false;
 
-    // 1. Recuperar facturas que estén en el mapa de metadatos pero no en la lista local
+    // 1. Recuperar facturas que estén en el mapa de metadatos con fecha real o inferible y que no estén en la lista local
     for (const [vid, meta] of Object.entries(metaMap)) {
       const num = String(meta?.numero_factura || '').trim().toUpperCase();
       if (existingIds.has(vid) || (num && existingNums.has(num))) continue;
       if (!meta || !(Number(meta.monto_total ?? 0) > 0 || (meta.detalle_ventas && meta.detalle_ventas.length > 0))) {
+        continue;
+      }
+      const realCreatedIso = meta.creado_en || inferDateFromInvoiceNum(meta.numero_factura);
+      if (!realCreatedIso) {
+        // No fabricar new Date().toISOString() para ventas antiguas sin fecha; Supabase provee creado_en real
         continue;
       }
       const reconstructed: VentaConDetalle = {
@@ -412,7 +456,7 @@ export function getLocalVentas(): VentaConDetalle[] {
         sucursal_id: null,
         cajero_id: meta.cajero_id ?? null,
         cliente_id: meta.cliente_id ?? null,
-        caja_id: meta.caja_id ?? '1',
+        caja_id: meta.caja_id ?? null,
         subtotal: round2(Number(meta.subtotal ?? meta.monto_total ?? 0)),
         monto_impuesto: round2(Number(meta.monto_impuesto ?? 0)),
         monto_descuento: round2(Number(meta.monto_descuento ?? 0)),
@@ -426,7 +470,7 @@ export function getLocalVentas(): VentaConDetalle[] {
         monto_credito: round2(Number(meta.monto_credito ?? 0)),
         devuelta_entregada: round2(Number(meta.devuelta_entregada ?? 0)),
         estado: 'completada',
-        creado_en: (meta as any).creado_en || new Date().toISOString(),
+        creado_en: realCreatedIso,
         cliente_nombre: meta.cliente_nombre || 'Cliente general',
         cajero_nombre: meta.cajero_nombre || 'Cajero',
         detalle_ventas: meta.detalle_ventas ?? [],
@@ -434,10 +478,10 @@ export function getLocalVentas(): VentaConDetalle[] {
       list.push(reconstructed);
       existingIds.add(vid);
       if (num) existingNums.add(num);
-      added = true;
+      modified = true;
     }
 
-    // 2. Recuperar facturas fiscales emitidas en mercato_fiscal_invoices que no estén en la lista
+    // 2. Recuperar facturas fiscales emitidas en mercato_fiscal_invoices que tengan timestamp real y no estén en la lista
     try {
       const rawFiscal = localStorage.getItem('mercato_fiscal_invoices');
       if (rawFiscal) {
@@ -447,9 +491,8 @@ export function getLocalVentas(): VentaConDetalle[] {
           const fnum = String(fi.numero_factura || fi.ncf || '').trim().toUpperCase();
           if (!fid || existingIds.has(fid) || (fnum && existingNums.has(fnum))) continue;
           const tsMatch = String(fi.id || '').match(/inv-(\d{10,15})/);
-          const createdIso = tsMatch
-            ? new Date(Number(tsMatch[1])).toISOString()
-            : new Date().toISOString();
+          if (!tsMatch) continue;
+          const createdIso = new Date(Number(tsMatch[1])).toISOString();
           const items: DetalleVenta[] = Array.isArray(fi.items)
             ? fi.items.map((it: any, idx: number) => ({
                 id: `${fid}-item-${idx + 1}`,
@@ -473,7 +516,7 @@ export function getLocalVentas(): VentaConDetalle[] {
             sucursal_id: null,
             cajero_id: null,
             cliente_id: null,
-            caja_id: '1',
+            caja_id: fi.caja_id ?? null,
             subtotal: round2(Number(fi.subtotal || fi.total || 0)),
             monto_impuesto: round2(Number(fi.itbis || 0)),
             monto_descuento: 0,
@@ -495,7 +538,7 @@ export function getLocalVentas(): VentaConDetalle[] {
           list.push(recFiscal);
           existingIds.add(fid);
           if (fnum) existingNums.add(fnum);
-          added = true;
+          modified = true;
         }
       }
     } catch {
@@ -509,7 +552,7 @@ export function getLocalVentas(): VentaConDetalle[] {
       return (isNaN(tb) ? 0 : tb) - (isNaN(ta) ? 0 : ta);
     });
 
-    if (added) {
+    if (modified) {
       try {
         localStorage.setItem(LOCAL_VENTAS_KEY, JSON.stringify(list.slice(0, 1000)));
       } catch {
@@ -528,15 +571,15 @@ export function saveLocalVentas(ventas: VentaConDetalle[]) {
 
 export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVenta> {
   const authUser = getCurrentAuthUser();
-  const effectiveCajeroId = authUser?.id || payload.cajero_id || null;
+  const effectiveCajeroId = payload.cajero_id || authUser?.id || null;
   const perfilesLocales = getLocalPerfilesMap();
   const payloadCajeroValido = isValidCashierName(payload.cajero_nombre)
     ? payload.cajero_nombre!.trim()
     : '';
   const effectiveCajeroNombre =
-    (authUser?.name && isValidCashierName(authUser.name) ? authUser.name.trim() : '') ||
     payloadCajeroValido ||
     (effectiveCajeroId ? perfilesLocales.get(String(effectiveCajeroId)) : undefined) ||
+    (authUser?.name && isValidCashierName(authUser.name) ? authUser.name.trim() : '') ||
     authUser?.name ||
     'Cajero';
   const effectiveClienteNombre =
@@ -630,6 +673,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
       cliente_id: payload.cliente_id ?? null,
       cliente_nombre: effectiveClienteNombre,
       caja_id: payload.caja_id ?? null,
+      creado_en: venta.creado_en,
       subtotal: exactSubtotal,
       monto_impuesto: exactTax,
       monto_descuento: exactDiscount,
@@ -738,6 +782,22 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     return { venta_id: id, numero_factura: numero, ncf: payload.ncf ?? null };
   }
 
+  let resolvedCajeroUuid: string | null = isUUID(effectiveCajeroId) ? effectiveCajeroId : null;
+  if (!resolvedCajeroUuid && effectiveCajeroNombre) {
+    try {
+      const dir = await fetchPerfilesDirectory();
+      const targetNorm = effectiveCajeroNombre.trim().toLowerCase();
+      for (const [uid, uname] of dir.entries()) {
+        if (isUUID(uid) && uname.trim().toLowerCase() === targetNorm) {
+          resolvedCajeroUuid = uid;
+          break;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   const sanitizedPayload = {
     ...payload,
     subtotal: exactSubtotal,
@@ -752,7 +812,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     monto_credito: round2(payload.monto_credito ?? 0),
     devuelta_entregada: round2(payload.devuelta_entregada ?? 0),
     sucursal_id: isUUID(payload.sucursal_id) ? payload.sucursal_id : null,
-    cajero_id: isUUID(effectiveCajeroId) ? effectiveCajeroId : null,
+    cajero_id: resolvedCajeroUuid,
     cliente_id: isUUID(payload.cliente_id) ? payload.cliente_id : null,
     caja_id: payload.caja_id ? String(payload.caja_id) : null,
     items: payload.items.map((it) => ({
@@ -777,87 +837,129 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     resultado = data as ResultadoVenta;
   } else {
     console.warn('Reintentando procesar_venta_pos sin FKs opcionales:', error?.message);
-    const retryPayload = {
+    const retryKeepCajero = {
       ...sanitizedPayload,
-      cajero_id: null,
       cliente_id: null,
       sucursal_id: null,
     };
-    const retryRpc = await sb.rpc('procesar_venta_pos', { p_payload: retryPayload });
-    if (!retryRpc.error && retryRpc.data) {
-      resultado = retryRpc.data as ResultadoVenta;
+    const retryRpc1 = await sb.rpc('procesar_venta_pos', { p_payload: retryKeepCajero });
+    if (!retryRpc1.error && retryRpc1.data) {
+      resultado = retryRpc1.data as ResultadoVenta;
     } else {
-      // Fallback de inserción directa en tabla ventas + detalle_ventas para no perder nunca una factura emitida
-      const fallbackId = crypto.randomUUID();
-      const fallbackNumero =
-        payload.numero_factura ||
-        `FAC-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${fallbackId.slice(0, 8).toUpperCase()}`;
-      try {
-        const { data: insertedVenta, error: directErr } = await sb
-          .from('ventas')
-          .insert({
-            id: fallbackId,
+      const retryPayload = {
+        ...sanitizedPayload,
+        cajero_id: null,
+        cliente_id: null,
+        sucursal_id: null,
+      };
+      const retryRpc = await sb.rpc('procesar_venta_pos', { p_payload: retryPayload });
+      if (!retryRpc.error && retryRpc.data) {
+        resultado = retryRpc.data as ResultadoVenta;
+      } else {
+        // Fallback de inserción directa en tabla ventas + detalle_ventas para no perder nunca una factura emitida
+        const fallbackId = crypto.randomUUID();
+        const fallbackNumero =
+          payload.numero_factura ||
+          `FAC-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${fallbackId.slice(0, 8).toUpperCase()}`;
+        try {
+          let { data: insertedVenta, error: directErr } = await sb
+            .from('ventas')
+            .insert({
+              id: fallbackId,
+              numero_factura: fallbackNumero,
+              ncf: payload.ncf ?? null,
+              tipo_ncf: payload.tipo_ncf ?? null,
+              cajero_id: resolvedCajeroUuid,
+              cliente_id: null,
+              caja_id: sanitizedPayload.caja_id,
+              subtotal: exactSubtotal,
+              monto_impuesto: exactTax,
+              monto_descuento: exactDiscount,
+              monto_total: exactTotal,
+              costo_total: exactCostoTotal,
+              metodo_pago: payload.metodo_pago,
+              monto_pagado: sanitizedPayload.monto_pagado,
+              monto_efectivo: sanitizedPayload.monto_efectivo,
+              monto_tarjeta: sanitizedPayload.monto_tarjeta,
+              monto_transferencia: sanitizedPayload.monto_transferencia,
+              monto_credito: sanitizedPayload.monto_credito,
+              devuelta_entregada: sanitizedPayload.devuelta_entregada,
+              estado: 'completada',
+            })
+            .select('id, numero_factura, ncf')
+            .single();
+
+          if (directErr && resolvedCajeroUuid) {
+            const retryDirect = await sb
+              .from('ventas')
+              .insert({
+                id: fallbackId,
+                numero_factura: fallbackNumero,
+                ncf: payload.ncf ?? null,
+                tipo_ncf: payload.tipo_ncf ?? null,
+                cajero_id: null,
+                cliente_id: null,
+                caja_id: sanitizedPayload.caja_id,
+                subtotal: exactSubtotal,
+                monto_impuesto: exactTax,
+                monto_descuento: exactDiscount,
+                monto_total: exactTotal,
+                costo_total: exactCostoTotal,
+                metodo_pago: payload.metodo_pago,
+                monto_pagado: sanitizedPayload.monto_pagado,
+                monto_efectivo: sanitizedPayload.monto_efectivo,
+                monto_tarjeta: sanitizedPayload.monto_tarjeta,
+                monto_transferencia: sanitizedPayload.monto_transferencia,
+                monto_credito: sanitizedPayload.monto_credito,
+                devuelta_entregada: sanitizedPayload.devuelta_entregada,
+                estado: 'completada',
+              })
+              .select('id, numero_factura, ncf')
+              .single();
+            insertedVenta = retryDirect.data;
+            directErr = retryDirect.error;
+          }
+
+          if (!directErr && insertedVenta) {
+            resultado = {
+              venta_id: String(insertedVenta.id),
+              numero_factura: String(insertedVenta.numero_factura || fallbackNumero),
+              ncf: insertedVenta.ncf ?? payload.ncf ?? null,
+            };
+            if (sanitizedPayload.items.length > 0) {
+              await sb.from('detalle_ventas').insert(
+                sanitizedPayload.items.map((it) => ({
+                  venta_id: resultado!.venta_id,
+                  producto_id: it.producto_id,
+                  combo_id: it.combo_id,
+                  tipo_item: it.tipo_item,
+                  nombre_item: it.nombre_item,
+                  precio_unitario: it.precio_unitario,
+                  costo_unitario: it.costo_unitario,
+                  cantidad: it.cantidad,
+                  porcentaje_impuesto: it.porcentaje_impuesto,
+                  subtotal: it.subtotal,
+                }))
+              );
+            }
+          }
+        } catch {
+          // Respaldo local garantizado abajo
+        }
+
+        if (!resultado) {
+          resultado = {
+            venta_id: fallbackId,
             numero_factura: fallbackNumero,
             ncf: payload.ncf ?? null,
-            tipo_ncf: payload.tipo_ncf ?? null,
-            cajero_id: null,
-            cliente_id: null,
-            caja_id: sanitizedPayload.caja_id,
-            subtotal: exactSubtotal,
-            monto_impuesto: exactTax,
-            monto_descuento: exactDiscount,
-            monto_total: exactTotal,
-            costo_total: exactCostoTotal,
-            metodo_pago: payload.metodo_pago,
-            monto_pagado: sanitizedPayload.monto_pagado,
-            monto_efectivo: sanitizedPayload.monto_efectivo,
-            monto_tarjeta: sanitizedPayload.monto_tarjeta,
-            monto_transferencia: sanitizedPayload.monto_transferencia,
-            monto_credito: sanitizedPayload.monto_credito,
-            devuelta_entregada: sanitizedPayload.devuelta_entregada,
-            estado: 'completada',
-          })
-          .select('id, numero_factura, ncf')
-          .single();
-
-        if (!directErr && insertedVenta) {
-          resultado = {
-            venta_id: String(insertedVenta.id),
-            numero_factura: String(insertedVenta.numero_factura || fallbackNumero),
-            ncf: insertedVenta.ncf ?? payload.ncf ?? null,
           };
-          if (sanitizedPayload.items.length > 0) {
-            await sb.from('detalle_ventas').insert(
-              sanitizedPayload.items.map((it) => ({
-                venta_id: resultado!.venta_id,
-                producto_id: it.producto_id,
-                combo_id: it.combo_id,
-                tipo_item: it.tipo_item,
-                nombre_item: it.nombre_item,
-                precio_unitario: it.precio_unitario,
-                costo_unitario: it.costo_unitario,
-                cantidad: it.cantidad,
-                porcentaje_impuesto: it.porcentaje_impuesto,
-                subtotal: it.subtotal,
-              }))
-            );
-          }
         }
-      } catch {
-        // Respaldo local garantizado abajo
-      }
-
-      if (!resultado) {
-        resultado = {
-          venta_id: fallbackId,
-          numero_factura: fallbackNumero,
-          ncf: payload.ncf ?? null,
-        };
       }
     }
   }
 
   if (resultado?.venta_id) {
+    const nowSaleIso = new Date().toISOString();
     const localItems: Array<DetalleVenta & { sku?: string | null }> = payload.items.map((it, idx) => ({
       id: `${resultado.venta_id}-item-${idx + 1}`,
       venta_id: resultado.venta_id,
@@ -879,7 +981,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
       numero_factura: resultado.numero_factura,
       ncf: resultado.ncf ?? payload.ncf ?? null,
       tipo_ncf: payload.tipo_ncf ?? null,
-      cajero_id: effectiveCajeroId,
+      cajero_id: resolvedCajeroUuid || effectiveCajeroId,
       cajero_nombre: effectiveCajeroNombre,
       cliente_id: payload.cliente_id ?? null,
       cliente_nombre: effectiveClienteNombre,
@@ -896,6 +998,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
       monto_transferencia: round2(payload.monto_transferencia ?? 0),
       monto_credito: round2(payload.monto_credito ?? 0),
       devuelta_entregada: round2(payload.devuelta_entregada ?? 0),
+      creado_en: nowSaleIso,
       detalle_ventas: localItems,
     });
 
@@ -906,7 +1009,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
         ncf: resultado.ncf ?? payload.ncf ?? null,
         tipo_ncf: payload.tipo_ncf ?? null,
         sucursal_id: payload.sucursal_id ?? null,
-        cajero_id: effectiveCajeroId,
+        cajero_id: resolvedCajeroUuid || effectiveCajeroId,
         cliente_id: payload.cliente_id ?? null,
         caja_id: payload.caja_id ?? null,
         subtotal: exactSubtotal,
@@ -922,7 +1025,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
         monto_credito: round2(payload.monto_credito ?? 0),
         devuelta_entregada: round2(payload.devuelta_entregada ?? 0),
         estado: 'completada',
-        creado_en: new Date().toISOString(),
+        creado_en: nowSaleIso,
         cliente_nombre: effectiveClienteNombre,
         cajero_nombre: effectiveCajeroNombre,
         detalle_ventas: localItems,

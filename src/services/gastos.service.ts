@@ -353,7 +353,7 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
     date: effectiveFecha,
     receipt: Boolean(input.tiene_recibo),
     status: STATUS_UI[input.estado ?? 'aprobado'] ?? 'approved',
-    caja_id: input.caja_id ? String(input.caja_id) : '1',
+    caja_id: input.caja_id ? String(input.caja_id) : null,
     cierre_id: input.cierre_id ?? null,
     created_at: new Date().toISOString(),
   };
@@ -361,14 +361,15 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
   // 1. Guardar de inmediato en almacenamiento local para no perder nunca el registro
   saveLocalGastos([newGastoUi, ...localGastos]);
 
-  // Si es un gasto pagado en efectivo o caja chica, reflejar en movimientos de caja para cuadre de caja
+  // Si es un gasto pagado en efectivo o caja chica asociado a una caja específica, reflejar en movimientos de caja para cuadre de caja
   if (
-    effectiveMetodoPago.toLowerCase() === 'efectivo' ||
-    effectiveMetodoPago.toLowerCase() === 'caja_chica'
+    (input.caja_id || input.cierre_id) &&
+    (effectiveMetodoPago.toLowerCase() === 'efectivo' ||
+      effectiveMetodoPago.toLowerCase() === 'caja_chica')
   ) {
     try {
       void registrarMovimientoCaja({
-        caja_id: input.caja_id ? String(input.caja_id) : '1',
+        caja_id: input.caja_id ? String(input.caja_id) : '',
         cierre_id: input.cierre_id ?? null,
         cajero_id: authUser?.id && isUUID(authUser.id) ? authUser.id : null,
         cajero_nombre: effectiveResponsable,

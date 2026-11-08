@@ -282,4 +282,115 @@ describe('Prueba integral de Cierre de Caja y Cuadre de Efectivo Físico', () =>
     expect(resumen.total_devoluciones).toBe(80);
     expect(resumen.monto_esperado).toBe(4450);
   });
+
+  it('NUNCA combina ventas ni gastos de otras cajas ni sobreescribe el cajero cuando una administradora consulta Caja #1 - CHEILA', async () => {
+    // 1. Cheila abre Caja #1 con RD$ 4,000
+    const turnoCheila = await iniciarCaja({
+      caja_id: '1',
+      caja_label: 'Caja #1 - CHEILA',
+      cajero_id: 'usr-cheila',
+      cajero_nombre: 'CHEILA',
+      monto_apertura: 4000,
+    });
+
+    // 2. Rosario (administradora) abre Caja #4 con RD$ 2,000
+    await iniciarCaja({
+      caja_id: '4',
+      caja_label: 'Caja #4 - Rosario',
+      cajero_id: 'usr-rosario',
+      cajero_nombre: 'Rosario',
+      monto_apertura: 2000,
+    });
+
+    // 3. Keila abre Caja #2 con RD$ 3,000
+    await iniciarCaja({
+      caja_id: '2',
+      caja_label: 'Caja #2 - Keila',
+      cajero_id: 'usr-keila',
+      cajero_nombre: 'Keila',
+      monto_apertura: 3000,
+    });
+
+    // Ventas de Cheila en Caja #1: RD$ 3,200 efectivo + RD$ 800 tarjeta = RD$ 4,000 total
+    await procesarVenta({
+      cajero_id: 'usr-cheila',
+      cajero_nombre: 'CHEILA',
+      caja_id: '1',
+      subtotal: 4000,
+      monto_impuesto: 0,
+      monto_descuento: 0,
+      monto_total: 4000,
+      costo_total: 2500,
+      metodo_pago: 'mixto',
+      monto_pagado: 4000,
+      monto_efectivo: 3200,
+      monto_tarjeta: 800,
+      monto_transferencia: 0,
+      monto_credito: 0,
+      devuelta_entregada: 0,
+      items: [],
+    });
+
+    // Ventas masivas de Rosario en Caja #4 (RD$ 150,000) -> NO deben sumarse a Caja #1
+    await procesarVenta({
+      cajero_id: 'usr-rosario',
+      cajero_nombre: 'Rosario',
+      caja_id: '4',
+      subtotal: 150000,
+      monto_impuesto: 0,
+      monto_descuento: 0,
+      monto_total: 150000,
+      costo_total: 100000,
+      metodo_pago: 'efectivo',
+      monto_pagado: 150000,
+      monto_efectivo: 150000,
+      monto_tarjeta: 0,
+      monto_transferencia: 0,
+      monto_credito: 0,
+      devuelta_entregada: 0,
+      items: [],
+    });
+
+    // Ventas de Keila en Caja #2 (RD$ 45,000) -> NO deben sumarse a Caja #1
+    await procesarVenta({
+      cajero_id: 'usr-keila',
+      cajero_nombre: 'Keila',
+      caja_id: '2',
+      subtotal: 45000,
+      monto_impuesto: 0,
+      monto_descuento: 0,
+      monto_total: 45000,
+      costo_total: 30000,
+      metodo_pago: 'efectivo',
+      monto_pagado: 45000,
+      monto_efectivo: 45000,
+      monto_tarjeta: 0,
+      monto_transferencia: 0,
+      monto_credito: 0,
+      devuelta_entregada: 0,
+      items: [],
+    });
+
+    // Gasto administrativo general sin caja_id (RD$ 1,000) -> NO debe descontarse de Caja #1
+    await crearGasto({
+      categoria_id: 'cat-008',
+      descripcion: 'Pago mantenimiento planta eléctrica',
+      monto: 1000,
+      metodo_pago: 'efectivo',
+      responsable_nombre: 'Rosario',
+      estado: 'aprobado',
+    });
+
+    // Cuando Rosario (admin) abre el modal de cierre para Caja #1 (incluso si se pasan credenciales de Rosario por defecto):
+    const resumenCheila = await calcularResumenCajaAbierta('1', 'usr-rosario', 'Rosario', turnoCheila.id);
+
+    expect(resumenCheila.caja_id).toBe('1');
+    expect(resumenCheila.cajero_nombre).toBe('CHEILA');
+    expect(resumenCheila.monto_apertura).toBe(4000);
+    expect(resumenCheila.total_ventas).toBe(4000);
+    expect(resumenCheila.total_efectivo).toBe(3200);
+    expect(resumenCheila.total_tarjeta).toBe(800);
+    expect(resumenCheila.total_retiros).toBe(0);
+    expect(resumenCheila.monto_esperado).toBe(7200);
+  });
 });

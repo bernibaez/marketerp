@@ -835,17 +835,25 @@ export default function POSTerminal() {
 
         closeCashModalOpen={closeCashModalOpen}
         onCloseCloseCash={() => setCloseCashModalOpen(false)}
-        onSuccessCloseCash={() => {
-          setShiftOpenedLocally(false);
-          setShiftClosedLocally(true);
-          try {
-            sessionStorage.removeItem('mercato_cash_opened_at_login');
-          } catch { /* ignore */ }
-          markRegisterClosed(String(activeCash.dbId || activeCashId));
-          clearCart();
-          resetOrderState();
-          clearAllHeld();
-          refreshHeld();
+        onSuccessCloseCash={(cierre) => {
+          const closedCajaId = String(cierre?.caja_id || activeCash.dbId || activeCashId);
+          const isClosingActiveBox =
+            closedCajaId === String(activeCash.dbId) ||
+            closedCajaId === String(activeCash.id) ||
+            closedCajaId === String(activeCash.codigo) ||
+            closedCajaId === String(activeCashId);
+          if (isClosingActiveBox) {
+            setShiftOpenedLocally(false);
+            setShiftClosedLocally(true);
+            try {
+              sessionStorage.removeItem('mercato_cash_opened_at_login');
+            } catch { /* ignore */ }
+            clearCart();
+            resetOrderState();
+            clearAllHeld();
+            refreshHeld();
+          }
+          markRegisterClosed(closedCajaId);
           void refetchRegisters();
           toast.success('Cierre registrado. Ya puedes iniciar caja de nuevo.');
         }}

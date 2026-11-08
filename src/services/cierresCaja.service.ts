@@ -410,6 +410,45 @@ export async function obtenerRegistrosCierreCaja(): Promise<CashClosure[]> {
   return allClosures.sort((a, b) => ((a.closedAt || a.openedAt) < (b.closedAt || b.openedAt) ? 1 : -1));
 }
 
+const GENERIC_BOX_TERMS = new Set([
+  'principal',
+  'general',
+  'central',
+  'administracion',
+  'administrador',
+  'pos',
+  'express',
+  'rapida',
+  'secundaria',
+  'auxiliar',
+  'caja',
+  'registradora',
+  'punto de venta',
+  'sucursal',
+  'almacen',
+  'tienda',
+  'supermercado',
+]);
+
+export function extractCashierFromCajaLabel(label?: string | null): string | undefined {
+  if (!label) return undefined;
+  const parts = String(label).split('-');
+  const suffix = (parts.length > 1 ? parts.slice(1).join('-') : '').trim();
+  if (!suffix || /\d/.test(suffix)) return undefined;
+  const norm = suffix
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  if (!norm || norm.length < 2 || GENERIC_BOX_TERMS.has(norm)) return undefined;
+  for (const term of GENERIC_BOX_TERMS) {
+    if (norm.includes(term)) return undefined;
+  }
+  return suffix;
+}
+
 function mapCierreRowWithPerfil(
   row: any,
   userMap?: Map<string, { nombre: string; username: string }>,
@@ -418,19 +457,25 @@ function mapCierreRowWithPerfil(
   const perfil = Array.isArray(row?.perfiles) ? row.perfiles[0] : row?.perfiles;
   const local = getCashClosures().find((x) => x.id === row?.id);
   const uFromMap = row?.cajero_id && userMap ? userMap.get(String(row.cajero_id)) : undefined;
-  const cajeroNombre =
-    perfil?.nombre_completo ||
-    uFromMap?.nombre ||
-    row?.cajero_nombre ||
-    local?.userName ||
-    undefined;
-  const rawCorreo = perfil?.correo || uFromMap?.username || row?.cajero_username || local?.username || undefined;
-  const cajeroUsername = rawCorreo ? String(rawCorreo).split('@')[0] : undefined;
   const cajaLabel =
     (row?.caja_id && cajaLabelMap ? cajaLabelMap.get(String(row.caja_id)) : undefined) ||
     row?.caja_label ||
     local?.cashRegisterLabel ||
     undefined;
+  const localUserName =
+    local?.userName && local.userName.trim().toLowerCase() !== 'cajero'
+      ? local.userName
+      : undefined;
+  const cajeroNombre =
+    perfil?.nombre_completo ||
+    uFromMap?.nombre ||
+    row?.cajero_nombre ||
+    localUserName ||
+    extractCashierFromCajaLabel(cajaLabel) ||
+    local?.userName ||
+    undefined;
+  const rawCorreo = perfil?.correo || uFromMap?.username || row?.cajero_username || local?.username || undefined;
+  const cajeroUsername = rawCorreo ? String(rawCorreo).split('@')[0] : undefined;
   const { perfiles: _omitPerfiles, ...rest } = row || {};
   return {
     ...(rest as CierreCaja),
@@ -529,7 +574,7 @@ export type NuevoCierreInput = {
 export async function guardarCierreCaja(datos: NuevoCierreInput): Promise<CierreCaja> {
   const now = new Date();
   const closure: CashClosure = {
-    id: `cc-${Date.now()}`,
+    id: `cc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     code: datos.codigo,
     cashRegisterId: datos.caja_id,
     cashRegisterLabel: datos.caja_label ?? `Caja ${datos.caja_id}`,
@@ -566,7 +611,24 @@ export async function guardarCierreCaja(datos: NuevoCierreInput): Promise<Cierre
 
   try {
     const sb = getSupabase();
-    const cajeroUuid = esUuid(datos.cajero_id) ? datos.cajero_id : null;
+    let cajeroUuid = esUuid(datos.cajero_id) ? datos.cajero_id : null;
+    if (!cajeroUuid && (datos.cajero_nombre || datos.cajero_username)) {
+      try {
+        const usuarios = await obtenerUsuarios();
+        const targetUser = (datos.cajero_username || '').split('@')[0].trim().toLowerCase();
+        const match = usuarios.find((u) => {
+          if (!esUuid(u.id)) return false;
+          if (datos.cajero_nombre && u.nombre_completo && isSameCashierName(u.nombre_completo, datos.cajero_nombre)) {
+            return true;
+          }
+          const uPrefix = (u.correo || '').split('@')[0].trim().toLowerCase();
+          return Boolean(targetUser && uPrefix && uPrefix === targetUser);
+        });
+        if (match?.id) cajeroUuid = match.id;
+      } catch {
+        // ignore
+      }
+    }
     const sucursalUuid = esUuid(datos.sucursal_id) ? datos.sucursal_id : null;
 
     const insertPayload: Record<string, unknown> = {
@@ -930,7 +992,13 @@ export async function obtenerCajaAbierta(
     if (matchExact) return matchExact;
   }
 
-  // 2. Coincidencia por cajero (si el usuario ya tiene su caja abierta en cualquier registradora)
+  // 2. Coincidencia por la caja solicitada (si la caja tiene un turno activo, devolver ese turno sin mezclar con otra caja)
+  if (ids.size > 0) {
+    const matchCaja = abiertas.find((c) => ids.has(String(c.caja_id)));
+    if (matchCaja) return matchCaja;
+  }
+
+  // 3. Coincidencia por cajero (solo si la caja solicitada no tenía sesión abierta o no se especificó caja)
   if (cajeroId || cajeroNombre) {
     const matchUser = abiertas.find((c) => {
       const matchId = cajeroId && c.cajero_id && String(c.cajero_id) === String(cajeroId);
@@ -939,12 +1007,6 @@ export async function obtenerCajaAbierta(
       return matchId || matchName;
     });
     if (matchUser) return matchUser;
-  }
-
-  // 3. Coincidencia por caja (permite al administrador consultar o cerrar cualquier caja activa)
-  if (ids.size > 0) {
-    const matchCaja = abiertas.find((c) => ids.has(String(c.caja_id)));
-    if (matchCaja) return matchCaja;
   }
 
   return null;
@@ -977,21 +1039,33 @@ export async function calcularResumenCajaAbierta(
   cajeroNombre?: string,
   cierreId?: string
 ): Promise<ResumenCajaAbierta> {
-  const ids = await expandCajaIds(cajaId);
+  let ids = await expandCajaIds(cajaId);
   let abierta = await obtenerCajaAbierta(cajaId, cajeroId, cajeroNombre, cierreId);
-  if (!abierta && (cajeroId || cajeroNombre)) {
+  if (!abierta && !cajaId && (cajeroId || cajeroNombre)) {
     abierta = await obtenerSesionAbiertaDeUsuario(cajeroId, cajeroNombre);
   }
   if (abierta?.caja_id) {
-    const extraIds = await expandCajaIds(abierta.caja_id);
-    extraIds.forEach((x) => ids.add(x));
+    // Aislar estrictamente los IDs a la caja de la sesión abierta (NUNCA unir dos cajas distintas)
+    ids = await expandCajaIds(abierta.caja_id);
   }
   const apertura = Number(abierta?.monto_apertura ?? 0);
-  const effectiveCajeroId = abierta ? abierta.cajero_id || cajeroId || undefined : cajeroId;
+  const abiertaId = abierta?.cajero_id || undefined;
+  const abiertaNombre =
+    (abierta as (CierreCaja & { cajero_nombre?: string }) | null)?.cajero_nombre ||
+    extractCashierFromCajaLabel(abierta?.caja_label) ||
+    undefined;
+
+  const callerMatchesAbierta =
+    !abierta ||
+    (!abiertaId && !abiertaNombre) ||
+    Boolean(cajeroId && abiertaId && String(cajeroId) === String(abiertaId)) ||
+    Boolean(cajeroNombre && abiertaNombre && isSameCashierName(cajeroNombre, abiertaNombre));
+
+  const effectiveCajeroId = abierta
+    ? abiertaId || (callerMatchesAbierta ? cajeroId || undefined : undefined)
+    : cajeroId;
   const effectiveCajeroNombre = abierta
-    ? (abierta as (CierreCaja & { cajero_nombre?: string }) | null)?.cajero_nombre ||
-      cajeroNombre ||
-      undefined
+    ? abiertaNombre || (callerMatchesAbierta ? cajeroNombre || undefined : undefined)
     : cajeroNombre;
 
   // Determinar el inicio exacto del turno y evitar que entren ventas de turnos ya cerrados hoy
@@ -1006,8 +1080,8 @@ export async function calcularResumenCajaAbierta(
       const sameUser =
         (effectiveCajeroId && cl.userId && String(cl.userId) === String(effectiveCajeroId)) ||
         (effectiveCajeroNombre && cl.userName && isSameCashierName(cl.userName, effectiveCajeroNombre));
-      const sameBox = cl.cashRegisterId && ids.has(String(cl.cashRegisterId));
-      if (sameUser || (!effectiveCajeroId && !effectiveCajeroNombre && sameBox)) {
+      const sameBox = Boolean(cl.cashRegisterId && ids.has(String(cl.cashRegisterId)));
+      if (sameUser || sameBox) {
         if (closedMs > lastClosedTime) lastClosedTime = closedMs;
       }
     }
@@ -1066,9 +1140,17 @@ export async function calcularResumenCajaAbierta(
         if (!isNaN(vt) && vt <= lastClosedTime) return false;
       }
 
-      const matchesBox = ids.has(String(v.caja_id ?? ''));
+      const saleCajaId = String(v.caja_id ?? '').trim();
+      const matchesBox = saleCajaId ? ids.has(saleCajaId) : false;
+
+      // Regla estricta multi-caja: si la venta tiene una caja asignada distinta a esta caja, NUNCA mezclarla
+      if (saleCajaId && ids.size > 0 && !matchesBox) {
+        return false;
+      }
+
+      const rowCajeroId = v.cajero_id || (v as any).usuario_id;
       const matchesId = Boolean(
-        effectiveCajeroId && v.cajero_id && String(v.cajero_id) === String(effectiveCajeroId)
+        effectiveCajeroId && rowCajeroId && String(rowCajeroId) === String(effectiveCajeroId)
       );
       const rowName = (v.cajero_nombre || '').trim();
       const rowNameLower = rowName.toLowerCase();
@@ -1082,21 +1164,20 @@ export async function calcularResumenCajaAbierta(
       );
 
       if (effectiveCajeroId || targetNameNorm) {
-        if (matchesId || matchesName) return true;
-        // Si la venta tiene un nombre de cajero distinto al dueño del turno, NO mezclarla
+        // Si la venta tiene un nombre de cajero específico distinto al dueño del turno, NO mezclarla
         if (targetNameNorm && hasSpecificRowName && !matchesName) return false;
-        // Si la venta tiene un UUID de cajero distinto al dueño del turno, NO mezclarla
+        // Si la venta tiene un ID de cajero distinto al dueño del turno (y no coincide por nombre), NO mezclarla
         if (
           effectiveCajeroId &&
-          v.cajero_id &&
-          esUuid(String(effectiveCajeroId)) &&
-          esUuid(String(v.cajero_id)) &&
-          String(v.cajero_id) !== String(effectiveCajeroId)
+          rowCajeroId &&
+          String(rowCajeroId) !== String(effectiveCajeroId) &&
+          !matchesName
         ) {
           return false;
         }
-        // Solo incluir por caja si la venta no tiene cajero identificable
-        return matchesBox && !hasSpecificRowName && !v.cajero_id;
+        if (matchesId || matchesName) return true;
+        // Solo incluir por caja si la venta pertenece a esta caja y no contradice al cajero del turno
+        return matchesBox && !hasSpecificRowName && !rowCajeroId;
       }
 
       return matchesBox;
@@ -1158,20 +1239,25 @@ export async function calcularResumenCajaAbierta(
     if (abierta?.id && itemCierreId) {
       return String(itemCierreId) === String(abierta.id);
     }
+    const cleanCajaId = String(itemCajaId ?? '').trim();
     const cleanItemName = (itemCajeroName || '').trim();
     const hasSpecificItemName =
       Boolean(cleanItemName) &&
       !['cajero', 'cajera', 'administrador', 'usuario', 'no especificado'].includes(
         cleanItemName.toLowerCase()
       );
-    if (effectiveCajeroNombre && hasSpecificItemName) {
-      if (isSameCashierName(cleanItemName, effectiveCajeroNombre)) return true;
-      return false;
+
+    // Si el movimiento o gasto tiene una caja asignada, debe coincidir estrictamente con esta caja
+    if (cleanCajaId) {
+      if (!ids.has(cleanCajaId)) return false;
+      if (effectiveCajeroNombre && hasSpecificItemName) {
+        return isSameCashierName(cleanItemName, effectiveCajeroNombre);
+      }
+      return true;
     }
-    if (itemCajaId) {
-      return ids.has(String(itemCajaId));
-    }
-    return true;
+
+    // Los gastos generales de administración sin caja_id ni cierre_id NO deben restarse de una caja registradora POS
+    return false;
   };
 
   try {
@@ -1353,9 +1439,9 @@ export async function calcularResumenCajaAbierta(
   return {
     cierre_id: abierta?.id,
     caja_id: abierta?.caja_id || cajaId,
-    caja_label: `Caja #${abierta?.caja_id || cajaId}`,
-    cajero_id: abierta?.cajero_id,
-    cajero_nombre: (abierta as CierreCaja & { cajero_nombre?: string })?.cajero_nombre,
+    caja_label: abierta?.caja_label || `Caja #${abierta?.caja_id || cajaId}`,
+    cajero_id: effectiveCajeroId ?? abierta?.cajero_id,
+    cajero_nombre: effectiveCajeroNombre || (abierta as CierreCaja & { cajero_nombre?: string })?.cajero_nombre,
     cajero_username: (abierta as CierreCaja & { cajero_username?: string })?.cajero_username,
     abierta_en: abierta?.abierta_en || new Date().toISOString(),
     monto_apertura: apertura,
@@ -1398,7 +1484,7 @@ export interface CerrarTurnoInput {
 
 export async function cerrarTurnoCaja(input: CerrarTurnoInput): Promise<CierreCaja> {
   const todas = await obtenerCierresCaja();
-  const cajaIds = await expandCajaIds(input.caja_id);
+  let cajaIds = await expandCajaIds(input.caja_id);
   let abierta: CierreCaja | null = null;
   if (input.cierre_id) {
     abierta = todas.find((c) => c.id === input.cierre_id) || null;
@@ -1407,8 +1493,7 @@ export async function cerrarTurnoCaja(input: CerrarTurnoInput): Promise<CierreCa
     abierta = await obtenerCajaAbierta(input.caja_id, input.cajero_id ?? undefined, input.cajero_nombre);
   }
   if (abierta?.caja_id) {
-    const extraBoxIds = await expandCajaIds(abierta.caja_id);
-    extraBoxIds.forEach((x) => cajaIds.add(x));
+    cajaIds = await expandCajaIds(abierta.caja_id);
   }
 
   // Prevenir cierres duplicados
