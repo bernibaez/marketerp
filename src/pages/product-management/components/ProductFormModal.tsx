@@ -1606,6 +1606,7 @@ return (
               type="number"
               step="0.01"
               min={0}
+              onWheel={(e) => e.currentTarget.blur()}
               {...register('costPrice', {
                 required: 'El precio de compra es obligatorio',
                 min: { value: 0, message: 'Debe ser mayor o igual a 0' },
@@ -1621,6 +1622,7 @@ return (
               type="number"
               step="0.01"
               min={0}
+              onWheel={(e) => e.currentTarget.blur()}
               {...register('salePrice', {
                 required: 'El precio de venta es obligatorio',
                 min: { value: 0, message: 'Debe ser mayor o igual a 0' },

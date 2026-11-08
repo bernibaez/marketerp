@@ -187,6 +187,10 @@ export interface CierreCaja {
   codigo: string;
   caja_id: string;
   cajero_id: string | null;
+  cajero_nombre?: string | null;
+  cajero_username?: string | null;
+  caja_label?: string | null;
+  notes?: string | null;
   sucursal_id: string | null;
   monto_apertura: number;
   monto_esperado: number;

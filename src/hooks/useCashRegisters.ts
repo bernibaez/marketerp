@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { CASH_REGISTERS, type CashRegisterId, type CashRegisterSession } from '@/lib/cashRegisters';
+import {
+  CASH_REGISTERS,
+  doesRegisterMatchUser,
+  isSameCashierName,
+  type CashRegisterId,
+  type CashRegisterSession,
+} from '@/lib/cashRegisters';
 import { getCashClosures } from '@/lib/cashClosureStore';
 import { obtenerCierresCaja } from '@/services/cierresCaja.service';
 import { obtenerUsuarios } from '@/services/usuarios.service';
 import { obtenerCajas } from '@/services/cajas.service';
 import { obtenerHistorialVentas, rememberCajeroNombre } from '@/services/ventas.service';
 import { ROL_DB_A_UI } from '@/services/auth.service';
+import { tryGetSupabase, isSupabaseConfigured } from '@/services/clienteSupabase';
 import type { CierreCaja, Perfil } from '@/types/database';
 
 export function useCashRegisters() {
@@ -42,7 +49,55 @@ export function useCashRegisters() {
 
       const ventasHoy = ventasHoyRes.datos || [];
       const localClosures = getCashClosures();
-      const abiertas = cierres.filter((c) => String(c.estado).toLowerCase() === 'abierta');
+
+      const resolveSessionCashierName = (c: CierreCaja): string => {
+        const matchedU = usuarios.find((u) => u.id && c.cajero_id && String(u.id) === String(c.cajero_id));
+        const rawNombre = (c as CierreCaja & { cajero_nombre?: string })?.cajero_nombre;
+        const localCl = localClosures.find((lc) => lc.id === c.id);
+        return (
+          matchedU?.nombre_completo ||
+          rawNombre ||
+          localCl?.userName ||
+          (c.cajero_id && user?.id === c.cajero_id ? user?.name : '') ||
+          ''
+        ).trim();
+      };
+
+      // Limpieza única de sesiones colgadas de Keila/Keyla si ella no es quien está operando actualmente
+      let abiertasRaw = cierres.filter((c) => String(c.estado).toLowerCase() === 'abierta');
+      try {
+        const cleanupKey = 'mercato_cleanup_keila_session_v2';
+        const isCurrentUserKeila = doesRegisterMatchUser('Keila', user?.name, user?.username);
+        if (!isCurrentUserKeila && typeof localStorage !== 'undefined' && !localStorage.getItem(cleanupKey)) {
+          const keilaOpen = abiertasRaw.filter((c) => {
+            const cName = resolveSessionCashierName(c);
+            const cLabel = (c as CierreCaja & { caja_label?: string })?.caja_label || '';
+            return doesRegisterMatchUser('Keila', cName) || (!cName && doesRegisterMatchUser('Keila', cLabel));
+          });
+          if (keilaOpen.length > 0) {
+            const nowIso = new Date().toISOString();
+            const sb = tryGetSupabase();
+            if (sb && isSupabaseConfigured()) {
+              const uuids = keilaOpen.map((k) => k.id).filter((id) => /^[0-9a-f-]{36}$/i.test(id));
+              if (uuids.length > 0) {
+                void sb
+                  .from('cierres_caja')
+                  .update({ estado: 'cerrada', cerrada_en: nowIso })
+                  .in('id', uuids)
+                  .eq('estado', 'abierta')
+                  .then(() => {});
+              }
+            }
+            const staleSet = new Set(keilaOpen.map((k) => k.id));
+            abiertasRaw = abiertasRaw.filter((c) => !staleSet.has(c.id));
+          }
+          localStorage.setItem(cleanupKey, 'done');
+        }
+      } catch {
+        // ignore
+      }
+
+      const abiertas = abiertasRaw;
 
       const baseCajasList = cajasDb.length > 0 ? cajasDb : CASH_REGISTERS.map((r) => ({
         id: r.id,
@@ -51,6 +106,16 @@ export function useCashRegisters() {
         es_caja_principal: r.isAdminBox ?? false,
         activa: true,
       }));
+
+      // Determinar si una caja tiene el nombre propio de un cajero (ej: Keila, Valentina, Cheila, Eroly, Beiliz, Elizabeth)
+      const KNOWN_CASHIER_BOX_NAMES = ['keila', 'keyla', 'valentina', 'cheila', 'sheila', 'eroly', 'beiliz', 'beilis', 'elizabeth', 'leanny'];
+      const isBoxNamedAfterCashier = (boxName?: string | null): boolean => {
+        if (!boxName) return false;
+        if (usuarios.some((u) => doesRegisterMatchUser(boxName, u.nombre_completo, u.correo))) {
+          return true;
+        }
+        return KNOWN_CASHIER_BOX_NAMES.some((n) => doesRegisterMatchUser(boxName, n));
+      };
 
       const usedCierreIds = new Set<string>();
 
@@ -146,10 +211,21 @@ export function useCashRegisters() {
             })
           : 'Hoy';
 
+        // Si la etiqueta de la caja tenía el nombre de otra cajera distinta a quien abrió el turno, mostrar el nombre real del cajero
+        let effectiveLabel = formattedLabel;
+        if (
+          cashierName &&
+          cashierName !== 'Cajero Activo' &&
+          isBoxNamedAfterCashier(formattedLabel) &&
+          !doesRegisterMatchUser(formattedLabel, cashierName)
+        ) {
+          effectiveLabel = `Caja #${ids.codigo} - ${cashierName}`;
+        }
+
         return {
           id: cajaId,
           ...ids,
-          label: formattedLabel,
+          label: effectiveLabel,
           cashier: cashierName,
           cashierId: sessionAbierta.cajero_id || undefined,
           cierreId: sessionAbierta.id,
@@ -192,9 +268,40 @@ export function useCashRegisters() {
             .filter(Boolean)
             .map(String)
         );
-        const sessionAbierta = abiertas.find(
-          (c) => !usedCierreIds.has(c.id) && keys.has(String(c.caja_id))
-        );
+        const boxHasSpecificCashierName = isBoxNamedAfterCashier(caja.nombre);
+
+        // 1. Primero buscar si hay una sesión abierta cuyo cajero coincida por nombre con esta caja
+        let sessionAbierta = boxHasSpecificCashierName
+          ? abiertas.find((c) => {
+              if (usedCierreIds.has(c.id)) return false;
+              const cName = resolveSessionCashierName(c);
+              return Boolean(cName && doesRegisterMatchUser(caja.nombre, cName));
+            })
+          : undefined;
+
+        // 2. Si no, buscar por coincidencia de caja_id (pero si la caja lleva el nombre de una cajera específica como Keila,
+        //    no asignarle el turno de otra cajera distinta ni turnos huérfanos sin cajero)
+        if (!sessionAbierta) {
+          sessionAbierta = abiertas.find((c) => {
+            if (usedCierreIds.has(c.id)) return false;
+            if (!keys.has(String(c.caja_id))) return false;
+            const cName = resolveSessionCashierName(c);
+            if (boxHasSpecificCashierName) {
+              // Una caja con nombre propio (ej. Keila) solo se muestra abierta si el turno realmente es de esa cajera
+              return Boolean(cName && doesRegisterMatchUser(caja.nombre, cName));
+            }
+            // Si el turno pertenece a un cajero que tiene su propia caja con su nombre en baseCajasList, reservarlo para su caja
+            if (cName) {
+              const hasOwnNamedBox = baseCajasList.some(
+                (otherCaja) =>
+                  String(otherCaja.id) !== dbId &&
+                  doesRegisterMatchUser(otherCaja.nombre, cName)
+              );
+              if (hasOwnNamedBox) return false;
+            }
+            return true;
+          });
+        }
         const isAdminBox = Boolean(caja.es_caja_principal);
         const ids = { dbId, codigo };
 

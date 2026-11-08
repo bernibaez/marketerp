@@ -125,9 +125,11 @@ export function useSalesModals({
     }
   };
 
-  // Quote detail & conversion
+  // Quote detail, print & conversion
   const [viewingQuote, setViewingQuote] = useState<CotizacionConDetalle | null>(null);
   const [loadingQuoteDetail, setLoadingQuoteDetail] = useState(false);
+  const [printingQuote, setPrintingQuote] = useState<CotizacionConDetalle | null>(null);
+  const [loadingPrintQuote, setLoadingPrintQuote] = useState(false);
   const [convertQuote, setConvertQuote] = useState<CotizacionConDetalle | null>(null);
 
   const handleOpenQuoteDetail = async (q: CotizacionConDetalle) => {
@@ -140,6 +142,20 @@ export function useSalesModals({
       // Keep list summary
     } finally {
       setLoadingQuoteDetail(false);
+    }
+  };
+
+  const handleOpenPrintQuote = async (q: CotizacionConDetalle) => {
+    setPrintingQuote(q);
+    if (q.items && q.items.length > 0) return;
+    setLoadingPrintQuote(true);
+    try {
+      const full = await obtenerDetalleCotizacion(q.id);
+      if (full) setPrintingQuote(full);
+    } catch {
+      // Keep summary
+    } finally {
+      setLoadingPrintQuote(false);
     }
   };
 
@@ -186,6 +202,10 @@ export function useSalesModals({
     setViewingQuote,
     loadingQuoteDetail,
     handleOpenQuoteDetail,
+    printingQuote,
+    setPrintingQuote,
+    loadingPrintQuote,
+    handleOpenPrintQuote,
     convertQuote,
     setConvertQuote,
     handleConfirmConvertQuote,

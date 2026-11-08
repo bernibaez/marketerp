@@ -19,12 +19,21 @@ import { usePOSHeldSales } from '../hooks/usePOSHeldSales';
 import { usePOSCheckout } from '../hooks/usePOSCheckout';
 import { usePOSScanner } from '../hooks/usePOSScanner';
 
-import { findCashRegister, getCashRegister, type CashRegisterId, type CashRegisterSession } from '@/lib/cashRegisters';
+import {
+  findCashRegister,
+  getCashRegister,
+  doesRegisterMatchUser,
+  isSameCashierName,
+  type CashRegisterId,
+  type CashRegisterSession,
+} from '@/lib/cashRegisters';
 import { useCashRegisters } from '@/hooks/useCashRegisters';
+import { obtenerSesionAbiertaDeUsuario } from '@/services/cierresCaja.service';
 import type { NCFType } from '@/lib/ncfStore';
 import { useAuth } from '@/context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useProductos } from '@/hooks/useProductos';
+import { actualizarProducto } from '@/services/productos.service';
 import { useCombos } from '@/hooks/useCombos';
 import { syncInvoiceSettingsFromSupabase } from '@/lib/invoiceSettingsStore';
 
@@ -35,7 +44,8 @@ function resolvePreferredBoxId(
   isAdmin: boolean,
   uName?: string,
   uId?: string,
-  currentId?: string
+  currentId?: string,
+  uUsername?: string
 ): CashRegisterId {
   if (regs.length === 0) return (currentId as CashRegisterId) || '1';
 
@@ -44,16 +54,14 @@ function resolvePreferredBoxId(
     (c) =>
       c.open &&
       ((c.cashierId && uId && String(c.cashierId) === String(uId)) ||
-        (c.cashier && uName && c.cashier.trim().toLowerCase() === uName.trim().toLowerCase()))
+        isSameCashierName(c.cashier, uName) ||
+        doesRegisterMatchUser(c.label, uName, uUsername))
   );
   if (openBox) return openBox.id;
 
   // 2. Si el nombre del usuario coincide con una caja
-  if (uName) {
-    const norm = uName.trim().toLowerCase();
-    const byName = regs.find((c) => !c.isAdminBox && (
-      c.label.toLowerCase().includes(norm) || norm.includes(c.label.toLowerCase())
-    ));
+  if (uName || uUsername) {
+    const byName = regs.find((c) => !c.isAdminBox && doesRegisterMatchUser(c.label, uName, uUsername));
     if (byName) return byName.id;
   }
 
@@ -63,11 +71,12 @@ function resolvePreferredBoxId(
     if (adminBox) return adminBox.id;
   }
 
-  // 4. Si la caja actual es operativa y válida, conservarla
-  if (currentId) {
-    const curr = regs.find((c) => c.id === currentId);
-    if (curr && !curr.isAdminBox) return curr.id;
-  }
+  // 4. Primera caja operativa libre que no tenga el nombre propio de otra cajera
+  const KNOWN_NAMES = ['keila', 'keyla', 'valentina', 'cheila', 'sheila', 'eroly', 'beiliz', 'beilis', 'elizabeth'];
+  const genericFree = regs.find(
+    (c) => !c.isAdminBox && !c.open && !KNOWN_NAMES.some((n) => doesRegisterMatchUser(c.label, n))
+  );
+  if (genericFree) return genericFree.id;
 
   // 5. Primera caja operativa disponible (no admin)
   const firstFree = regs.find((c) => !c.isAdminBox && !c.open);
@@ -184,6 +193,7 @@ export default function POSTerminal() {
     }
   });
   const [shiftClosedLocally, setShiftClosedLocally] = useState(false);
+  const [checkingExistingSession, setCheckingExistingSession] = useState(true);
 
   useEffect(() => {
     void syncInvoiceSettingsFromSupabase();
@@ -191,22 +201,107 @@ export default function POSTerminal() {
 
   useEffect(() => {
     if (registers.length === 0) return;
-    const targetId = resolvePreferredBoxId(registers, isAdminUser, user?.name, user?.id, activeCashId);
+    const targetId = resolvePreferredBoxId(
+      registers,
+      isAdminUser,
+      user?.name,
+      user?.id,
+      activeCashId,
+      user?.username || user?.email
+    );
     if (targetId && targetId !== activeCashId) {
       setActiveCashId(targetId);
     }
-  }, [isAdminUser, registers, user?.id, user?.name]);
+  }, [isAdminUser, registers, user?.id, user?.name, user?.username, user?.email]);
+
+  const userOpenRegister = registers.find(
+    (c) =>
+      c.open &&
+      ((c.cashierId && user?.id && String(c.cashierId) === String(user.id)) ||
+        isSameCashierName(c.cashier, user?.name) ||
+        doesRegisterMatchUser(c.label, user?.name, user?.username || user?.email))
+  );
+
+  // Si el usuario ya tiene un turno abierto hoy (ej. cambió de máquina o se apagó y prendió la PC),
+  // recuperar automáticamente su turno activo sin volver a pedir el fondo inicial (4,000).
+  useEffect(() => {
+    if (shiftClosedLocally) {
+      setCheckingExistingSession(false);
+      return;
+    }
+    if (userOpenRegister) {
+      if (userOpenRegister.id !== activeCashId) {
+        setActiveCashId(userOpenRegister.id);
+      }
+      setPendingPostLoginOpen(false);
+      setShiftOpenedLocally(true);
+      setCheckingExistingSession(false);
+      try {
+        sessionStorage.removeItem('mercato_pending_cash_open');
+        sessionStorage.setItem('mercato_cash_opened_at_login', 'true');
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
+    if (registersLoading) return;
+
+    let alive = true;
+    (async () => {
+      try {
+        const sesionRemota = await obtenerSesionAbiertaDeUsuario(
+          user?.id,
+          user?.name,
+          user?.username || user?.email
+        );
+        if (!alive) return;
+        if (sesionRemota) {
+          const matchedReg = findCashRegister(registers, sesionRemota.caja_id);
+          if (matchedReg) {
+            setActiveCashId(matchedReg.id);
+          } else if (sesionRemota.caja_id) {
+            setActiveCashId(String(sesionRemota.caja_id));
+          }
+          setPendingPostLoginOpen(false);
+          setShiftOpenedLocally(true);
+          try {
+            sessionStorage.removeItem('mercato_pending_cash_open');
+            sessionStorage.setItem('mercato_cash_opened_at_login', 'true');
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch {
+        /* ignore */
+      } finally {
+        if (alive) setCheckingExistingSession(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [
+    registersLoading,
+    userOpenRegister?.id,
+    user?.id,
+    user?.name,
+    user?.username,
+    user?.email,
+    shiftClosedLocally,
+  ]);
 
   const activeCashSession = findCashRegister(registers, activeCashId);
   const activeCash = activeCashSession || getCashRegister(activeCashId);
 
   // Determinar si la sesión de la caja activa pertenece al usuario actual
   const isMyOpenSession = Boolean(
-    activeCashSession?.open &&
-      ((activeCashSession.cashierId && user?.id && String(activeCashSession.cashierId) === String(user.id)) ||
-        (user?.name &&
-          activeCashSession.cashier &&
-          activeCashSession.cashier.trim().toLowerCase() === user.name.trim().toLowerCase()))
+    userOpenRegister ||
+      (activeCashSession?.open &&
+        ((activeCashSession.cashierId && user?.id && String(activeCashSession.cashierId) === String(user.id)) ||
+          isSameCashierName(activeCashSession.cashier, user?.name) ||
+          doesRegisterMatchUser(activeCashSession.label, user?.name, user?.username || user?.email)))
   );
 
   // Para cajero regular: si la caja activa pertenece a otro cajero, no se considera abierta para el usuario actual
@@ -217,10 +312,11 @@ export default function POSTerminal() {
     !shiftOpenedLocally;
 
   const cashIsOpen =
-    !pendingPostLoginOpen &&
     !shiftClosedLocally &&
     !isCajaBelongingToOtherCashier &&
-    (isMyOpenSession || shiftOpenedLocally || (isAdminUser && Boolean(activeCashSession?.open)));
+    (isMyOpenSession ||
+      (!pendingPostLoginOpen &&
+        (shiftOpenedLocally || (isAdminUser && Boolean(activeCashSession?.open)))));
   const isRemoteAdmin = isAdminUser && !activeCash.isAdminBox;
 
   // 4. Held Sales Hook
@@ -403,7 +499,12 @@ export default function POSTerminal() {
     setPendingSupervisorAction(null);
   };
 
-  const handleConfirmPriceChange = (cartItemId: string, newPrice: number, reason?: string) => {
+  const handleConfirmPriceChange = (
+    cartItemId: string,
+    newPrice: number,
+    reason?: string,
+    persistToCatalog = true
+  ) => {
     if (!isAdminUser && !canChangePrice(user) && !canChangePrice(authorizedSupervisor)) {
       toast.error('No tienes permiso para modificar precios.');
       return;
@@ -412,6 +513,22 @@ export default function POSTerminal() {
     const oldPrice = item ? item.price : 0;
 
     updateItemPrice(cartItemId, newPrice, reason);
+
+    if (persistToCatalog && item?.productId && !item.isCombo && newPrice > 0) {
+      void actualizarProducto(item.productId, {
+        nombre: item.name,
+        sku: item.sku,
+        codigo_barras: item.barcode,
+        precio_venta: newPrice,
+        price_per_weight: newPrice,
+      })
+        .then(() => {
+          void refetchProductos();
+        })
+        .catch((err) => {
+          console.warn('No se pudo persistir el cambio de precio en catálogo:', err);
+        });
+    }
 
     const supervisorName = authorizedSupervisor?.name || user?.name || 'Administrador';
     const supervisorRole = authorizedSupervisor?.role || user?.role || 'Administrador';
@@ -602,7 +719,7 @@ export default function POSTerminal() {
       </div>
 
       {/* 2. Pantalla de Verificación o Modal Obligatorio de Apertura de Caja */}
-      {registersLoading && !shiftOpenedLocally && !pendingPostLoginOpen ? (
+      {(registersLoading || checkingExistingSession) && !shiftOpenedLocally && !isMyOpenSession ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-md">
           <div className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl p-8 border border-slate-200/80 dark:border-slate-800 shadow-2xl flex flex-col items-center gap-4 text-center">
             <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-100 dark:border-emerald-900/50 flex items-center justify-center text-emerald-600 dark:text-emerald-400 animate-spin">

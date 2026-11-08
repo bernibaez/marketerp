@@ -12,7 +12,7 @@ import {
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/context/AuthContext';
 import { isAdminOrSuperAdmin } from '@/lib/auth';
-import { findCashRegister } from '@/lib/cashRegisters';
+import { findCashRegister, doesRegisterMatchUser, isSameCashierName } from '@/lib/cashRegisters';
 import { useCashRegisters } from '@/hooks/useCashRegisters';
 import { iniciarCaja } from '@/services/cierresCaja.service';
 import type { CierreCaja } from '@/types/database';
@@ -49,26 +49,36 @@ export default function PosCashOpenModal({
     (c) =>
       c.open &&
       ((c.cashierId && user?.id && String(c.cashierId) === String(user.id)) ||
-        (c.cashier && user?.name && c.cashier.trim().toLowerCase() === user.name.trim().toLowerCase()))
+        isSameCashierName(c.cashier, user?.name) ||
+        doesRegisterMatchUser(c.label, user?.name, user?.username || user?.email))
   );
 
-  // b) Si el nombre del usuario coincide con una caja (ej: Cheila, Valentina, Eroly, Beiliz, Elizabeth, Keyla)
-  const userBoxByName = user?.name
-    ? registers.find((c) => {
-        const u = user.name.trim().toLowerCase();
-        const l = c.label.toLowerCase();
-        return l.includes(u) || u.includes(l);
-      })
-    : undefined;
+  // b) Si el nombre del usuario coincide con una caja (ej: Cheila, Valentina, Eroly, Beiliz, Elizabeth, Keyla/Keila)
+  const userBoxByName =
+    user?.name || user?.username
+      ? registers.find((c) => doesRegisterMatchUser(c.label, user?.name, user?.username || user?.email))
+      : undefined;
+
+  const KNOWN_CASHIER_NAMES = ['keila', 'keyla', 'valentina', 'cheila', 'sheila', 'eroly', 'beiliz', 'beilis', 'elizabeth'];
+  const isBoxOfOtherCashier = (label?: string) => {
+    if (!label) return false;
+    if (doesRegisterMatchUser(label, user?.name, user?.username || user?.email)) return false;
+    return KNOWN_CASHIER_NAMES.some((n) => doesRegisterMatchUser(label, n));
+  };
+
   const resolvedMatch =
     findCashRegister(availableRegisters, initialCajaId) ||
     findCashRegister(registers, initialCajaId);
+  const genericFreeBox = availableRegisters.find((c) => !c.open && !isBoxOfOtherCashier(c.label));
   const firstFreeBox = availableRegisters.find((c) => !c.open);
 
   const defaultCajaId =
     userOpenBox?.id ||
     userBoxByName?.id ||
-    (resolvedMatch && !resolvedMatch.isAdminBox ? resolvedMatch.id : undefined) ||
+    (resolvedMatch && !resolvedMatch.isAdminBox && !isBoxOfOtherCashier(resolvedMatch.label)
+      ? resolvedMatch.id
+      : undefined) ||
+    genericFreeBox?.id ||
     firstFreeBox?.id ||
     availableRegisters[0]?.id ||
     registers[0]?.id ||
@@ -124,7 +134,10 @@ export default function PosCashOpenModal({
 
       const targetBox = selectedCaja || availableRegisters[0];
       const targetCajaId = String(targetBox?.dbId || targetBox?.id || selectedCajaId);
-      const targetLabel = targetBox?.label || `Caja #${selectedCajaId}`;
+      const rawBoxLabel = targetBox?.label || `Caja #${selectedCajaId}`;
+      const targetLabel = isBoxOfOtherCashier(rawBoxLabel)
+        ? `Caja #${targetBox?.codigo || selectedCajaId} - ${cajeroNombre}`
+        : rawBoxLabel;
 
       const result = await iniciarCaja({
         caja_id: targetCajaId,
@@ -134,7 +147,7 @@ export default function PosCashOpenModal({
         cajero_username: cajeroUsername,
         monto_apertura: monto,
         notes: notes.trim() || undefined,
-        forzarNueva: true,
+        forzarNueva: !isMandatory,
       });
 
       logAuditEvent({

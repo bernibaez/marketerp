@@ -22,6 +22,7 @@ import { SaleCreateView } from './sales/components/SaleCreateView';
 import { QuoteCreateView } from './sales/components/QuoteCreateView';
 import { SaleAnularModal } from './sales/components/SaleAnularModal';
 import { SalePrintModal } from './sales/components/SalePrintModal';
+import { QuotePrintModal } from './sales/components/QuotePrintModal';
 import { SalesTable } from './sales/components/SalesTable';
 import { QuotesTable } from './sales/components/QuotesTable';
 import { ReturnsTable } from './sales/components/ReturnsTable';
@@ -63,6 +64,10 @@ export default function SalesPage() {
   useEffect(() => {
     const q = searchParams.get('q');
     if (q) setSearch(q);
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'quotes' || tabParam === 'sales' || tabParam === 'returns' || tabParam === 'held') {
+      setTab(tabParam);
+    }
   }, [searchParams]);
 
   // Pagination State
@@ -174,6 +179,10 @@ export default function SalesPage() {
     setViewingQuote,
     loadingQuoteDetail,
     handleOpenQuoteDetail,
+    printingQuote,
+    setPrintingQuote,
+    loadingPrintQuote,
+    handleOpenPrintQuote,
     convertQuote,
     setConvertQuote,
     handleConfirmConvertQuote,
@@ -200,6 +209,16 @@ export default function SalesPage() {
     }
   }, [searchParams, ventas, editingSale]);
 
+  useEffect(() => {
+    const printQuoteId = searchParams.get('printQuote');
+    if (printQuoteId && rawCotizaciones.length > 0 && !printingQuote) {
+      const target = rawCotizaciones.find((c) => String(c.id) === String(printQuoteId));
+      if (target) {
+        void handleOpenPrintQuote(target);
+      }
+    }
+  }, [searchParams, rawCotizaciones, printingQuote]);
+
   const handleCreateSaleSubmit = async (payload: Parameters<typeof cobrar>[0]) => {
     try {
       const res = await cobrar({
@@ -216,9 +235,15 @@ export default function SalesPage() {
 
   const handleCreateQuoteSubmit = async (payload: Parameters<typeof guardarCotizacion>[0]) => {
     try {
-      const cot = await guardarCotizacion(payload);
+      const cot = await guardarCotizacion({
+        ...payload,
+        vendedor_id: payload.vendedor_id ?? user?.id ?? null,
+        vendedor_nombre: payload.vendedor_nombre ?? user?.name ?? 'Cajero',
+      });
       toast.success(`Cotización ${cot.codigo} guardada exitosamente`);
       setShowAddQuoteForm(false);
+      setTab('quotes');
+      void handleOpenPrintQuote(cot);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al crear la cotización');
     }
@@ -330,8 +355,17 @@ export default function SalesPage() {
           quote={viewingQuote}
           loadingDetail={loadingQuoteDetail}
           onConvert={(q) => setConvertQuote(q)}
+          onPrint={(q) => void handleOpenPrintQuote(q)}
           onClose={() => setViewingQuote(null)}
         />
+        {printingQuote && (
+          <QuotePrintModal
+            quote={printingQuote}
+            clients={dbClientes}
+            loadingPrintDetail={loadingPrintQuote}
+            onClose={() => setPrintingQuote(null)}
+          />
+        )}
       </AppLayout>
     );
   }
@@ -437,6 +471,7 @@ export default function SalesPage() {
             loading={loadingCotizaciones}
             onConvert={(q) => setConvertQuote(q)}
             onViewDetail={(q) => void handleOpenQuoteDetail(q)}
+            onPrintQuote={(q) => void handleOpenPrintQuote(q)}
           />
         )}
 
@@ -483,6 +518,15 @@ export default function SalesPage() {
             clients={dbClientes}
             loadingPrintDetail={loadingPrintDetail}
             onClose={() => setPrintingSale(null)}
+          />
+        )}
+
+        {printingQuote && (
+          <QuotePrintModal
+            quote={printingQuote}
+            clients={dbClientes}
+            loadingPrintDetail={loadingPrintQuote}
+            onClose={() => setPrintingQuote(null)}
           />
         )}
       </div>

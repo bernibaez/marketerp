@@ -770,6 +770,7 @@ export function PurchaseCreateView({
                               }}
                               onFocus={(e) => e.target.select()}
                               onClick={(e) => (e.target as HTMLInputElement).select()}
+                              onWheel={(e) => e.currentTarget.blur()}
                               className="input-field w-20 sm:w-24 text-right py-1 px-1.5 font-bold font-mono text-xs tabular-nums"
                               title="Precio de compra / costo"
                             />
@@ -792,6 +793,7 @@ export function PurchaseCreateView({
                               }}
                               onFocus={(e) => e.target.select()}
                               onClick={(e) => (e.target as HTMLInputElement).select()}
+                              onWheel={(e) => e.currentTarget.blur()}
                               className="input-field w-20 sm:w-24 text-right py-1 px-1.5 font-bold font-mono text-xs tabular-nums text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
                               title="Precio de venta"
                             />
@@ -819,6 +821,7 @@ export function PurchaseCreateView({
                                 }}
                                 onFocus={(e) => e.target.select()}
                                 onClick={(e) => (e.target as HTMLInputElement).select()}
+                                onWheel={(e) => e.currentTarget.blur()}
                                 className="input-field w-16 text-center py-1 px-1 font-extrabold text-xs tabular-nums text-emerald-600 dark:text-emerald-400 border-emerald-500/40 bg-emerald-500/5 focus:bg-background"
                                 title="Porcentaje de ganancia deseado (calcula el precio de venta automáticamente)"
                               />

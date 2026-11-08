@@ -61,11 +61,13 @@ export function useProductos(params: ProductosFiltro = {}) {
       }
     };
     window.addEventListener('mercato_products_updated', handleProductsUpdated);
+    window.addEventListener('focus', handleProductsUpdated);
 
     return () => {
       mountedRef.current = false;
       reqIdRef.current += 1;
       window.removeEventListener('mercato_products_updated', handleProductsUpdated);
+      window.removeEventListener('focus', handleProductsUpdated);
     };
   }, [refetch]);
 

@@ -7,7 +7,7 @@ interface PosEditPriceModalProps {
   open: boolean;
   onClose: () => void;
   item: CartItem | null;
-  onConfirm: (cartItemId: string, newPrice: number, reason?: string) => void;
+  onConfirm: (cartItemId: string, newPrice: number, reason?: string, persistToCatalog?: boolean) => void;
   authorizedBy?: string;
 }
 
@@ -28,12 +28,14 @@ export default function PosEditPriceModal({
 }: PosEditPriceModalProps) {
   const [priceInput, setPriceInput] = useState<string>('');
   const [reason, setReason] = useState<string>('');
+  const [persistToCatalog, setPersistToCatalog] = useState<boolean>(true);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open && item) {
       setPriceInput(item.price.toFixed(2));
       setReason(item.priceChangeReason || '');
+      setPersistToCatalog(true);
       setTimeout(() => {
         if (inputRef.current) {
           inputRef.current.focus();
@@ -71,7 +73,7 @@ export default function PosEditPriceModal({
     if (isNaN(numericPrice) || numericPrice < 0) {
       return;
     }
-    onConfirm(item.id, safeNewPrice, reason.trim() || undefined);
+    onConfirm(item.id, safeNewPrice, reason.trim() || undefined, persistToCatalog);
     onClose();
   };
 
@@ -218,6 +220,24 @@ export default function PosEditPriceModal({
               </span>
             </div>
           )}
+
+          {/* Guardar en catálogo */}
+          <label className="flex items-center gap-2.5 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 cursor-pointer text-xs">
+            <input
+              type="checkbox"
+              checked={persistToCatalog}
+              onChange={(e) => setPersistToCatalog(e.target.checked)}
+              className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+            />
+            <div>
+              <span className="font-bold text-foreground block">
+                Guardar como nuevo precio fijo en el catálogo
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                Mantiene este precio ({fmt(safeNewPrice)}) para futuras ventas de este producto
+              </span>
+            </div>
+          </label>
 
           {/* Resumen del impacto en vivo */}
           <div className="rounded-xl border border-border bg-muted/40 p-3.5 space-y-1.5 text-xs">

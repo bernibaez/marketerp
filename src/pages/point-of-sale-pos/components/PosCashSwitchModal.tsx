@@ -168,10 +168,17 @@ export default function PosCashSwitchModal({ currentId, onSelect, onClose }: Pro
                   </div>
                   <div>
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">ESTADO</span>
-                    <span className="font-black text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse" />
-                      Abierta ({adminBox.openedAt})
-                    </span>
+                    {adminBox.open ? (
+                      <span className="font-black text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse" />
+                        Abierta ({adminBox.openedAt})
+                      </span>
+                    ) : (
+                      <span className="font-black text-xs text-rose-500 flex items-center gap-1.5">
+                        <Lock size={12} />
+                        Cerrada
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

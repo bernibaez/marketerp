@@ -117,7 +117,9 @@ export function usePOSCheckout({
     try {
       const cot = await crearCotizacion({
         cliente_id: selectedCustomer?.id ?? null,
+        cliente_nombre: selectedCustomer?.name ?? 'Cliente General',
         vendedor_id: user?.id ?? null,
+        vendedor_nombre: user?.name ?? 'Cajero',
         subtotal,
         monto_impuesto: taxTotal,
         monto_total: total,
@@ -126,15 +128,16 @@ export function usePOSCheckout({
           nombre_item: item.name,
           precio_unitario: item.price,
           cantidad: item.qty,
-          subtotal: item.price * item.qty * (1 - item.discount / 100),
+          subtotal: Math.round(item.price * item.qty * (1 - item.discount / 100) * 100) / 100,
         })),
       });
-      toast.success(`Cotización ${cot.codigo} creada`);
-      navigate('/sales');
+      clearCart();
+      toast.success(`Cotización ${cot.codigo} creada — lista para imprimir`);
+      navigate(`/sales?tab=quotes&printQuote=${cot.id}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo crear la cotización');
     }
-  }, [cart, selectedCustomer, user, subtotal, taxTotal, total, navigate]);
+  }, [cart, selectedCustomer, user, subtotal, taxTotal, total, clearCart, navigate]);
 
   const paymentProps = {
     checkoutSessionId,

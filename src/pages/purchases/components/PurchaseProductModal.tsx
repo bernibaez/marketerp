@@ -513,6 +513,7 @@ value={modalPrice === 0 ? '' : modalPrice}
                     placeholder="0.00"
                     onFocus={(e) => e.target.select()}
                     onClick={(e) => (e.target as HTMLInputElement).select()}
+                    onWheel={(e) => e.currentTarget.blur()}
                     onChange={(e) => {
                       const v = e.target.value.trim();
                       setModalPrice(v === '' ? 0 : parseFloat(v) || 0);
@@ -543,6 +544,7 @@ value={modalSalePrice === 0 ? '' : modalSalePrice}
                     placeholder="0.00"
                     onFocus={(e) => e.target.select()}
                     onClick={(e) => (e.target as HTMLInputElement).select()}
+                    onWheel={(e) => e.currentTarget.blur()}
                     onChange={(e) => {
                       const v = e.target.value.trim();
                       setModalSalePrice(v === '' ? 0 : parseFloat(v) || 0);

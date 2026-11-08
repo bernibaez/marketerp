@@ -357,6 +357,7 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
               stock_actual: updatedStock,
               precio_costo: costPrice > 0 ? costPrice : undefined,
               precio_venta: salePrice > 0 ? salePrice : undefined,
+              price_per_weight: salePrice > 0 ? salePrice : undefined,
               ...(wholesalePrice ? { precio_mayorista: wholesalePrice } : {}),
               estado: 'activo',
             });
@@ -365,6 +366,7 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
               await actualizarProducto(dbProd.id, {
                 precio_costo: costPrice > 0 ? costPrice : undefined,
                 precio_venta: salePrice > 0 ? salePrice : undefined,
+                price_per_weight: salePrice > 0 ? salePrice : undefined,
                 ...(wholesalePrice ? { precio_mayorista: wholesalePrice } : {}),
                 estado: 'activo',
               });
@@ -775,8 +777,13 @@ export async function editarCompra(
     const delta = Math.round((newData.qty - oldQty) * 1000) / 1000;
 
     const matchingLine = input.lineas.find((l) => (l.producto_id || l.nombre) === key);
+    const oldMatchingLine = existingDetail.lineas.find((l) => (l.producto_id || l.nombre) === key);
     const costPrice = matchingLine?.precio_costo ?? 0;
-    const salePrice = matchingLine?.precio_venta ?? 0;
+    const rawSalePrice = matchingLine?.precio_venta ?? 0;
+    const oldSalePrice = oldMatchingLine?.precio_venta ?? 0;
+    // Solo sobrescribir el precio de venta actual del producto si el usuario cambió el precio de venta en esta edición (o es una línea nueva)
+    const salePriceChanged = !oldMatchingLine || Math.abs(rawSalePrice - oldSalePrice) > 0.001;
+    const salePrice = salePriceChanged ? rawSalePrice : 0;
 
     if (delta !== 0) {
       updateProductPurchaseDataInStore(key, delta, costPrice, salePrice);
@@ -858,12 +865,20 @@ export async function editarCompra(
             });
 
             if (prodUuid) {
+              const oldMatchingLine = existingDetail.lineas.find(
+                (l) => l.producto_id === prodUuid || l.nombre === newLine.nombre
+              );
+              const salePriceChanged =
+                !oldMatchingLine ||
+                Math.abs((newLine.precio_venta ?? 0) - (oldMatchingLine.precio_venta ?? 0)) > 0.001;
               const { data: pData } = await sb.from('productos').select('stock_actual').eq('id', prodUuid).maybeSingle();
               const cur = Number(pData?.stock_actual || 0);
               await sb.from('productos').update({
                 stock_actual: cur + newLine.cantidad,
                 precio_costo: newLine.precio_costo > 0 ? newLine.precio_costo : undefined,
-                precio_venta: newLine.precio_venta > 0 ? newLine.precio_venta : undefined,
+                ...(salePriceChanged && newLine.precio_venta > 0
+                  ? { precio_venta: newLine.precio_venta }
+                  : {}),
               }).eq('id', prodUuid);
             }
           }

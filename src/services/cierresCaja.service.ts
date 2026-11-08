@@ -1,6 +1,7 @@
 import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupabase';
 import { CIERRE_COLUMNS, type CierreCaja } from '@/types/database';
-import { getCashClosures, saveCashClosure, type CashClosure } from '@/lib/cashClosureStore';
+import { getCashClosures, removeCashClosure, saveCashClosure, type CashClosure } from '@/lib/cashClosureStore';
+import { isSameCashierName } from '@/lib/cashRegisters';
 import { obtenerCajas } from './cajas.service';
 import { obtenerUsuarios } from './usuarios.service';
 import { obtenerVentasTurno, getLocalVentas, type VentaConDetalle } from './ventas.service';
@@ -21,6 +22,16 @@ function getSafeSupabase() {
 
 function esUuid(value: string | undefined | null): boolean {
   return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function toLocalDateStr(isoOrDate?: string | null): string {
+  if (!isoOrDate) return '';
+  const d = new Date(isoOrDate);
+  if (isNaN(d.getTime())) return String(isoOrDate).slice(0, 10);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 async function expandCajaIds(cajaId?: string): Promise<Set<string>> {
@@ -65,6 +76,10 @@ function localToDb(c: CashClosure): CierreCaja {
     codigo: c.code,
     caja_id: String(c.cashRegisterId),
     cajero_id: String(c.userId),
+    cajero_nombre: c.userName || undefined,
+    cajero_username: c.username || undefined,
+    caja_label: c.cashRegisterLabel || undefined,
+    notes: c.notes || undefined,
     sucursal_id: null,
     monto_apertura: c.baseCash ?? 0,
     monto_esperado: c.expectedCash,
@@ -80,8 +95,144 @@ function localToDb(c: CashClosure): CierreCaja {
   };
 }
 
+function sameSessionOwnerOrBox(a: CierreCaja, b: CierreCaja): boolean {
+  if (a.cajero_id && b.cajero_id && String(a.cajero_id) !== '0' && String(a.cajero_id) === String(b.cajero_id)) {
+    return true;
+  }
+  const nameA = a.cajero_nombre || (a as any).userName;
+  const nameB = b.cajero_nombre || (b as any).userName;
+  if (nameA && nameB && isSameCashierName(nameA, nameB)) {
+    return true;
+  }
+  if (a.caja_id && b.caja_id && String(a.caja_id) === String(b.caja_id)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Detecta y cierra automáticamente sesiones que quedaron colgadas como 'abierta'
+ * de días anteriores, sesiones duplicadas más antiguas o registros temporales 'cc-...' huérfanos.
+ * Mantiene intactas las sesiones abiertas del día de hoy para que el cajero pueda cambiar de máquina o reiniciar sin volver a abrir caja.
+ */
+function depurarSesionesAbiertasObsoletas(
+  rows: CierreCaja[],
+  sb: ReturnType<typeof getSafeSupabase>
+): CierreCaja[] {
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const todayLocal = toLocalDateStr(nowIso);
+
+  const openRows = rows.filter((r) => isOpenStatus(r.estado));
+  if (openRows.length === 0) return rows;
+
+  const closedRows = rows.filter((r) => !isOpenStatus(r.estado));
+  const staleIds = new Set<string>();
+  const orphanLocalIds = new Set<string>();
+
+  // 1. Primero identificar sesiones de días anteriores (> 8 horas de antigüedad y fecha distinta a hoy)
+  //    o sesiones temporales locales 'cc-...' huérfanas cuando Supabase está activo,
+  //    o sesiones que ya tienen un cierre posterior registrado.
+  for (const op of openRows) {
+    const openedMs = op.abierta_en ? new Date(op.abierta_en).getTime() : 0;
+    const openedLocalDay = toLocalDateStr(op.abierta_en);
+
+    // a) Sin fecha válida o abierta en un día calendario anterior (y hace más de 8 horas)
+    const isPastDay =
+      !openedMs ||
+      isNaN(openedMs) ||
+      (openedLocalDay !== todayLocal && nowMs - openedMs > 8 * 3600 * 1000);
+
+    if (isPastDay) {
+      staleIds.add(op.id);
+      continue;
+    }
+
+    // b) Registro local temporal 'cc-...' cuando Supabase está configurado
+    if (sb && isSupabaseConfigured() && String(op.id).startsWith('cc-')) {
+      const hasRemoteMatch = openRows.some((other) => esUuid(other.id) && sameSessionOwnerOrBox(op, other));
+      const isOlderThan2Min = nowMs - openedMs > 2 * 60 * 1000;
+      if (hasRemoteMatch || isOlderThan2Min) {
+        staleIds.add(op.id);
+        orphanLocalIds.add(op.id);
+        continue;
+      }
+    }
+
+    // c) Ya existe un registro cerrado posterior para el mismo cajero o la misma caja
+    const supersededByClose = closedRows.some((cl) => {
+      if (!sameSessionOwnerOrBox(op, cl)) return false;
+      const clTime = cl.cerrada_en
+        ? new Date(cl.cerrada_en).getTime()
+        : cl.abierta_en
+          ? new Date(cl.abierta_en).getTime()
+          : 0;
+      return clTime > 0 && clTime >= openedMs;
+    });
+
+    if (supersededByClose) {
+      staleIds.add(op.id);
+    }
+  }
+
+  // 2. Entre las sesiones que siguen abiertas hoy, si un mismo cajero o caja tiene más de una abierta,
+  //    conservar únicamente la más reciente y cerrar las anteriores.
+  const remainingOpen = openRows.filter((r) => !staleIds.has(r.id));
+  for (const op of remainingOpen) {
+    const openedMs = op.abierta_en ? new Date(op.abierta_en).getTime() : 0;
+    const hasNewerOpen = remainingOpen.some((other) => {
+      if (other.id === op.id || staleIds.has(other.id)) return false;
+      if (!sameSessionOwnerOrBox(op, other)) return false;
+      const otherMs = other.abierta_en ? new Date(other.abierta_en).getTime() : 0;
+      return otherMs > openedMs;
+    });
+    if (hasNewerOpen) {
+      staleIds.add(op.id);
+    }
+  }
+
+  if (staleIds.size === 0) return rows;
+
+  // Limpiar en localStorage
+  try {
+    for (const oId of orphanLocalIds) {
+      removeCashClosure(oId);
+    }
+    const localList = getCashClosures();
+    for (const loc of localList) {
+      if (staleIds.has(loc.id) && !orphanLocalIds.has(loc.id) && loc.status === 'abierta') {
+        saveCashClosure({
+          ...loc,
+          status: 'cerrada',
+          closedAt: loc.closedAt || nowIso,
+        });
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // Limpiar en Supabase de forma asíncrona
+  if (sb && isSupabaseConfigured()) {
+    const uuidsToClose = Array.from(staleIds).filter(esUuid);
+    if (uuidsToClose.length > 0) {
+      void sb
+        .from('cierres_caja')
+        .update({ estado: 'cerrada', cerrada_en: nowIso })
+        .in('id', uuidsToClose)
+        .eq('estado', 'abierta')
+        .then(() => {});
+    }
+  }
+
+  return rows
+    .filter((r) => !orphanLocalIds.has(r.id))
+    .map((r) => (staleIds.has(r.id) ? { ...r, estado: 'cerrada', cerrada_en: r.cerrada_en || nowIso } : r));
+}
+
+
 export function cierreDbARegistro(
-  c: CierreCaja & { cajero_nombre?: string; cajero_username?: string; caja_label?: string },
+  c: CierreCaja,
   extra?: Partial<Pick<CashClosure, 'userName' | 'username' | 'cashRegisterLabel' | 'notes' | 'baseCash'>>
 ): CashClosure {
   const local = getCashClosures().find((x) => x.id === c.id);
@@ -259,7 +410,7 @@ function mapCierreRowWithPerfil(
   row: any,
   userMap?: Map<string, { nombre: string; username: string }>,
   cajaLabelMap?: Map<string, string>
-): CierreCaja & { cajero_nombre?: string; cajero_username?: string; caja_label?: string } {
+): CierreCaja {
   const perfil = Array.isArray(row?.perfiles) ? row.perfiles[0] : row?.perfiles;
   const local = getCashClosures().find((x) => x.id === row?.id);
   const uFromMap = row?.cajero_id && userMap ? userMap.get(String(row.cajero_id)) : undefined;
@@ -291,7 +442,7 @@ export async function obtenerCierresCaja(params?: {
   const local = getCashClosures().map(localToDb);
   const sb = getSafeSupabase();
   if (!sb) {
-    return local;
+    return depurarSesionesAbiertasObsoletas(local, null);
   }
   try {
     const [usuarios, cajasDb] = await Promise.all([
@@ -328,18 +479,26 @@ export async function obtenerCierresCaja(params?: {
       if (params?.signal) q = q.abortSignal(params.signal);
       return q;
     };
-    let { data, error } = await buildQuery(`${CIERRE_COLUMNS}, perfiles!cajero_id(nombre_completo, correo)`);
+    let { data, error } = await buildQuery('*, perfiles!cajero_id(nombre_completo, correo)');
     if (error) {
-      const fallback = await buildQuery(CIERRE_COLUMNS);
-      if (!fallback.error) {
-        data = fallback.data;
+      const fallbackStar = await buildQuery('*');
+      if (!fallbackStar.error) {
+        data = fallbackStar.data;
+        error = null;
+      } else {
+        const fallbackCols = await buildQuery(CIERRE_COLUMNS);
+        if (!fallbackCols.error) {
+          data = fallbackCols.data;
+          error = null;
+        }
       }
     }
     const remote = (data ?? []).map((r) => mapCierreRowWithPerfil(r, userMap, cajaLabelMap));
     const seen = new Set(remote.map((r) => r.id));
-    return [...remote, ...local.filter((l) => !seen.has(l.id))];
+    const merged = [...remote, ...local.filter((l) => !seen.has(l.id))];
+    return depurarSesionesAbiertasObsoletas(merged, sb);
   } catch {
-    return local;
+    return depurarSesionesAbiertasObsoletas(local, null);
   }
 }
 
@@ -430,7 +589,7 @@ export async function guardarCierreCaja(datos: NuevoCierreInput): Promise<Cierre
     let { data, error } = await sb
       .from('cierres_caja')
       .insert(insertPayload)
-      .select(CIERRE_COLUMNS)
+      .select('*')
       .single();
 
     if (error) {
@@ -456,14 +615,23 @@ export async function guardarCierreCaja(datos: NuevoCierreInput): Promise<Cierre
     }
 
     if (!error && data) {
-      persistirRegistroCierre(data as CierreCaja, {
+      // Eliminar el registro temporal 'cc-...' para que nunca quede huérfano como sesión abierta
+      removeCashClosure(closure.id);
+      const enrichedData: CierreCaja = {
+        ...(data as CierreCaja),
+        cajero_nombre: (data as CierreCaja).cajero_nombre || datos.cajero_nombre,
+        cajero_username: (data as CierreCaja).cajero_username || datos.cajero_username,
+        caja_label: (data as CierreCaja).caja_label || datos.caja_label,
+        notes: (data as CierreCaja).notes || datos.notes,
+      };
+      persistirRegistroCierre(enrichedData, {
         userName: datos.cajero_nombre,
         username: datos.cajero_username,
         cashRegisterLabel: datos.caja_label,
         notes: datos.notes,
         baseCash: datos.monto_apertura,
       });
-      return data as CierreCaja;
+      return enrichedData;
     }
   } catch (err) {
     console.warn('Advertencia al insertar cierre en Supabase (manteniendo respaldo local):', err);
@@ -487,20 +655,22 @@ export type NuevoInicioCajaInput = {
 
 export async function obtenerSesionAbiertaDeUsuario(
   cajeroId?: string | null,
-  cajeroNombre?: string | null
+  cajeroNombre?: string | null,
+  cajeroUsername?: string | null
 ): Promise<CierreCaja | null> {
   const abiertas = await listarSesionesAbiertas();
   if (abiertas.length === 0) return null;
+
+  const targetUserPrefix = cajeroUsername ? String(cajeroUsername).split('@')[0].trim().toLowerCase() : '';
 
   return (
     abiertas.find((c) => {
       const matchId = cajeroId && c.cajero_id && String(c.cajero_id) === String(cajeroId);
       const rowNombre = (c as any).cajero_nombre || (c as any).userName;
-      const matchNombre =
-        cajeroNombre &&
-        rowNombre &&
-        String(rowNombre).trim().toLowerCase() === String(cajeroNombre).trim().toLowerCase();
-      return matchId || matchNombre;
+      const matchNombre = Boolean(cajeroNombre && rowNombre && isSameCashierName(rowNombre, cajeroNombre));
+      const rowUsername = String((c as any).cajero_username || (c as any).username || '').split('@')[0].trim().toLowerCase();
+      const matchUsername = Boolean(targetUserPrefix && rowUsername && targetUserPrefix === rowUsername);
+      return matchId || matchNombre || matchUsername;
     }) || null
   );
 }
@@ -508,14 +678,18 @@ export async function obtenerSesionAbiertaDeUsuario(
 export async function iniciarCaja(datos: NuevoInicioCajaInput): Promise<CierreCaja> {
   const ids = await expandCajaIds(datos.caja_id);
 
-  // 1. Si no se fuerza nueva apertura, verificar si este usuario ya tiene una sesión abierta activa
+  // 1. Si no se fuerza nueva apertura, verificar si este usuario ya tiene una sesión abierta activa hoy
   if (!datos.forzarNueva) {
-    const sesionPropia = await obtenerSesionAbiertaDeUsuario(datos.cajero_id, datos.cajero_nombre);
+    const sesionPropia = await obtenerSesionAbiertaDeUsuario(
+      datos.cajero_id,
+      datos.cajero_nombre,
+      datos.cajero_username
+    );
     if (sesionPropia) {
       persistirRegistroCierre(sesionPropia, {
-        userName: datos.cajero_nombre,
-        username: datos.cajero_username,
-        cashRegisterLabel: datos.caja_label,
+        userName: datos.cajero_nombre || sesionPropia.cajero_nombre || undefined,
+        username: datos.cajero_username || sesionPropia.cajero_username || undefined,
+        cashRegisterLabel: datos.caja_label || sesionPropia.caja_label || undefined,
         notes: datos.notes,
         baseCash: sesionPropia.monto_apertura,
       });
@@ -529,7 +703,7 @@ export async function iniciarCaja(datos: NuevoInicioCajaInput): Promise<CierreCa
         (datos.cajero_id && c.cajero_id && String(c.cajero_id) === String(datos.cajero_id)) ||
         (datos.cajero_nombre &&
           (c as any).cajero_nombre &&
-          String((c as any).cajero_nombre).trim().toLowerCase() === String(datos.cajero_nombre).trim().toLowerCase());
+          isSameCashierName((c as any).cajero_nombre, datos.cajero_nombre));
       return !isMe;
     });
 
@@ -570,10 +744,9 @@ export async function iniciarCaja(datos: NuevoInicioCajaInput): Promise<CierreCa
     for (const loc of currentLocal) {
       if (loc.status !== 'abierta') continue;
       const sameId = datos.cajero_id && loc.userId && String(loc.userId) === String(datos.cajero_id);
-      const sameName =
-        datos.cajero_nombre &&
-        loc.userName &&
-        loc.userName.trim().toLowerCase() === datos.cajero_nombre.trim().toLowerCase();
+      const sameName = Boolean(
+        datos.cajero_nombre && loc.userName && isSameCashierName(loc.userName, datos.cajero_nombre)
+      );
       if (sameId || sameName) {
         saveCashClosure({
           ...loc,
@@ -618,7 +791,8 @@ export async function iniciarCaja(datos: NuevoInicioCajaInput): Promise<CierreCa
 async function listarSesionesAbiertas(): Promise<CierreCaja[]> {
   const sb = getSafeSupabase();
   if (!sb) {
-    return getCashClosures().map(localToDb).filter((c) => isOpenStatus(c.estado));
+    const localAll = depurarSesionesAbiertasObsoletas(getCashClosures().map(localToDb), null);
+    return localAll.filter((c) => isOpenStatus(c.estado));
   }
   try {
     const [usuarios, cajasDb, queryRes] = await Promise.all([
@@ -626,7 +800,7 @@ async function listarSesionesAbiertas(): Promise<CierreCaja[]> {
       obtenerCajas({ soloActivas: false }).catch(() => []),
       sb
         .from('cierres_caja')
-        .select(`${CIERRE_COLUMNS}, perfiles!cajero_id(nombre_completo, correo)`)
+        .select('*, perfiles!cajero_id(nombre_completo, correo)')
         .eq('estado', 'abierta')
         .order('abierta_en', { ascending: false })
         .limit(50),
@@ -655,21 +829,34 @@ async function listarSesionesAbiertas(): Promise<CierreCaja[]> {
 
     let rows: any[] = queryRes.data ?? [];
     if (queryRes.error) {
-      const fallback = await sb
+      const fallbackStar = await sb
         .from('cierres_caja')
-        .select(CIERRE_COLUMNS)
+        .select('*')
         .eq('estado', 'abierta')
         .order('abierta_en', { ascending: false })
         .limit(50);
-      rows = fallback.data ?? [];
+      if (!fallbackStar.error) {
+        rows = fallbackStar.data ?? [];
+      } else {
+        const fallbackCols = await sb
+          .from('cierres_caja')
+          .select(CIERRE_COLUMNS)
+          .eq('estado', 'abierta')
+          .order('abierta_en', { ascending: false })
+          .limit(50);
+        rows = fallbackCols.data ?? [];
+      }
     }
 
     const remote = rows.map((r) => mapCierreRowWithPerfil(r, userMap, cajaLabelMap));
     const local = getCashClosures().map(localToDb).filter((c) => isOpenStatus(c.estado));
     const seen = new Set(remote.map((c) => c.id));
-    return [...remote, ...local.filter((c) => !seen.has(c.id))];
+    const merged = [...remote, ...local.filter((c) => !seen.has(c.id))];
+    const cleaned = depurarSesionesAbiertasObsoletas(merged, sb);
+    return cleaned.filter((c) => isOpenStatus(c.estado));
   } catch {
-    return getCashClosures().map(localToDb).filter((c) => isOpenStatus(c.estado));
+    const localAll = depurarSesionesAbiertasObsoletas(getCashClosures().map(localToDb), null);
+    return localAll.filter((c) => isOpenStatus(c.estado));
   }
 }
 
@@ -733,10 +920,7 @@ export async function obtenerCajaAbierta(
       if (!matchCaja) return false;
       const matchId = cajeroId && c.cajero_id && String(c.cajero_id) === String(cajeroId);
       const rowNombre = (c as any).cajero_nombre || (c as any).userName;
-      const matchName =
-        cajeroNombre &&
-        rowNombre &&
-        String(rowNombre).trim().toLowerCase() === String(cajeroNombre).trim().toLowerCase();
+      const matchName = Boolean(cajeroNombre && rowNombre && isSameCashierName(rowNombre, cajeroNombre));
       return matchId || matchName;
     });
     if (matchExact) return matchExact;
@@ -747,10 +931,7 @@ export async function obtenerCajaAbierta(
     const matchUser = abiertas.find((c) => {
       const matchId = cajeroId && c.cajero_id && String(c.cajero_id) === String(cajeroId);
       const rowNombre = (c as any).cajero_nombre || (c as any).userName;
-      const matchName =
-        cajeroNombre &&
-        rowNombre &&
-        String(rowNombre).trim().toLowerCase() === String(cajeroNombre).trim().toLowerCase();
+      const matchName = Boolean(cajeroNombre && rowNombre && isSameCashierName(rowNombre, cajeroNombre));
       return matchId || matchName;
     });
     if (matchUser) return matchUser;
@@ -1111,12 +1292,17 @@ export interface CerrarTurnoInput {
 
 export async function cerrarTurnoCaja(input: CerrarTurnoInput): Promise<CierreCaja> {
   const todas = await obtenerCierresCaja();
+  const cajaIds = await expandCajaIds(input.caja_id);
   let abierta: CierreCaja | null = null;
   if (input.cierre_id) {
     abierta = todas.find((c) => c.id === input.cierre_id) || null;
   }
   if (!abierta) {
     abierta = await obtenerCajaAbierta(input.caja_id, input.cajero_id ?? undefined, input.cajero_nombre);
+  }
+  if (abierta?.caja_id) {
+    const extraBoxIds = await expandCajaIds(abierta.caja_id);
+    extraBoxIds.forEach((x) => cajaIds.add(x));
   }
 
   // Prevenir cierres duplicados
@@ -1157,25 +1343,29 @@ export async function cerrarTurnoCaja(input: CerrarTurnoInput): Promise<CierreCa
         const matchId = abierta?.id && c.id === abierta.id;
         const matchUser =
           input.cajero_id && c.userId && String(c.userId) === String(input.cajero_id);
-        const matchName =
-          input.cajero_nombre &&
-          c.userName &&
-          c.userName.trim().toLowerCase() === input.cajero_nombre.trim().toLowerCase();
-        if (matchId || matchUser || matchName) {
-          saveCashClosure({
-            ...c,
-            status: 'cerrada',
-            closedAt: now,
-            expectedCash: input.monto_esperado,
-            countedCash: input.monto_real,
-            difference: input.monto_diferencia,
-            totalSales: input.total_ventas ?? c.totalSales,
-            totalCash: input.total_efectivo ?? c.totalCash,
-            totalCard: input.total_tarjeta ?? c.totalCard,
-            totalTransfer: input.total_transferencia ?? c.totalTransfer,
-            baseCash: input.monto_apertura,
-            notes: input.notes || c.notes,
-          });
+        const matchName = Boolean(
+          input.cajero_nombre && c.userName && isSameCashierName(c.userName, input.cajero_nombre)
+        );
+        const matchBox = Boolean(c.cashRegisterId && cajaIds.has(String(c.cashRegisterId)));
+        if (matchId || matchUser || matchName || matchBox) {
+          if (String(c.id).startsWith('cc-') && abierta?.id && esUuid(abierta.id)) {
+            removeCashClosure(c.id);
+          } else {
+            saveCashClosure({
+              ...c,
+              status: 'cerrada',
+              closedAt: now,
+              expectedCash: input.monto_esperado,
+              countedCash: input.monto_real,
+              difference: input.monto_diferencia,
+              totalSales: input.total_ventas ?? c.totalSales,
+              totalCash: input.total_efectivo ?? c.totalCash,
+              totalCard: input.total_tarjeta ?? c.totalCard,
+              totalTransfer: input.total_transferencia ?? c.totalTransfer,
+              baseCash: input.monto_apertura,
+              notes: input.notes || c.notes,
+            });
+          }
         }
       }
     } catch {
@@ -1183,7 +1373,7 @@ export async function cerrarTurnoCaja(input: CerrarTurnoInput): Promise<CierreCa
     }
   };
 
-  // Cerrar sesiones abiertas residuales de este cajero en Supabase
+  // Cerrar sesiones abiertas residuales de este cajero o de esta caja en Supabase
   const closeRemoteResidualSessions = async (excludeId?: string) => {
     const sb = getSafeSupabase();
     if (!sb || !isSupabaseConfigured()) return;
@@ -1206,6 +1396,15 @@ export async function cerrarTurnoCaja(input: CerrarTurnoInput): Promise<CierreCa
         if (excludeId && esUuid(excludeId)) q = q.neq('id', excludeId);
         await q;
       }
+      if (cajaIds.size > 0) {
+        let q = sb
+          .from('cierres_caja')
+          .update({ estado: 'cerrada', cerrada_en: now })
+          .in('caja_id', Array.from(cajaIds))
+          .eq('estado', 'abierta');
+        if (excludeId && esUuid(excludeId)) q = q.neq('id', excludeId);
+        await q;
+      }
     } catch {
       // ignore
     }
@@ -1213,6 +1412,7 @@ export async function cerrarTurnoCaja(input: CerrarTurnoInput): Promise<CierreCa
 
   if (abierta?.id) {
     if (!isSupabaseConfigured() || !esUuid(abierta.id)) {
+      await closeRemoteResidualSessions();
       closeLocalOpenSessions();
       const current = getCashClosures();
       const existing = current.find((c) => c.id === abierta.id);
@@ -1248,7 +1448,7 @@ export async function cerrarTurnoCaja(input: CerrarTurnoInput): Promise<CierreCa
           .from('cierres_caja')
           .update(updateFields)
           .eq('id', abierta.id)
-          .select(CIERRE_COLUMNS)
+          .select('*')
           .single();
         if (error) {
           const { codigo: _omitCodigo, ...withoutCode } = updateFields;

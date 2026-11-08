@@ -57,3 +57,11 @@ export function saveCashClosure(closure: CashClosure): CashClosure[] {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   return updated;
 }
+
+export function removeCashClosure(id: string): CashClosure[] {
+  const current = getCashClosures();
+  const updated = current.filter((c) => c.id !== id);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  return updated;
+}
+
