@@ -108,6 +108,9 @@ export default function PosExpenseModal({
         time: now.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' }),
         user: user?.name || 'Cajero',
         cashier: cashierLabel || `Caja #${effectiveCajaId}`,
+        cajaId: effectiveCajaId,
+        cierreId: cierreId || undefined,
+        created_at: now.toISOString(),
       });
 
       toast.success(`Gasto registrado: RD$ ${value.toLocaleString('es-DO')}`);

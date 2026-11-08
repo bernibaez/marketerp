@@ -4,7 +4,12 @@ import { getCashClosures, removeCashClosure, saveCashClosure, type CashClosure }
 import { isSameCashierName } from '@/lib/cashRegisters';
 import { obtenerCajas } from './cajas.service';
 import { obtenerUsuarios } from './usuarios.service';
-import { obtenerVentasTurno, getLocalVentas, type VentaConDetalle } from './ventas.service';
+import {
+  obtenerVentasTurno,
+  getLocalVentas,
+  calcularEfectivoNetoVenta,
+  type VentaConDetalle,
+} from './ventas.service';
 import { obtenerMovimientosCaja } from './movimientosCaja.service';
 
 const isTestEnv =
@@ -381,11 +386,10 @@ export async function obtenerRegistrosCierreCaja(): Promise<CashClosure[]> {
           for (const v of ventasDelTurno) {
             const monto = Number(v.monto_total || 0);
             sumSales += monto;
-            const m = String(v.metodo_pago || 'efectivo').toLowerCase();
-            if (m === 'efectivo' || m === 'cash') sumCash += monto;
-            else if (m === 'tarjeta' || m === 'card') sumCard += monto;
-            else if (m === 'transferencia' || m === 'transfer') sumTransfer += monto;
-            else if (m === 'credito' || m === 'credit') sumCredit += monto;
+            sumCash += calcularEfectivoNetoVenta(v);
+            sumCard += Number(v.monto_tarjeta || 0);
+            sumTransfer += Number(v.monto_transferencia || 0);
+            sumCredit += Number(v.monto_credito || 0);
           }
           cl.totalSales = Math.round(sumSales * 100) / 100;
           cl.totalCash = Math.round(sumCash * 100) / 100;
@@ -974,17 +978,54 @@ export async function calcularResumenCajaAbierta(
   cierreId?: string
 ): Promise<ResumenCajaAbierta> {
   const ids = await expandCajaIds(cajaId);
-  const abierta = await obtenerCajaAbierta(cajaId, cajeroId, cajeroNombre, cierreId);
+  let abierta = await obtenerCajaAbierta(cajaId, cajeroId, cajeroNombre, cierreId);
+  if (!abierta && (cajeroId || cajeroNombre)) {
+    abierta = await obtenerSesionAbiertaDeUsuario(cajeroId, cajeroNombre);
+  }
   if (abierta?.caja_id) {
     const extraIds = await expandCajaIds(abierta.caja_id);
     extraIds.forEach((x) => ids.add(x));
   }
   const apertura = Number(abierta?.monto_apertura ?? 0);
-  const desde = abierta?.abierta_en || `${new Date().toISOString().slice(0, 10)}T00:00:00`;
-  const effectiveCajeroId = abierta ? abierta.cajero_id || undefined : cajeroId;
+  const effectiveCajeroId = abierta ? abierta.cajero_id || cajeroId || undefined : cajeroId;
   const effectiveCajeroNombre = abierta
-    ? (abierta as (CierreCaja & { cajero_nombre?: string }) | null)?.cajero_nombre || undefined
+    ? (abierta as (CierreCaja & { cajero_nombre?: string }) | null)?.cajero_nombre ||
+      cajeroNombre ||
+      undefined
     : cajeroNombre;
+
+  // Determinar el inicio exacto del turno y evitar que entren ventas de turnos ya cerrados hoy
+  let lastClosedTime = 0;
+  try {
+    const localClosures = getCashClosures();
+    for (const cl of localClosures) {
+      if (abierta?.id && cl.id === abierta.id) continue;
+      if (cl.status !== 'cerrada' && !cl.closedAt) continue;
+      const closedMs = cl.closedAt ? new Date(cl.closedAt).getTime() : 0;
+      if (!closedMs || isNaN(closedMs)) continue;
+      const sameUser =
+        (effectiveCajeroId && cl.userId && String(cl.userId) === String(effectiveCajeroId)) ||
+        (effectiveCajeroNombre && cl.userName && isSameCashierName(cl.userName, effectiveCajeroNombre));
+      const sameBox = cl.cashRegisterId && ids.has(String(cl.cashRegisterId));
+      if (sameUser || (!effectiveCajeroId && !effectiveCajeroNombre && sameBox)) {
+        if (closedMs > lastClosedTime) lastClosedTime = closedMs;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  const rawDesde = abierta?.abierta_en || `${new Date().toISOString().slice(0, 10)}T00:00:00`;
+  const rawDesdeMs = new Date(rawDesde).getTime();
+  const effectiveDesdeMs =
+    !isNaN(rawDesdeMs) && rawDesdeMs > 0
+      ? lastClosedTime > rawDesdeMs
+        ? lastClosedTime
+        : rawDesdeMs
+      : lastClosedTime;
+  const desde =
+    effectiveDesdeMs > 0 ? new Date(effectiveDesdeMs).toISOString() : rawDesde;
+  const desdeTime = effectiveDesdeMs > 0 ? effectiveDesdeMs : 0;
 
   let totalVentas = 0;
   let totalEfectivo = 0;
@@ -1000,9 +1041,10 @@ export async function calcularResumenCajaAbierta(
         desde,
         limite: 1000,
       }).catch((): VentaConDetalle[] => []),
-      effectiveCajeroId
+      effectiveCajeroId || effectiveCajeroNombre
         ? obtenerVentasTurno({
             cajeroId: effectiveCajeroId,
+            cajeroNombre: effectiveCajeroNombre,
             desde,
             limite: 1000,
           }).catch((): VentaConDetalle[] => [])
@@ -1013,26 +1055,56 @@ export async function calcularResumenCajaAbierta(
     const ventas: VentaConDetalle[] = [];
     const targetNameNorm = (effectiveCajeroNombre || '').trim().toLowerCase();
 
+    const shouldIncludeSale = (v: VentaConDetalle): boolean => {
+      if (v.estado === 'anulada' || (v.estado as string) === 'cancelled') return false;
+      if (desdeTime > 0 && v.creado_en) {
+        const vt = new Date(v.creado_en).getTime();
+        if (!isNaN(vt) && vt < desdeTime - 5_000) return false;
+      }
+      if (lastClosedTime > 0 && v.creado_en) {
+        const vt = new Date(v.creado_en).getTime();
+        if (!isNaN(vt) && vt <= lastClosedTime) return false;
+      }
+
+      const matchesBox = ids.has(String(v.caja_id ?? ''));
+      const matchesId = Boolean(
+        effectiveCajeroId && v.cajero_id && String(v.cajero_id) === String(effectiveCajeroId)
+      );
+      const rowName = (v.cajero_nombre || '').trim();
+      const rowNameLower = rowName.toLowerCase();
+      const hasSpecificRowName =
+        Boolean(rowNameLower) &&
+        rowNameLower !== 'cajero' &&
+        rowNameLower !== 'cajera' &&
+        rowNameLower !== 'no especificado';
+      const matchesName = Boolean(
+        targetNameNorm && hasSpecificRowName && isSameCashierName(rowName, effectiveCajeroNombre)
+      );
+
+      if (effectiveCajeroId || targetNameNorm) {
+        if (matchesId || matchesName) return true;
+        // Si la venta tiene un nombre de cajero distinto al dueño del turno, NO mezclarla
+        if (targetNameNorm && hasSpecificRowName && !matchesName) return false;
+        // Si la venta tiene un UUID de cajero distinto al dueño del turno, NO mezclarla
+        if (
+          effectiveCajeroId &&
+          v.cajero_id &&
+          esUuid(String(effectiveCajeroId)) &&
+          esUuid(String(v.cajero_id)) &&
+          String(v.cajero_id) !== String(effectiveCajeroId)
+        ) {
+          return false;
+        }
+        // Solo incluir por caja si la venta no tiene cajero identificable
+        return matchesBox && !hasSpecificRowName && !v.cajero_id;
+      }
+
+      return matchesBox;
+    };
+
     for (const v of [...ventasPorCaja, ...ventasPorCajero]) {
       if (seenVentaIds.has(v.id)) continue;
-      const matchesBox = ids.has(String(v.caja_id ?? ''));
-      const matchesId =
-        effectiveCajeroId && v.cajero_id && String(v.cajero_id) === String(effectiveCajeroId);
-      const matchesName =
-        targetNameNorm &&
-        v.cajero_nombre &&
-        v.cajero_nombre.trim().toLowerCase() === targetNameNorm;
-
-      // Si el turno tiene un cajero específico, priorizar sus propias ventas o las de su caja
-      if (effectiveCajeroId || targetNameNorm) {
-        if (matchesId || matchesName || (matchesBox && !v.cajero_id)) {
-          ventas.push(v);
-          seenVentaIds.add(v.id);
-        } else if (matchesBox && ventasPorCajero.length === 0) {
-          ventas.push(v);
-          seenVentaIds.add(v.id);
-        }
-      } else if (matchesBox) {
+      if (shouldIncludeSale(v)) {
         ventas.push(v);
         seenVentaIds.add(v.id);
       }
@@ -1041,24 +1113,12 @@ export async function calcularResumenCajaAbierta(
     // Complementar con ventas locales de espejo que coincidan con la caja o el cajero
     try {
       const localVentas = getLocalVentas();
-      const desdeTime = desde ? new Date(desde).getTime() : 0;
       for (const lv of localVentas) {
         if (seenVentaIds.has(lv.id)) continue;
-        if (lv.estado === 'anulada' || (lv.estado as string) === 'cancelled') continue;
-        const matchesBox = ids.has(String(lv.caja_id ?? ''));
-        const matchesId =
-          effectiveCajeroId && lv.cajero_id && String(lv.cajero_id) === String(effectiveCajeroId);
-        const matchesName =
-          targetNameNorm &&
-          lv.cajero_nombre &&
-          lv.cajero_nombre.trim().toLowerCase() === targetNameNorm;
-        if (!matchesBox && !matchesId && !matchesName) continue;
-        if (desdeTime > 0 && lv.creado_en) {
-          const lt = new Date(lv.creado_en).getTime();
-          if (!isNaN(lt) && lt < desdeTime - 60_000) continue;
+        if (shouldIncludeSale(lv)) {
+          ventas.push(lv);
+          seenVentaIds.add(lv.id);
         }
-        ventas.push(lv);
-        seenVentaIds.add(lv.id);
       }
     } catch {
       // ignore
@@ -1066,11 +1126,16 @@ export async function calcularResumenCajaAbierta(
 
     for (const v of ventas) {
       totalVentas += Number(v.monto_total) || 0;
-      totalEfectivo += Number(v.monto_efectivo) || 0;
+      totalEfectivo += calcularEfectivoNetoVenta(v);
       totalTarjeta += Number(v.monto_tarjeta) || 0;
       totalTransferencia += Number(v.monto_transferencia) || 0;
       totalOtros += Number(v.monto_credito) || 0;
     }
+    totalVentas = Math.round(totalVentas * 100) / 100;
+    totalEfectivo = Math.round(totalEfectivo * 100) / 100;
+    totalTarjeta = Math.round(totalTarjeta * 100) / 100;
+    totalTransferencia = Math.round(totalTransferencia * 100) / 100;
+    totalOtros = Math.round(totalOtros * 100) / 100;
   } catch {
     totalVentas = Number(abierta?.total_ventas ?? 0);
     totalEfectivo = Number(abierta?.total_efectivo ?? 0);
@@ -1082,28 +1147,65 @@ export async function calcularResumenCajaAbierta(
   let totalRetiros = 0;
   let totalDevoluciones = 0;
   const countedMovementKeys = new Set<string>();
+  const makeExpenseKey = (monto: number, concepto?: string | null) =>
+    `gasto-${Number(monto || 0).toFixed(2)}-${(concepto || '').trim().toLowerCase()}`;
+
+  const matchesShiftMovement = (
+    itemCajaId?: string | null,
+    itemCierreId?: string | null,
+    itemCajeroName?: string | null
+  ): boolean => {
+    if (abierta?.id && itemCierreId) {
+      return String(itemCierreId) === String(abierta.id);
+    }
+    const cleanItemName = (itemCajeroName || '').trim();
+    const hasSpecificItemName =
+      Boolean(cleanItemName) &&
+      !['cajero', 'cajera', 'administrador', 'usuario', 'no especificado'].includes(
+        cleanItemName.toLowerCase()
+      );
+    if (effectiveCajeroNombre && hasSpecificItemName) {
+      if (isSameCashierName(cleanItemName, effectiveCajeroNombre)) return true;
+      return false;
+    }
+    if (itemCajaId) {
+      return ids.has(String(itemCajaId));
+    }
+    return true;
+  };
 
   try {
-    const movimientos = await obtenerMovimientosCaja(abierta?.id, abierta?.caja_id || cajaId);
-    const desdeTime = desde ? new Date(desde).getTime() : 0;
+    const movimientos = await obtenerMovimientosCaja(abierta?.id, Array.from(ids));
     for (const m of movimientos) {
-      if (abierta?.id && m.cierre_id && String(m.cierre_id) !== String(abierta.id)) continue;
-      if (m.caja_id && !ids.has(String(m.caja_id))) continue;
+      if (!matchesShiftMovement(m.caja_id, m.cierre_id, m.cajero_nombre)) continue;
       if (desdeTime > 0 && m.creado_en) {
         const mt = new Date(m.creado_en).getTime();
         if (!isNaN(mt) && mt < desdeTime - 5000) continue;
       }
-      const monto = Number(m.monto || 0);
-      if (m.concepto) {
-        countedMovementKeys.add(`${m.tipo}-${monto}-${m.concepto.trim().toLowerCase()}`);
+      if (lastClosedTime > 0 && m.creado_en) {
+        const mt = new Date(m.creado_en).getTime();
+        if (!isNaN(mt) && mt <= lastClosedTime) continue;
       }
+      const monto = Number(m.monto || 0);
       if (m.tipo === 'entrada' || m.tipo === 'aporte') {
-        totalEntradas += monto;
+        const key = `entrada-${monto.toFixed(2)}-${(m.concepto || '').trim().toLowerCase()}`;
+        if (!countedMovementKeys.has(key)) {
+          totalEntradas += monto;
+          countedMovementKeys.add(key);
+        }
       } else if (m.tipo === 'salida' || m.tipo === 'retiro' || m.tipo === 'gasto') {
         if (m.categoria === 'Devolución' || m.concepto?.toLowerCase().includes('devolución')) {
-          totalDevoluciones += monto;
+          const key = `salida-${monto.toFixed(2)}-devolución`;
+          if (!countedMovementKeys.has(key)) {
+            totalDevoluciones += monto;
+            countedMovementKeys.add(key);
+          }
         } else {
-          totalRetiros += monto;
+          const key = makeExpenseKey(monto, m.concepto);
+          if (!countedMovementKeys.has(key)) {
+            totalRetiros += monto;
+            countedMovementKeys.add(key);
+          }
         }
       }
     }
@@ -1112,7 +1214,6 @@ export async function calcularResumenCajaAbierta(
   }
 
   // Complementar con gastos locales y de POS para que nunca falte un gasto registrado
-  const desdeTime = desde ? new Date(desde).getTime() : 0;
   const desdeDate = desde ? desde.slice(0, 10) : new Date().toISOString().slice(0, 10);
 
   try {
@@ -1120,16 +1221,17 @@ export async function calcularResumenCajaAbierta(
     if (rawPosExp) {
       const posExps = JSON.parse(rawPosExp) as any[];
       for (const exp of posExps) {
-        if (!exp.cajaId || !ids.has(String(exp.cajaId))) continue;
+        if (!matchesShiftMovement(exp.cajaId, exp.cierreId, exp.user)) continue;
         if (desdeTime > 0 && exp.created_at) {
           const et = new Date(exp.created_at).getTime();
           if (!isNaN(et) && et < desdeTime - 5000) continue;
         } else if (exp.date && exp.date < desdeDate) {
           continue;
         }
-        const key = `gasto-${exp.amount}-${(exp.description || '').trim().toLowerCase()}`;
+        const monto = Number(exp.amount || 0);
+        const key = makeExpenseKey(monto, exp.description);
         if (!countedMovementKeys.has(key)) {
-          totalRetiros += Number(exp.amount || 0);
+          totalRetiros += monto;
           countedMovementKeys.add(key);
         }
       }
@@ -1139,20 +1241,19 @@ export async function calcularResumenCajaAbierta(
     if (rawGastos) {
       const localGastos = JSON.parse(rawGastos) as any[];
       for (const g of localGastos) {
-        if (!g.caja_id || !ids.has(String(g.caja_id))) continue;
+        if (!matchesShiftMovement(g.caja_id, g.cierre_id, g.responsible || g.responsable_nombre)) continue;
         if (desdeTime > 0 && (g.created_at || g.creado_en)) {
           const gt = new Date(g.created_at || g.creado_en).getTime();
           if (!isNaN(gt) && gt < desdeTime - 5000) continue;
         } else if (g.date && g.date < desdeDate) {
           continue;
         }
-        if (
-          g.status !== 'rejected' &&
-          (g.paymentMethod?.toLowerCase() === 'efectivo' || g.paymentMethod?.toLowerCase() === 'caja_chica')
-        ) {
-          const key = `gasto-${g.monto ?? g.amount}-${(g.descripcion || g.description || '').trim().toLowerCase()}`;
+        const method = String(g.paymentMethod ?? g.metodo_pago ?? 'efectivo').toLowerCase();
+        if (g.status !== 'rejected' && (method === 'efectivo' || method === 'caja_chica')) {
+          const monto = Number((g.monto ?? g.amount) || 0);
+          const key = makeExpenseKey(monto, g.descripcion || g.description);
           if (!countedMovementKeys.has(key)) {
-            totalRetiros += Number((g.monto ?? g.amount) || 0);
+            totalRetiros += monto;
             countedMovementKeys.add(key);
           }
         }
@@ -1172,9 +1273,10 @@ export async function calcularResumenCajaAbierta(
         if (dev.estado !== 'rechazada' && (dev.metodo_reembolso === 'efectivo' || dev.metodo_reembolso === 'cash')) {
           const devTime = dev.creado_en ? new Date(dev.creado_en).getTime() : 0;
           if (desdeTime > 0 && devTime > 0 && devTime < desdeTime - 5000) continue;
-          const key = `salida-${dev.monto_total}-devolución`;
+          const monto = Number(dev.monto_total || 0);
+          const key = `salida-${monto.toFixed(2)}-devolución`;
           if (!countedMovementKeys.has(key)) {
-            totalDevoluciones += Number(dev.monto_total || 0);
+            totalDevoluciones += monto;
             countedMovementKeys.add(key);
           }
         }
@@ -1190,22 +1292,22 @@ export async function calcularResumenCajaAbierta(
     try {
       const { data: remoteGastos } = await sbCierre
         .from('gastos')
-        .select('id, descripcion, monto, metodo_pago, creado_en, caja_id')
-        .eq('estado', 'aprobado')
+        .select('id, descripcion, monto, metodo_pago, creado_en, caja_id, responsable_nombre')
+        .neq('estado', 'rechazado')
         .gte('creado_en', `${desdeDate}T00:00:00`);
 
       for (const g of remoteGastos ?? []) {
-        // Solo considerar si el gasto pertenece explícitamente a esta caja y ocurrió dentro del turno
-        if (!g.caja_id || !ids.has(String(g.caja_id))) continue;
+        if (!matchesShiftMovement(g.caja_id, null, (g as any).responsable_nombre)) continue;
         if (desdeTime > 0 && g.creado_en) {
           const gt = new Date(g.creado_en).getTime();
           if (!isNaN(gt) && gt < desdeTime - 5000) continue;
         }
         const method = String(g.metodo_pago ?? 'efectivo').toLowerCase();
         if (method === 'efectivo' || method === 'caja_chica') {
-          const key = `gasto-${g.monto}-${(g.descripcion || '').trim().toLowerCase()}`;
+          const monto = Number(g.monto || 0);
+          const key = makeExpenseKey(monto, g.descripcion);
           if (!countedMovementKeys.has(key)) {
-            totalRetiros += Number(g.monto || 0);
+            totalRetiros += monto;
             countedMovementKeys.add(key);
           }
         }
@@ -1222,7 +1324,6 @@ export async function calcularResumenCajaAbierta(
         .gte('creado_en', `${desdeDate}T00:00:00`);
 
       for (const d of remoteDevs ?? []) {
-        // Solo considerar si la devolución no pertenece a otra caja y ocurrió dentro del turno
         if (d.caja_id && !ids.has(String(d.caja_id))) continue;
         if (desdeTime > 0 && d.creado_en) {
           const dt = new Date(d.creado_en).getTime();
@@ -1230,9 +1331,10 @@ export async function calcularResumenCajaAbierta(
         }
         const m = String(d.metodo_reembolso ?? '').toLowerCase();
         if (m === 'efectivo' || m === 'cash') {
-          const key = `salida-${d.monto_total}-devolución`;
+          const monto = Number(d.monto_total || 0);
+          const key = `salida-${monto.toFixed(2)}-devolución`;
           if (!countedMovementKeys.has(key)) {
-            totalDevoluciones += Number(d.monto_total || 0);
+            totalDevoluciones += monto;
             countedMovementKeys.add(key);
           }
         }
@@ -1242,7 +1344,11 @@ export async function calcularResumenCajaAbierta(
     }
   }
 
-  const montoEsperado = Math.round((apertura + totalEfectivo + totalEntradas - totalRetiros - totalDevoluciones) * 100) / 100;
+  totalEntradas = Math.round(totalEntradas * 100) / 100;
+  totalRetiros = Math.round(totalRetiros * 100) / 100;
+  totalDevoluciones = Math.round(totalDevoluciones * 100) / 100;
+  const montoEsperado =
+    Math.round((apertura + totalEfectivo + totalEntradas - totalRetiros - totalDevoluciones) * 100) / 100;
 
   return {
     cierre_id: abierta?.id,

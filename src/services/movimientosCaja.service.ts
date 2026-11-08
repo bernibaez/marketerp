@@ -93,18 +93,23 @@ export async function registrarMovimientoCaja(
   return nuevo;
 }
 
-export async function obtenerMovimientosCaja(cierreId?: string, cajaId?: string): Promise<(MovimientoCaja & { cajero_nombre?: string })[]> {
+export async function obtenerMovimientosCaja(
+  cierreId?: string,
+  cajaId?: string | string[]
+): Promise<(MovimientoCaja & { cajero_nombre?: string })[]> {
   const localList = getLocalMovimientosCaja();
   const sb = getSafeSupabase();
+  const cajaIds = Array.isArray(cajaId)
+    ? new Set(cajaId.map((x) => String(x)))
+    : cajaId
+      ? new Set([String(cajaId)])
+      : null;
 
   const filterItem = (m: MovimientoCaja) => {
-    if (cierreId) {
-      if (m.cierre_id === cierreId) return true;
-      if (!m.cierre_id && cajaId && String(m.caja_id) === String(cajaId)) return true;
-      return false;
-    }
-    if (cajaId) {
-      return String(m.caja_id) === String(cajaId);
+    if (cierreId && m.cierre_id && String(m.cierre_id) === String(cierreId)) return true;
+    if (cierreId && m.cierre_id && String(m.cierre_id) !== String(cierreId)) return false;
+    if (cajaIds && cajaIds.size > 0) {
+      return !m.caja_id || cajaIds.has(String(m.caja_id));
     }
     return true;
   };
@@ -114,30 +119,25 @@ export async function obtenerMovimientosCaja(cierreId?: string, cajaId?: string)
   }
 
   try {
-    let query = sb.from('movimientos_caja').select('*').order('creado_en', { ascending: false });
-    if (cierreId && cajaId) {
-      query = query.or(`cierre_id.eq.${cierreId},and(cierre_id.is.null,caja_id.eq.${cajaId})`);
-    } else if (cierreId) {
-      query = query.or(`cierre_id.eq.${cierreId},cierre_id.is.null`);
-    } else if (cajaId) {
-      query = query.eq('caja_id', cajaId);
-    }
-
+    const query = sb.from('movimientos_caja').select('*').order('creado_en', { ascending: false }).limit(500);
     const { data, error } = await query;
     if (error || !data) return localList.filter(filterItem);
 
-    const fromDb: (MovimientoCaja & { cajero_nombre?: string })[] = data.map((row: any) => ({
-      id: String(row.id),
-      codigo: row.codigo,
-      caja_id: String(row.caja_id),
-      cierre_id: row.cierre_id ? String(row.cierre_id) : null,
-      cajero_id: row.cajero_id ? String(row.cajero_id) : null,
-      tipo: row.tipo,
-      monto: Number(row.monto || 0),
-      concepto: row.concepto,
-      categoria: row.categoria,
-      creado_en: row.creado_en,
-    }));
+    const fromDb: (MovimientoCaja & { cajero_nombre?: string })[] = data
+      .map((row: any) => ({
+        id: String(row.id),
+        codigo: row.codigo,
+        caja_id: String(row.caja_id ?? ''),
+        cierre_id: row.cierre_id ? String(row.cierre_id) : null,
+        cajero_id: row.cajero_id ? String(row.cajero_id) : null,
+        cajero_nombre: row.cajero_nombre ? String(row.cajero_nombre) : undefined,
+        tipo: row.tipo,
+        monto: Number(row.monto || 0),
+        concepto: row.concepto,
+        categoria: row.categoria,
+        creado_en: row.creado_en,
+      }))
+      .filter(filterItem);
 
     const dbIds = new Set(fromDb.map((m) => m.id));
     const pendingLocal = localList.filter((m) => !dbIds.has(m.id) && filterItem(m));

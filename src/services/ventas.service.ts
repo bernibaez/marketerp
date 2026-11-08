@@ -1073,10 +1073,13 @@ export async function obtenerHistorialVentas(params: {
       if (params.cajeroId && v.cajero_id && String(v.cajero_id).trim() === String(params.cajeroId).trim()) {
         return true;
       }
-      if (targetName && v.cajero_nombre && v.cajero_nombre.trim().toLowerCase() === targetName) {
-        return true;
+      const rowName = (v.cajero_nombre || '').trim().toLowerCase();
+      const hasSpecificRowName =
+        Boolean(rowName) && rowName !== 'cajero' && rowName !== 'no especificado';
+      if (targetName && hasSpecificRowName) {
+        return rowName === targetName;
       }
-      if (!v.cajero_id && params.cajaId) return true;
+      if (!v.cajero_id && params.cajaId && !hasSpecificRowName) return true;
       if (!cajeroIdIsUuid && !v.cajero_id && !targetName) return true;
       return false;
     });
@@ -1086,10 +1089,55 @@ export async function obtenerHistorialVentas(params: {
   return { datos, total: Math.max(count ?? 0, datos.length) };
 }
 
+/**
+ * Calcula el efectivo físico NETO que realmente ingresó y permaneció en la gaveta por una venta.
+ * Descuenta cualquier devuelta/cambio entregado al cliente (especialmente en pagos mixtos o en efectivo
+ * donde monto_efectivo haya registrado el billete entregado por el cliente en lugar del neto).
+ */
+export function calcularEfectivoNetoVenta(v: {
+  estado?: string | null;
+  metodo_pago?: string | null;
+  monto_total?: number | null;
+  monto_efectivo?: number | null;
+  monto_tarjeta?: number | null;
+  monto_transferencia?: number | null;
+  monto_credito?: number | null;
+  devuelta_entregada?: number | null;
+}): number {
+  const est = String(v.estado || '').toLowerCase();
+  if (est === 'anulada' || est === 'cancelled') return 0;
+
+  const montoTotal = Math.max(0, Number(v.monto_total || 0));
+  const montoTarjeta = Math.max(0, Number(v.monto_tarjeta || 0));
+  const montoTransferencia = Math.max(0, Number(v.monto_transferencia || 0));
+  const montoCredito = Math.max(0, Number(v.monto_credito || 0));
+  const noEfectivo = montoTarjeta + montoTransferencia + montoCredito;
+
+  const maxEfectivoEnGaveta = Math.max(0, Math.round((montoTotal - noEfectivo) * 100) / 100);
+  const rawEfectivo = Math.max(0, Number(v.monto_efectivo || 0));
+  const devuelta = Math.max(0, Number(v.devuelta_entregada || 0));
+  const metodo = String(v.metodo_pago || '').toLowerCase();
+
+  if (rawEfectivo > 0) {
+    const trasDevuelta =
+      rawEfectivo > maxEfectivoEnGaveta && devuelta > 0
+        ? Math.max(0, rawEfectivo - devuelta)
+        : rawEfectivo;
+    return Math.round(Math.min(trasDevuelta, maxEfectivoEnGaveta) * 100) / 100;
+  }
+
+  if ((metodo === 'efectivo' || metodo === 'cash') && noEfectivo === 0) {
+    return maxEfectivoEnGaveta;
+  }
+
+  return 0;
+}
+
 /** Ventas del turno (caja/cajero) con detalle de ítems — para resumen POS / admin. */
 export async function obtenerVentasTurno(params: {
   cajaId?: string | string[];
   cajeroId?: string;
+  cajeroNombre?: string;
   desde?: string;
   limite?: number;
 }): Promise<VentaConDetalle[]> {
@@ -1099,18 +1147,19 @@ export async function obtenerVentasTurno(params: {
     limite: params.limite ?? 500,
     cajaId: params.cajaId,
     cajeroId: cajeroIdIsUuid ? params.cajeroId : undefined,
+    cajeroNombre: params.cajeroNombre,
     fechaInicio: params.desde?.slice(0, 10),
     excluirAnuladas: true,
   });
 
   if (datos.length === 0) return [];
 
-  // Filtrar por hora exacta de apertura comparando timestamps numéricos (con 60s de margen por sincronización de reloj)
+  // Filtrar por hora exacta de apertura comparando timestamps numéricos (con 5s de margen por reloj)
   const desdeTime = params.desde ? new Date(params.desde).getTime() : 0;
   const filtradas = desdeTime > 0
     ? datos.filter((v) => {
         const t = new Date(v.creado_en).getTime();
-        return !isNaN(t) ? t >= desdeTime - 60_000 : true;
+        return !isNaN(t) ? t >= desdeTime - 5_000 : true;
       })
     : datos;
 

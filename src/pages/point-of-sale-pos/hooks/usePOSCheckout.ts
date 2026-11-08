@@ -188,6 +188,17 @@ export function usePOSCheckout({
       const costoTotal = activeItems.reduce((s, i) => s + i.cost * i.qty, 0);
       const montoPagado =
         _payments.cash + _payments.card + _payments.transfer + _payments.credit;
+      const noEfectivoPagado =
+        (Number(_payments.card) || 0) +
+        (Number(_payments.transfer) || 0) +
+        (Number(_payments.credit) || 0);
+      const efectivoNetoGaveta = Math.max(
+        0,
+        Math.min(
+          Number(_payments.cash) || 0,
+          Math.round((total - noEfectivoPagado) * 100) / 100
+        )
+      );
 
       try {
         const effectiveNcfType =
@@ -223,11 +234,11 @@ export function usePOSCheckout({
           costo_total: costoTotal,
           metodo_pago: metodo,
           monto_pagado: montoPagado,
-          monto_efectivo: _payments.cash,
+          monto_efectivo: efectivoNetoGaveta,
           monto_tarjeta: _payments.card,
           monto_transferencia: _payments.transfer,
           monto_credito: _payments.credit,
-          devuelta_entregada: Math.max(0, montoPagado - total),
+          devuelta_entregada: Math.max(0, Math.round((montoPagado - total) * 100) / 100),
           ncf: isSupabaseConfigured() ? null : (fiscalInvoice?.ncf ?? null),
           tipo_ncf: effectiveNcfType,
           items: activeItems.map((item) => ({

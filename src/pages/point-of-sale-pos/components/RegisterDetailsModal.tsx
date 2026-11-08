@@ -3,7 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { X, Printer, Download, Briefcase, Edit } from 'lucide-react';
 import { exportTableToPdf, formatMoneyPdf } from '@/lib/exportPdf';
 import { useAuth } from '@/context/AuthContext';
-import { obtenerVentasTurno, type VentaConDetalle } from '@/services/ventas.service';
+import {
+  obtenerVentasTurno,
+  calcularEfectivoNetoVenta,
+  type VentaConDetalle,
+} from '@/services/ventas.service';
 import { obtenerCajaAbierta } from '@/services/cierresCaja.service';
 import { toast } from '@/lib/toast';
 
@@ -130,7 +134,7 @@ export default function RegisterDetailsModal({
     let credit = 0;
     for (const v of ventas) {
       total += Number(v.monto_total) || 0;
-      cash += Number(v.monto_efectivo) || 0;
+      cash += calcularEfectivoNetoVenta(v);
       card += Number(v.monto_tarjeta) || 0;
       transfer += Number(v.monto_transferencia) || 0;
       credit += Number(v.monto_credito) || 0;

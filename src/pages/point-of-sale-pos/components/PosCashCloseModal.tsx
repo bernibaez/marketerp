@@ -413,9 +413,9 @@ export default function PosCashCloseModal({
               </div>
 
               <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
-                <span className="text-[10px] font-bold text-emerald-600 uppercase block">(+) Ventas Efectivo</span>
+                <span className="text-[10px] font-bold text-emerald-600 uppercase block">(+) Ventas Efectivo Neto</span>
                 <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">
-                  RD$ {summary.total_efectivo.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                  RD$ {(summary.total_efectivo + summary.total_entradas).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                 </span>
               </div>
 
@@ -431,10 +431,10 @@ export default function PosCashCloseModal({
             <div className="p-3.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-900 flex items-center justify-between">
               <div>
                 <span className="text-xs font-black text-indigo-900 dark:text-indigo-200 block">
-                  Efectivo Total Esperado en Caja:
+                  Efectivo Físico Esperado en Gaveta:
                 </span>
                 <span className="text-[11px] text-indigo-600 dark:text-indigo-400">
-                  Fondo Inicial + Ventas Efectivo - Retiros/Gastos
+                  Fondo ({summary.monto_apertura.toLocaleString('es-DO', { minimumFractionDigits: 2 })}) + Efectivo Neto ({(summary.total_efectivo + summary.total_entradas).toLocaleString('es-DO', { minimumFractionDigits: 2 })}) - Salidas ({(summary.total_retiros + summary.total_devoluciones).toLocaleString('es-DO', { minimumFractionDigits: 2 })})
                 </span>
               </div>
               <span className="text-lg sm:text-xl font-black text-indigo-700 dark:text-indigo-300">

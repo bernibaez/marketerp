@@ -11,7 +11,11 @@ import { getCashClosures } from '@/lib/cashClosureStore';
 import { obtenerCierresCaja } from '@/services/cierresCaja.service';
 import { obtenerUsuarios } from '@/services/usuarios.service';
 import { obtenerCajas } from '@/services/cajas.service';
-import { obtenerHistorialVentas, rememberCajeroNombre } from '@/services/ventas.service';
+import {
+  obtenerHistorialVentas,
+  rememberCajeroNombre,
+  calcularEfectivoNetoVenta,
+} from '@/services/ventas.service';
 import { ROL_DB_A_UI } from '@/services/auth.service';
 import { tryGetSupabase, isSupabaseConfigured } from '@/services/clienteSupabase';
 import type { CierreCaja, Perfil } from '@/types/database';
@@ -140,21 +144,35 @@ export function useCashRegisters() {
         const sameBoxOpenShifts = abiertas.filter((a) => keys.has(String(a.caja_id)));
         const multipleShiftsOnSameBox = sameBoxOpenShifts.length > 1;
 
+        const shiftOwnerName =
+          matchedUser?.nombre_completo || rawCajeroNombre || localClosure?.userName || '';
+
         const ventasTurno = ventasHoy.filter((v) => {
-          const matchesCashier =
+          const matchesCashierId =
             Boolean(sessionAbierta.cajero_id) &&
             String(v.cajero_id ?? '') === String(sessionAbierta.cajero_id);
+          const rowName = (v.cajero_nombre || '').trim();
+          const hasSpecificRowName =
+            Boolean(rowName) &&
+            !['cajero', 'cajera', 'no especificado'].includes(rowName.toLowerCase());
+          const matchesCashierName =
+            Boolean(shiftOwnerName) &&
+            hasSpecificRowName &&
+            isSameCashierName(rowName, shiftOwnerName);
           const matchesBox = keys.has(String(v.caja_id ?? ''));
 
+          if (shiftOwnerName && hasSpecificRowName && !matchesCashierName && !matchesCashierId) {
+            return false;
+          }
           if (multipleShiftsOnSameBox && sessionAbierta.cajero_id && v.cajero_id) {
-            if (!matchesCashier) return false;
-          } else if (!matchesBox && !matchesCashier) {
+            if (!matchesCashierId && !matchesCashierName) return false;
+          } else if (!matchesBox && !matchesCashierId && !matchesCashierName) {
             return false;
           }
 
           if (openTime > 0 && v.creado_en) {
             const vt = new Date(v.creado_en).getTime();
-            if (!isNaN(vt) && vt < openTime - 10_000) return false;
+            if (!isNaN(vt) && vt < openTime - 5_000) return false;
           }
           return true;
         });
@@ -162,7 +180,7 @@ export function useCashRegisters() {
         const computedSales =
           Math.round(ventasTurno.reduce((sum, v) => sum + Number(v.monto_total || 0), 0) * 100) / 100;
         const computedCash =
-          Math.round(ventasTurno.reduce((sum, v) => sum + Number(v.monto_efectivo || 0), 0) * 100) / 100;
+          Math.round(ventasTurno.reduce((sum, v) => sum + calcularEfectivoNetoVenta(v), 0) * 100) / 100;
         const computedCard =
           Math.round(ventasTurno.reduce((sum, v) => sum + Number(v.monto_tarjeta || 0), 0) * 100) / 100;
         const computedTransfer =

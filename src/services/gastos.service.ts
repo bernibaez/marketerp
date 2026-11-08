@@ -16,6 +16,9 @@ export type GastoUi = {
   date: string;
   receipt: boolean;
   status: GastoStatusUi;
+  caja_id?: string | null;
+  cierre_id?: string | null;
+  created_at?: string;
 };
 
 export type CategoriaGastoUi = {
@@ -350,6 +353,9 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
     date: effectiveFecha,
     receipt: Boolean(input.tiene_recibo),
     status: STATUS_UI[input.estado ?? 'aprobado'] ?? 'approved',
+    caja_id: input.caja_id ? String(input.caja_id) : '1',
+    cierre_id: input.cierre_id ?? null,
+    created_at: new Date().toISOString(),
   };
 
   // 1. Guardar de inmediato en almacenamiento local para no perder nunca el registro
