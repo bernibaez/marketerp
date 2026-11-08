@@ -106,16 +106,29 @@ export async function exportReportPdf(
     case 'stock-detail': {
       const d = await obtenerInformeStockGeneral();
       exportTableToPdf({
-        title: 'Informe de Stock y Valoración',
-        subtitle: `Stock Cierre (Compra): ${formatMoneyPdf(d.stock_cierre_compra)} | Venta: ${formatMoneyPdf(d.stock_cierre_venta)} | Margen: ${d.profit_margin_pct.toFixed(2)}%`,
+        title: 'Informe de Stock y Movimientos por Producto',
+        subtitle: `Stock Cierre (Compra): ${formatMoneyPdf(d.stock_cierre_compra)} | Venta: ${formatMoneyPdf(d.stock_cierre_venta)} | Margen: ${d.profit_margin_pct.toFixed(2)}% | Total Productos: ${d.total_productos}`,
         filename: `informe-stock-general-${dateFrom}-${dateTo}`,
-        headers: ['SKU', 'Producto', 'Categoría', 'Ubicación', 'Precio Venta', 'Stock Actual', 'Valor Compra', 'Valor Venta'],
+        headers: [
+          'SKU',
+          'Producto',
+          'Categoría',
+          'Precio Venta',
+          'Apertura',
+          'Entradas (+)',
+          'Salidas (-)',
+          'Stock Actual',
+          'Valor Compra',
+          'Valor Venta',
+        ],
         rows: d.items.map((p) => [
           p.sku || '-',
           p.nombre,
           p.categoria,
-          p.ubicacion,
           formatMoneyPdf(p.precio_venta),
+          p.stock_apertura.toFixed(2),
+          `+${(p.total_comprado + p.total_devuelto + p.total_ajustado_entrada).toFixed(2)}`,
+          `-${p.total_salidas.toFixed(2)}`,
           `${p.stock_actual.toFixed(2)} ${p.unidad}`,
           formatMoneyPdf(p.valor_compra),
           formatMoneyPdf(p.valor_venta),

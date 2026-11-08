@@ -929,6 +929,80 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
       };
       const existingLocal = getLocalVentas().filter((v) => v.id !== resultado.venta_id);
       saveLocalVentas([mirroredVenta, ...existingLocal].slice(0, 1000));
+
+      // Sincronizar también el Kardex local y el stock en memoria para reflejar el movimiento de inmediato
+      const docRef = resultado.ncf || resultado.numero_factura;
+      for (const item of payload.items) {
+        if (item.tipo_item === 'producto' && (item.producto_id || item.nombre_item)) {
+          const stored = getStoredProducts().find(
+            (p) =>
+              (item.producto_id && p.id === item.producto_id) ||
+              (item.sku && p.sku && p.sku.toLowerCase() === item.sku.toLowerCase()) ||
+              p.name.toLowerCase() === item.nombre_item.toLowerCase()
+          );
+          const compositeItems = (stored as any)?.composite_items;
+          if (Array.isArray(compositeItems) && compositeItems.length > 0) {
+            for (const ci of compositeItems) {
+              const compProdId = ci.product_id || (ci as any).productId;
+              if (!compProdId) continue;
+              const baseProd = getStoredProducts().find((p) => p.id === compProdId);
+              const stockPrev = baseProd?.currentStock ?? 0;
+              const cantDeduct = Math.round(Number(ci.quantity || 1) * Number(item.cantidad || 1) * 1000) / 1000;
+              updateProductStockInStore(compProdId, -cantDeduct);
+              registrarMovimientoInventario({
+                producto_id: compProdId,
+                producto_nombre: baseProd?.name || ci.product_name || (ci as any).name || 'Componente paquete',
+                tipo: 'Venta',
+                cantidad_salida: cantDeduct,
+                stock_anterior: stockPrev,
+                stock_resultante: Math.max(0, stockPrev - cantDeduct),
+                documento_referencia: docRef,
+                usuario: effectiveCajeroNombre,
+                motivo: `Componente de ${stored?.name || item.nombre_item} en Factura ${resultado.numero_factura}`,
+              });
+            }
+          } else {
+            const targetProdId = stored?.id || item.producto_id || item.nombre_item;
+            const stockPrev = stored?.currentStock ?? 0;
+            const movimiento = stored
+              ? movimientoInventarioPresentacion(stored, item.cantidad)
+              : { productoId: targetProdId, cantidad: item.cantidad };
+            updateProductStockInStore(movimiento.productoId, -movimiento.cantidad);
+            registrarMovimientoInventario({
+              producto_id: movimiento.productoId,
+              producto_nombre: stored?.name || item.nombre_item,
+              tipo: 'Venta',
+              cantidad_salida: movimiento.cantidad,
+              stock_anterior: stockPrev,
+              stock_resultante: Math.max(0, stockPrev - movimiento.cantidad),
+              documento_referencia: docRef,
+              usuario: effectiveCajeroNombre,
+              motivo: `${effectiveClienteNombre} • Factura ${resultado.numero_factura}`,
+            });
+          }
+        } else if (item.tipo_item === 'combo' && item.combo_id) {
+          const combo = getCombos().find((c) => c.id === item.combo_id);
+          if (combo && Array.isArray(combo.items)) {
+            for (const ci of combo.items) {
+              const baseProd = getStoredProducts().find((p) => p.id === ci.productId);
+              const stockPrev = baseProd?.currentStock ?? 0;
+              const cantDeduct = Math.round(Number((ci as any).quantity ?? (ci as any).qty ?? 1) * Number(item.cantidad || 1) * 1000) / 1000;
+              updateProductStockInStore(ci.productId, -cantDeduct);
+              registrarMovimientoInventario({
+                producto_id: ci.productId,
+                producto_nombre: baseProd?.name || ci.name || 'Componente combo',
+                tipo: 'Venta',
+                cantidad_salida: cantDeduct,
+                stock_anterior: stockPrev,
+                stock_resultante: Math.max(0, stockPrev - cantDeduct),
+                documento_referencia: docRef,
+                usuario: effectiveCajeroNombre,
+                motivo: `Componente de ${combo.name} en Factura ${resultado.numero_factura}`,
+              });
+            }
+          }
+        }
+      }
     } catch {
       // ignore local mirror error
     }

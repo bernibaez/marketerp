@@ -2,6 +2,7 @@ import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupa
 import type { Devolucion, EstadoDevolucion } from '@/types/database';
 import { updateProductStockInStore, getStoredProducts } from '@/lib/productStore';
 import { movimientoInventarioPresentacion } from './presentaciones.service';
+import { registrarMovimientoInventario } from './movimientosInventarioCentral.service';
 
 export interface ItemDevolucionPayload {
   producto_id?: string | null;
@@ -270,13 +271,29 @@ export async function cambiarEstadoDevolucion(
       const target = getLocalDevoluciones().find((d) => d.id === devolucionId);
       if (target?.items) {
         for (const item of target.items) {
-          if (item.producto_id) {
-            const stored = getStoredProducts().find((p) => p.id === item.producto_id);
+          if (item.producto_id || item.nombre_item) {
+            const stored = getStoredProducts().find(
+              (p) =>
+                (item.producto_id && p.id === item.producto_id) ||
+                (item.sku && p.sku && p.sku.toLowerCase() === item.sku.toLowerCase()) ||
+                p.name.toLowerCase() === item.nombre_item.toLowerCase()
+            );
             const cantExacta = Number(item.cantidad || 0);
+            const stockPrev = stored?.currentStock ?? 0;
             const mov = stored
               ? movimientoInventarioPresentacion(stored, cantExacta)
-              : { productoId: item.producto_id, cantidad: cantExacta };
+              : { productoId: item.producto_id || item.nombre_item, cantidad: cantExacta };
             updateProductStockInStore(mov.productoId, mov.cantidad);
+            registrarMovimientoInventario({
+              producto_id: mov.productoId,
+              producto_nombre: stored?.name || item.nombre_item,
+              tipo: 'Devolución',
+              cantidad_entrada: mov.cantidad,
+              stock_anterior: stockPrev,
+              stock_resultante: stockPrev + mov.cantidad,
+              documento_referencia: target.numero_factura || target.codigo,
+              motivo: target.motivo || 'Devolución de venta aprobada',
+            });
           }
         }
       }

@@ -850,15 +850,14 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
     }
   }
 
-  // Obtenemos los productos de demostración/catálogo base
-  let fallbackList = demoAsProductos();
-  // Si no hay Supabase o falló, unimos también los productos locales
-  if (!sb || supabaseFailed) {
-    const local = localAsProductos();
-    const localSkus = new Set(local.map((p) => (p.sku || '').toLowerCase()));
-    const extras = fallbackList.filter((f) => !localSkus.has((f.sku || '').toLowerCase()));
-    fallbackList = [...local, ...extras];
-  }
+  // Obtenemos los productos locales y del catálogo base de demostración
+  const local = localAsProductos();
+  const localSkus = new Set(local.map((p) => (p.sku || '').toLowerCase()).filter(Boolean));
+  const localIds = new Set(local.map((p) => p.id.toLowerCase()));
+  const demoExtras = demoAsProductos().filter(
+    (f) => !localIds.has(f.id.toLowerCase()) && (!f.sku || !localSkus.has(f.sku.toLowerCase()))
+  );
+  let fallbackList = [...local, ...demoExtras];
 
   // Filtrar catálogo base según los parámetros solicitados
   if (params.busqueda?.trim()) {
@@ -880,16 +879,18 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
     fallbackList = fallbackList.filter((p) => p.estado === params.estado);
   }
 
-  // Excluir productos del catálogo base que ya existan en Supabase (por SKU o código de barras)
-  const dbSkus = new Set(dbProducts.map((p) => (p.sku || '').toLowerCase()));
-  const dbBarcodes = new Set(dbProducts.map((p) => (p.codigo_barras || '').toLowerCase()));
+  // Excluir productos del catálogo base que ya existan en Supabase (por ID, SKU o código de barras)
+  const dbIds = new Set(dbProducts.map((p) => p.id.toLowerCase()));
+  const dbSkus = new Set(dbProducts.map((p) => (p.sku || '').toLowerCase()).filter(Boolean));
+  const dbBarcodes = new Set(dbProducts.map((p) => (p.codigo_barras || '').toLowerCase()).filter(Boolean));
   const deletedKeys = getDeletedProductKeys();
   const missingFromDb = fallbackList.filter(
     (p) =>
       !deletedKeys.has(p.id.toLowerCase()) &&
       !deletedKeys.has((p.sku || '').toLowerCase()) &&
       !(p.codigo_barras && deletedKeys.has(p.codigo_barras.toLowerCase())) &&
-      !dbSkus.has((p.sku || '').toLowerCase()) &&
+      !dbIds.has(p.id.toLowerCase()) &&
+      (!p.sku || !dbSkus.has(p.sku.toLowerCase())) &&
       (!p.codigo_barras || !dbBarcodes.has(p.codigo_barras.toLowerCase()))
   );
 

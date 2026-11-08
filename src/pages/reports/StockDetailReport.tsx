@@ -1,11 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Package,
-  TrendingUp,
-  DollarSign,
   ArrowLeft,
   Search,
-  Download,
   FileSpreadsheet,
   FileText,
   Printer,
@@ -15,12 +12,12 @@ import {
   RotateCcw,
   History,
   X,
-  Filter,
   Edit,
   AlertCircle,
   ChevronLeft,
   ChevronRight,
-  ExternalLink,
+  ChevronDown,
+  ChevronUp,
   Layers,
   ArrowDownRight,
   ArrowUpRight,
@@ -33,14 +30,70 @@ import {
   exportarKardexAExcel,
   exportarACSV,
   type ResumenStockGeneral,
-  type StockGeneralItem,
   type HistorialMovimientosProductoResult,
   type MovimientoStockItem,
 } from '@/services/informes/informesStockMovimientos.service';
 import { toast } from '@/lib/toast';
 
+function renderMovementBadge(tipo: MovimientoStockItem['tipo']) {
+  if (tipo === 'Ventas') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-info/10 text-info">
+        <ShoppingCart size={11} /> Venta
+      </span>
+    );
+  }
+  if (tipo === 'Compras') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-success/10 text-success">
+        <ShoppingBag size={11} /> Compra
+      </span>
+    );
+  }
+  if (tipo === 'Ajuste de Stock') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-warning/10 text-warning">
+        <Sliders size={11} /> Ajuste
+      </span>
+    );
+  }
+  if (tipo === 'Devolución de Venta') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400">
+        <RotateCcw size={11} /> Devolución
+      </span>
+    );
+  }
+  if (tipo === 'Devolución de Compra') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-danger/10 text-danger">
+        <RotateCcw size={11} /> Dev. Compra
+      </span>
+    );
+  }
+  if (tipo === 'Anulación') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400">
+        <AlertCircle size={11} /> Anulación
+      </span>
+    );
+  }
+  if (tipo === 'Edición de factura') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400">
+        <Edit size={11} /> Edición Factura
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-500/10 text-slate-600">
+      <Layers size={11} /> Transferencia
+    </span>
+  );
+}
+
 export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo }: ReportPeriodProps) {
-  // Estado de vista: null = Vista General de Stock (Imagen 1), string = ID del producto seleccionado para Kardex (Imagen 2)
+  // null = Vista General de Stock con todos los productos y sus movimientos, string = ID del producto para Kardex individual
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
 
   // Datos Vista General
@@ -48,12 +101,14 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
   const [loadingGeneral, setLoadingGeneral] = useState(true);
   const [errorGeneral, setErrorGeneral] = useState<string | null>(null);
 
-  // Filtros Vista General
+  // Filtros Vista General — Por defecto mostrar TODOS los productos (-1) y mostrar los movimientos de cada uno
   const [searchGeneral, setSearchGeneral] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'ok' | 'low' | 'out'>('all');
-  const [pageSize, setPageSize] = useState<number>(25);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'ok' | 'low' | 'out' | 'with_movements'>('all');
+  const [pageSize, setPageSize] = useState<number>(-1);
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const [showAllMovementsInline, setShowAllMovementsInline] = useState<boolean>(true);
+  const [expandedProductIds, setExpandedProductIds] = useState<Record<string, boolean>>({});
 
   // Datos Vista Detallada (Kardex del producto)
   const [kardexData, setKardexData] = useState<HistorialMovimientosProductoResult | null>(null);
@@ -65,14 +120,14 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
   const [kardexTypeFilter, setKardexTypeFilter] = useState<string>('all');
   const [kardexDateFrom, setKardexDateFrom] = useState('');
   const [kardexDateTo, setKardexDateTo] = useState('');
-  const [kardexPageSize, setKardexPageSize] = useState<number>(25);
+  const [kardexPageSize, setKardexPageSize] = useState<number>(-1);
   const [kardexCurrentPage, setKardexCurrentPage] = useState<number>(1);
 
   // Búsqueda rápida de producto en el selector de Kardex
   const [productQuickSearch, setProductQuickSearch] = useState('');
   const [isQuickSearchOpen, setIsQuickSearchOpen] = useState(false);
 
-  // 1. Cargar Vista General
+  // 1. Cargar Vista General con TODOS los productos y sus movimientos
   const loadGeneralStock = async () => {
     setLoadingGeneral(true);
     setErrorGeneral(null);
@@ -95,8 +150,34 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
     setLoadingKardex(true);
     setErrorKardex(null);
     try {
-      const data = await obtenerHistorialMovimientosProducto(id);
-      setKardexData(data);
+      // Si ya tenemos el producto cargado en generalData, podemos servirlo de inmediato y refrescar
+      const cachedProd = generalData?.items.find((p) => p.id === id);
+      if (cachedProd) {
+        setKardexData({
+          producto: cachedProd,
+          resumen: {
+            cantidades_en: {
+              compra_total: cachedProd.total_comprado,
+              stock_apertura: cachedProd.stock_apertura,
+              total_devolucion_venta: cachedProd.total_devuelto,
+              transferencias_en: cachedProd.total_ajustado_entrada,
+            },
+            cantidades_fuera: {
+              total_vendido: cachedProd.total_vendido,
+              ajuste_total: cachedProd.total_ajustado_salida,
+              total_devolucion_compra: 0,
+              transferencias_afuera: 0,
+            },
+            totales: {
+              stock_actual: cachedProd.stock_actual,
+            },
+          },
+          movimientos: cachedProd.movimientos,
+        });
+      } else {
+        const data = await obtenerHistorialMovimientosProducto(id);
+        setKardexData(data);
+      }
     } catch (err) {
       setErrorKardex(err instanceof Error ? err.message : 'Error al cargar historial de movimientos');
     } finally {
@@ -114,6 +195,20 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
       setKardexData(null);
     }
   }, [selectedProductId]);
+
+  const toggleProductExpanded = (productId: string) => {
+    setExpandedProductIds((prev) => {
+      const current = prev[productId] !== undefined ? prev[productId] : showAllMovementsInline;
+      return { ...prev, [productId]: !current };
+    });
+  };
+
+  const isProductExpanded = (productId: string) => {
+    if (expandedProductIds[productId] !== undefined) {
+      return expandedProductIds[productId];
+    }
+    return showAllMovementsInline;
+  };
 
   // Lista de categorías únicas
   const categories = useMemo(() => {
@@ -135,7 +230,12 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
           i.nombre.toLowerCase().includes(q) ||
           i.sku.toLowerCase().includes(q) ||
           i.codigo_barras.toLowerCase().includes(q) ||
-          i.categoria.toLowerCase().includes(q)
+          i.categoria.toLowerCase().includes(q) ||
+          i.movimientos.some(
+            (m) =>
+              m.numero_referencia.toLowerCase().includes(q) ||
+              m.cliente_proveedor_info.toLowerCase().includes(q)
+          )
       );
     }
 
@@ -148,6 +248,17 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
     if (statusFilter === 'ok') list = list.filter((i) => i.estado === 'OK');
     else if (statusFilter === 'low') list = list.filter((i) => i.estado === 'Bajo');
     else if (statusFilter === 'out') list = list.filter((i) => i.estado === 'Agotado');
+    else if (statusFilter === 'with_movements') {
+      list = list.filter(
+        (i) =>
+          i.total_vendido > 0 ||
+          i.total_comprado > 0 ||
+          i.total_devuelto > 0 ||
+          i.total_ajustado_salida > 0 ||
+          i.total_ajustado_entrada > 0 ||
+          i.movimientos.some((m) => m.numero_referencia !== 'APERTURA-INV')
+      );
+    }
 
     return list;
   }, [generalData, searchGeneral, categoryFilter, statusFilter]);
@@ -166,7 +277,6 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
     if (!kardexData) return [];
     let list = kardexData.movimientos;
 
-    // Filtro por texto
     if (kardexSearch.trim()) {
       const q = kardexSearch.toLowerCase().trim();
       list = list.filter(
@@ -177,17 +287,14 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
       );
     }
 
-    // Filtro por tipo
     if (kardexTypeFilter !== 'all') {
       list = list.filter((m) => m.tipo === kardexTypeFilter);
     }
 
-    // Filtro por fecha desde
     if (kardexDateFrom) {
       list = list.filter((m) => m.fecha.slice(0, 10) >= kardexDateFrom);
     }
 
-    // Filtro por fecha hasta
     if (kardexDateTo) {
       list = list.filter((m) => m.fecha.slice(0, 10) <= kardexDateTo);
     }
@@ -208,10 +315,10 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
   const quickSearchProducts = useMemo(() => {
     if (!generalData) return [];
     const q = productQuickSearch.trim().toLowerCase();
-    if (!q) return generalData.items.slice(0, 20);
+    if (!q) return generalData.items.slice(0, 30);
     return generalData.items
       .filter((p) => p.nombre.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q))
-      .slice(0, 30);
+      .slice(0, 40);
   }, [generalData, productQuickSearch]);
 
   // Exportaciones Vista General
@@ -221,8 +328,11 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
       return;
     }
     try {
-      await exportarStockGeneralAExcel(filteredGeneralItems, `informe-stock-${new Date().toISOString().slice(0, 10)}.xlsx`);
-      toast.success('Archivo Excel generado correctamente');
+      await exportarStockGeneralAExcel(
+        filteredGeneralItems,
+        `informe-stock-${new Date().toISOString().slice(0, 10)}.xlsx`
+      );
+      toast.success('Archivo Excel con productos y movimientos generado correctamente');
     } catch {
       toast.error('Error al exportar a Excel');
     }
@@ -237,27 +347,37 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
       'SKU',
       'Producto',
       'Categoría',
-      'Ubicación',
-      'Precio Venta (RD$)',
       'Precio Compra (RD$)',
+      'Precio Venta (RD$)',
+      'Apertura',
+      'Compras (+)',
+      'Devoluciones (+)',
+      'Ventas (-)',
+      'Ajustes (-)',
       'Stock Actual',
       'Unidad',
       'Valor Compra (RD$)',
       'Valor Venta (RD$)',
       'Estado',
+      'Cant. Movimientos',
     ];
     const rows = filteredGeneralItems.map((p) => [
       p.sku,
       p.nombre,
       p.categoria,
-      p.ubicacion,
-      p.precio_venta,
       p.precio_costo,
+      p.precio_venta,
+      p.stock_apertura,
+      p.total_comprado,
+      p.total_devuelto,
+      p.total_vendido,
+      p.total_ajustado_salida,
       p.stock_actual,
       p.unidad,
       p.valor_compra,
       p.valor_venta,
       p.estado,
+      p.cantidad_movimientos,
     ]);
     exportarACSV(`informe-stock-${new Date().toISOString().slice(0, 10)}`, headers, rows);
     toast.success('Archivo CSV descargado correctamente');
@@ -288,17 +408,21 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
     }
     const headers = [
       'Tipo de Movimiento',
-      'Cambio de Cantidad',
-      'Nueva Cantidad (Saldo)',
-      'Fecha',
+      'Entrada (+)',
+      'Salida (-)',
+      'Stock Anterior',
+      'Stock Resultante',
+      'Fecha y Hora',
       'Número de Referencia / NCF',
       'Cliente / Proveedor / Responsable',
       'Notas',
     ];
     const rows = filteredKardexMovements.map((m) => [
       m.tipo,
-      m.cambio_cantidad,
-      m.nueva_cantidad,
+      m.cantidad_entrada,
+      m.cantidad_salida,
+      m.stock_anterior,
+      m.stock_resultante,
       m.fecha_formateada,
       m.numero_referencia,
       m.cliente_proveedor_info,
@@ -312,12 +436,11 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
     toast.success('Kardex en CSV descargado correctamente');
   };
 
-  // Si está cargando la vista general
   if (loadingGeneral && !generalData) return <ReportLoading />;
   if (errorGeneral && !generalData) return <ReportError error={errorGeneral} />;
 
   // =========================================================================
-  // VISTA 2: HISTORIAL DE EXISTENCIAS DE UN PRODUCTO (KARDEX - IMAGEN 2)
+  // VISTA 2: HISTORIAL DE EXISTENCIAS DE UN PRODUCTO (KARDEX INDIVIDUAL)
   // =========================================================================
   if (selectedProductId) {
     if (loadingKardex && !kardexData) return <ReportLoading />;
@@ -348,7 +471,7 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
             onClick={() => setSelectedProductId(null)}
             className="btn-secondary flex items-center gap-2 text-xs font-semibold self-start"
           >
-            <ArrowLeft size={15} /> Volver a Informe de Stock
+            <ArrowLeft size={15} /> Volver a todos los productos
           </button>
 
           {/* Selector de Producto tipo Combobox con autocompletado */}
@@ -414,7 +537,7 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
           </div>
         </div>
 
-        {/* Card de Encabezado y Resumen del Producto (Diseño idéntico a Imagen 2) */}
+        {/* Card de Encabezado y Resumen del Producto */}
         <div className="card p-5 space-y-4 border border-border/80 shadow-sm">
           <div>
             <h2 className="text-xl font-bold text-foreground uppercase tracking-tight flex items-center gap-2">
@@ -422,7 +545,8 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
               {prod?.nombre} ({prod?.sku})
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Ubicación: <strong className="text-foreground">{prod?.ubicacion}</strong> • Unidad: <strong className="text-foreground">{prod?.unidad}</strong>
+              Categoría: <strong className="text-foreground">{prod?.categoria}</strong> • Unidad:{' '}
+              <strong className="text-foreground">{prod?.unidad}</strong>
               {prod?.producto_base_id && (
                 <span className="ml-2 inline-flex items-center gap-1 bg-info/10 text-info px-2 py-0.5 rounded text-[11px] font-semibold">
                   <Layers size={11} /> Presentación vinculada ({prod.factor_conversion}x)
@@ -433,7 +557,6 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
 
           {/* Grid de 3 Columnas: Cantidades en, Cantidades fuera y Totales */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-3 border-t border-border">
-            {/* Columna 1: Cantidades en (Entradas) */}
             <div className="space-y-2 bg-success/5 p-3.5 rounded-xl border border-success/20">
               <div className="flex items-center gap-1.5 text-xs font-bold text-success uppercase tracking-wider">
                 <ArrowDownRight size={15} /> Cantidades en (Entradas)
@@ -458,13 +581,14 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-muted-foreground/80">
-                  <span>Transferencias de stock (En):</span>
-                  <span className="font-mono">0.00 {prod?.unidad}</span>
+                  <span>Ajustes positivos (En):</span>
+                  <span className="font-mono">
+                    {(res?.cantidades_en.transferencias_en || 0).toFixed(2)} {prod?.unidad}
+                  </span>
                 </div>
               </div>
             </div>
 
-            {/* Columna 2: Cantidades fuera (Salidas) */}
             <div className="space-y-2 bg-danger/5 p-3.5 rounded-xl border border-danger/20">
               <div className="flex items-center gap-1.5 text-xs font-bold text-danger uppercase tracking-wider">
                 <ArrowUpRight size={15} /> Cantidades fuera (Salidas)
@@ -477,7 +601,7 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Ajuste total de stock:</span>
+                  <span className="text-muted-foreground">Ajuste / Salida de stock:</span>
                   <span className="font-bold text-foreground font-mono">
                     {res?.cantidades_fuera.ajuste_total.toFixed(2)} {prod?.unidad}
                   </span>
@@ -488,14 +612,9 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
                     {res?.cantidades_fuera.total_devolucion_compra.toFixed(2)} {prod?.unidad}
                   </span>
                 </div>
-                <div className="flex justify-between items-center text-muted-foreground/80">
-                  <span>Transferencias de stock (Afuera):</span>
-                  <span className="font-mono">0.00 {prod?.unidad}</span>
-                </div>
               </div>
             </div>
 
-            {/* Columna 3: Totales */}
             <div className="space-y-2 bg-primary/5 p-3.5 rounded-xl border border-primary/25 flex flex-col justify-between">
               <div className="flex items-center gap-1.5 text-xs font-bold text-primary uppercase tracking-wider">
                 <Package size={15} /> Totales
@@ -517,7 +636,6 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
         {/* Toolbar de Filtros y Exportación de Kardex */}
         <div className="card p-4 space-y-3">
           <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 flex-wrap">
-            {/* Controles de entradas y búsqueda */}
             <div className="flex items-center gap-2 flex-wrap">
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <span>Mostrar</span>
@@ -527,18 +645,16 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
                     setKardexPageSize(Number(e.target.value));
                     setKardexCurrentPage(1);
                   }}
-                  className="input-field py-1 px-2 text-xs w-20"
+                  className="input-field py-1 px-2 text-xs w-24"
                 >
-                  <option value={10}>10</option>
                   <option value={25}>25</option>
                   <option value={50}>50</option>
                   <option value={100}>100</option>
                   <option value={-1}>Todos</option>
                 </select>
-                <span>entradas</span>
+                <span>movimientos</span>
               </div>
 
-              {/* Botones de Exportación */}
               <div className="flex items-center gap-1.5 pl-2 border-l border-border flex-wrap">
                 <button
                   type="button"
@@ -567,7 +683,6 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
               </div>
             </div>
 
-            {/* Filtros de Tipo y Búsqueda */}
             <div className="flex items-center gap-2 flex-wrap">
               <select
                 value={kardexTypeFilter}
@@ -612,7 +727,7 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
           </div>
         </div>
 
-        {/* Tabla de Movimientos de Kardex (Imagen 2) */}
+        {/* Tabla de Movimientos de Kardex */}
         <div className="card overflow-hidden border border-border shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -625,7 +740,7 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
                   <th className="px-3.5 py-3 text-right">Salida</th>
                   <th className="px-3.5 py-3 text-right">Stock Anterior</th>
                   <th className="px-3.5 py-3 text-right font-black text-foreground">Stock Resultante</th>
-                  <th className="px-3.5 py-3">Detalle / Cliente</th>
+                  <th className="px-3.5 py-3">Detalle / Cliente / Proveedor</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -640,109 +755,48 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
                     </td>
                   </tr>
                 ) : (
-                  paginatedKardexMovements.map((m) => {
-                    return (
-                      <tr key={m.id} className="hover:bg-secondary/25 transition-colors">
-                        {/* Fecha y Hora */}
-                        <td className="px-3.5 py-3 whitespace-nowrap text-muted-foreground font-mono">
-                          {m.fecha_formateada}
-                        </td>
-
-                        {/* Tipo de Movimiento */}
-                        <td className="px-3.5 py-3 whitespace-nowrap">
-                          {m.tipo === 'Ventas' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-info/10 text-info">
-                              <ShoppingCart size={11} /> Venta
-                            </span>
-                          )}
-                          {m.tipo === 'Compras' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-success/10 text-success">
-                              <ShoppingBag size={11} /> Compra
-                            </span>
-                          )}
-                          {m.tipo === 'Ajuste de Stock' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-warning/10 text-warning">
-                              <Sliders size={11} /> Ajuste
-                            </span>
-                          )}
-                          {m.tipo === 'Devolución de Venta' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400">
-                              <RotateCcw size={11} /> Devolución
-                            </span>
-                          )}
-                          {m.tipo === 'Devolución de Compra' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-danger/10 text-danger">
-                              <RotateCcw size={11} /> Dev. Compra
-                            </span>
-                          )}
-                          {m.tipo === 'Anulación' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400">
-                              <AlertCircle size={11} /> Anulación
-                            </span>
-                          )}
-                          {m.tipo === 'Edición de factura' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400">
-                              <Edit size={11} /> Edición Factura
-                            </span>
-                          )}
-                          {m.tipo === 'Transferencia' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-500/10 text-slate-600">
-                              <Layers size={11} /> Transferencia
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Número de Referencia o NCF */}
-                        <td className="px-3.5 py-3 whitespace-nowrap font-mono font-bold text-primary">
-                          {m.numero_referencia}
-                        </td>
-
-                        {/* Cantidad Entrada */}
-                        <td className="px-3.5 py-3 text-right font-mono font-bold text-success whitespace-nowrap">
-                          {m.cantidad_entrada > 0 ? `+${m.cantidad_entrada.toFixed(2)}` : '—'}
-                        </td>
-
-                        {/* Cantidad Salida */}
-                        <td className="px-3.5 py-3 text-right font-mono font-bold text-danger whitespace-nowrap">
-                          {m.cantidad_salida > 0 ? `-${m.cantidad_salida.toFixed(2)}` : '—'}
-                        </td>
-
-                        {/* Stock Anterior */}
-                        <td className="px-3.5 py-3 text-right font-mono text-muted-foreground whitespace-nowrap">
-                          {(m.stock_anterior ?? 0).toFixed(2)}
-                        </td>
-
-                        {/* Stock Resultante (Saldo acumulado) */}
-                        <td className="px-3.5 py-3 text-right font-mono font-extrabold text-foreground whitespace-nowrap">
-                          {(m.stock_resultante ?? m.nueva_cantidad ?? 0).toFixed(2)}
-                        </td>
-
-                        {/* Cliente / Proveedor / Info */}
-                        <td className="px-3.5 py-3 text-foreground font-medium max-w-xs truncate">
-                          {m.cliente_proveedor_info}
-                          {m.notas && (
-                            <span className="block text-[11px] text-muted-foreground italic truncate">
-                              {m.notas}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
+                  paginatedKardexMovements.map((m) => (
+                    <tr key={m.id} className="hover:bg-secondary/25 transition-colors">
+                      <td className="px-3.5 py-3 whitespace-nowrap text-muted-foreground font-mono">
+                        {m.fecha_formateada}
+                      </td>
+                      <td className="px-3.5 py-3 whitespace-nowrap">{renderMovementBadge(m.tipo)}</td>
+                      <td className="px-3.5 py-3 whitespace-nowrap font-mono font-bold text-primary">
+                        {m.numero_referencia}
+                      </td>
+                      <td className="px-3.5 py-3 text-right font-mono font-bold text-success whitespace-nowrap">
+                        {m.cantidad_entrada > 0 ? `+${m.cantidad_entrada.toFixed(2)}` : '—'}
+                      </td>
+                      <td className="px-3.5 py-3 text-right font-mono font-bold text-danger whitespace-nowrap">
+                        {m.cantidad_salida > 0 ? `-${m.cantidad_salida.toFixed(2)}` : '—'}
+                      </td>
+                      <td className="px-3.5 py-3 text-right font-mono text-muted-foreground whitespace-nowrap">
+                        {(m.stock_anterior ?? 0).toFixed(2)}
+                      </td>
+                      <td className="px-3.5 py-3 text-right font-mono font-extrabold text-foreground whitespace-nowrap">
+                        {(m.stock_resultante ?? m.nueva_cantidad ?? 0).toFixed(2)}
+                      </td>
+                      <td className="px-3.5 py-3 text-foreground font-medium max-w-xs truncate">
+                        {m.cliente_proveedor_info}
+                        {m.notas && (
+                          <span className="block text-[11px] text-muted-foreground italic truncate">
+                            {m.notas}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
           </div>
 
-          {/* Paginación Kardex */}
-          {filteredKardexMovements.length > 0 && (
+          {filteredKardexMovements.length > 0 && kardexPageSize !== -1 && (
             <div className="flex items-center justify-between p-3 border-t border-border bg-secondary/10 text-xs">
               <span className="text-muted-foreground">
                 Mostrando {Math.min((kardexCurrentPage - 1) * kardexPageSize + 1, filteredKardexMovements.length)} a{' '}
-                {kardexPageSize === -1
-                  ? filteredKardexMovements.length
-                  : Math.min(kardexCurrentPage * kardexPageSize, filteredKardexMovements.length)}{' '}
-                de {filteredKardexMovements.length} movimientos
+                {Math.min(kardexCurrentPage * kardexPageSize, filteredKardexMovements.length)} de{' '}
+                {filteredKardexMovements.length} movimientos
               </span>
               <div className="flex items-center gap-1">
                 <button
@@ -773,15 +827,14 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
   }
 
   // =========================================================================
-  // VISTA 1: INFORME DE STOCK GENERAL (IMAGEN 1)
+  // VISTA 1: INFORME DE STOCK GENERAL (TODOS LOS PRODUCTOS + SUS MOVIMIENTOS)
   // =========================================================================
   const general = generalData;
 
   return (
     <div className="space-y-5 animate-fadeIn">
-      {/* 4 Cards Superiores (Exactos a Imagen 1) */}
+      {/* 4 Cards Superiores */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Stock de cierre (Por precio de compra) */}
         <div className="card p-4 space-y-1 border border-border shadow-sm">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-tight">
             Stock de cierre (Por precio de compra)
@@ -789,10 +842,11 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
           <p className="text-2xl font-extrabold text-foreground font-mono mt-1">
             {formatRD(general?.stock_cierre_compra || 0)}
           </p>
-          <p className="text-[11px] text-muted-foreground">Valor total del inventario a costo</p>
+          <p className="text-[11px] text-muted-foreground">
+            {general?.total_productos || 0} productos en catálogo
+          </p>
         </div>
 
-        {/* Card 2: Stock de cierre (Por precio de venta) */}
         <div className="card p-4 space-y-1 border border-border shadow-sm">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-tight">
             Stock de cierre (Por precio de venta)
@@ -803,7 +857,6 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
           <p className="text-[11px] text-muted-foreground">Valor total estimado de venta</p>
         </div>
 
-        {/* Card 3: Beneficio potencial */}
         <div className="card p-4 space-y-1 border border-border shadow-sm">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-tight">
             Beneficio potencial
@@ -814,41 +867,59 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
           <p className="text-[11px] text-muted-foreground">Ganancia proyectada en inventario</p>
         </div>
 
-        {/* Card 4: Profit Margin % */}
         <div className="card p-4 space-y-1 border border-border shadow-sm">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-tight">
-            Profit Margin %
+            Margen de Rentabilidad %
           </p>
           <p className="text-2xl font-extrabold text-warning font-mono mt-1">
             {general?.profit_margin_pct?.toFixed(2) || '0.00'}%
           </p>
-          <p className="text-[11px] text-muted-foreground">Margen de rentabilidad global</p>
+          <p className="text-[11px] text-muted-foreground">
+            {general?.total_movimientos_global || 0} movimientos registrados
+          </p>
         </div>
       </div>
 
-      {/* Toolbar y Acciones (Imagen 1) */}
+      {/* Toolbar y Acciones */}
       <div className="card p-4 space-y-3">
         <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 flex-wrap">
-          {/* Selector de entradas y botones de exportación */}
+          {/* Selector de entradas, toggle de movimientos y botones de exportación */}
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span>Espectáculo</span>
+              <span>Mostrar</span>
               <select
                 value={pageSize}
                 onChange={(e) => {
                   setPageSize(Number(e.target.value));
                   setCurrentPage(1);
                 }}
-                className="input-field py-1 px-2 text-xs w-20"
+                className="input-field py-1 px-2 text-xs w-28 font-semibold"
               >
-                <option value={10}>10</option>
+                <option value={-1}>Todos ({filteredGeneralItems.length})</option>
                 <option value={25}>25</option>
                 <option value={50}>50</option>
                 <option value={100}>100</option>
-                <option value={-1}>Todas</option>
+                <option value={250}>250</option>
               </select>
-              <span>entradas</span>
+              <span>productos</span>
             </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                const next = !showAllMovementsInline;
+                setShowAllMovementsInline(next);
+                setExpandedProductIds({});
+              }}
+              className={`text-xs flex items-center gap-1.5 py-1.5 px-3 rounded-lg font-bold border transition-all ${
+                showAllMovementsInline
+                  ? 'bg-primary text-white border-primary shadow-xs'
+                  : 'bg-secondary/40 text-foreground border-border hover:bg-secondary'
+              }`}
+            >
+              <History size={13} />
+              {showAllMovementsInline ? 'Ocultar movimientos en tabla' : 'Mostrar movimientos de cada producto'}
+            </button>
 
             <div className="flex items-center gap-1.5 pl-2 border-l border-border flex-wrap">
               <button
@@ -857,15 +928,15 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
                 className="btn-secondary text-xs flex items-center gap-1 py-1 px-2.5"
                 title="Exportar tabla a formato CSV"
               >
-                <FileText size={13} /> Exportar a CSV
+                <FileText size={13} /> CSV
               </button>
               <button
                 type="button"
                 onClick={handleExportGeneralExcel}
                 className="btn-secondary text-xs flex items-center gap-1 py-1 px-2.5"
-                title="Exportar tabla a formato Excel"
+                title="Exportar productos y sus movimientos a Excel"
               >
-                <FileSpreadsheet size={13} /> Exportar a Excel
+                <FileSpreadsheet size={13} /> Excel
               </button>
               <button
                 type="button"
@@ -873,7 +944,7 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
                 className="btn-secondary text-xs flex items-center gap-1 py-1 px-2.5"
                 title="Imprimir informe actual"
               >
-                <Printer size={13} /> Impresión
+                <Printer size={13} /> Imprimir
               </button>
             </div>
           </div>
@@ -887,7 +958,7 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
                   setCategoryFilter(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="input-field py-1 px-2.5 text-xs w-36"
+                className="input-field py-1 px-2.5 text-xs w-40"
               >
                 <option value="all">Todas las categorías</option>
                 {categories.map((c) => (
@@ -904,9 +975,10 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
                 setStatusFilter(e.target.value as any);
                 setCurrentPage(1);
               }}
-              className="input-field py-1 px-2.5 text-xs w-32"
+              className="input-field py-1 px-2.5 text-xs w-44"
             >
-              <option value="all">Todos los stocks</option>
+              <option value="all">Todos los productos</option>
+              <option value="with_movements">Con ventas / compras / ajustes</option>
               <option value="ok">Con Stock (OK)</option>
               <option value="low">Stock Bajo</option>
               <option value="out">Agotados</option>
@@ -916,7 +988,7 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="text"
-                placeholder="Buscar por SKU, producto..."
+                placeholder="Buscar producto, SKU, factura..."
                 value={searchGeneral}
                 onChange={(e) => {
                   setSearchGeneral(e.target.value);
@@ -938,22 +1010,22 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
         </div>
       </div>
 
-      {/* Tabla Principal de Stock (Imagen 1) */}
+      {/* Tabla Principal de Stock con Movimientos Desplegables por Producto */}
       <div className="card overflow-hidden border border-border shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border bg-secondary/50 text-left text-muted-foreground font-semibold">
-                <th className="px-4 py-3 text-center">Acción</th>
-                <th className="px-4 py-3">SKU</th>
-                <th className="px-4 py-3">Producto</th>
-                <th className="px-4 py-3">Variación</th>
-                <th className="px-4 py-3">Categoría</th>
-                <th className="px-4 py-3">Ubicación</th>
-                <th className="px-4 py-3 text-right">Precio venta unitario</th>
-                <th className="px-4 py-3 text-right">Stock actual</th>
-                <th className="px-4 py-3 text-right">Valor actual (Por compra)</th>
-                <th className="px-4 py-3 text-right">Valor actual (Por venta)</th>
+                <th className="px-3 py-3 text-center">Movimientos / Kardex</th>
+                <th className="px-3 py-3">SKU</th>
+                <th className="px-3 py-3">Producto</th>
+                <th className="px-3 py-3">Categoría</th>
+                <th className="px-3 py-3 text-right">Precio Venta</th>
+                <th className="px-3 py-3 text-right text-success">Entradas (+)</th>
+                <th className="px-3 py-3 text-right text-danger">Salidas (-)</th>
+                <th className="px-3 py-3 text-right">Stock Actual</th>
+                <th className="px-3 py-3 text-right">Valor Compra</th>
+                <th className="px-3 py-3 text-right">Valor Venta</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -967,94 +1039,235 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
                 </tr>
               ) : (
                 paginatedGeneralItems.map((p) => {
+                  const expanded = isProductExpanded(p.id);
+                  const entriesWithoutOpening = p.total_comprado + p.total_devuelto + p.total_ajustado_entrada;
+
                   return (
-                    <tr key={p.id} className="hover:bg-secondary/25 transition-colors">
-                      {/* Botón Acción: Historial de existencias de productos (exacto a Imagen 1) */}
-                      <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedProductId(p.id)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/30 bg-primary/5 hover:bg-primary hover:text-white text-primary text-[11px] font-bold transition-all shadow-sm"
-                          title={`Ver historial de existencias y movimientos para ${p.nombre}`}
-                        >
-                          <History size={13} />
-                          <span>Historial de existencias</span>
-                        </button>
-                      </td>
+                    <React.Fragment key={p.id}>
+                      <tr className="hover:bg-secondary/25 transition-colors">
+                        {/* Botones de Acción: Ver movimientos en fila + Abrir Kardex individual */}
+                        <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => toggleProductExpanded(p.id)}
+                              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${
+                                expanded
+                                  ? 'border-primary bg-primary/10 text-primary'
+                                  : 'border-border bg-secondary/40 text-foreground hover:bg-secondary'
+                              }`}
+                              title="Desplegar u ocultar los movimientos de este producto"
+                            >
+                              {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                              <span>Movimientos ({p.cantidad_movimientos})</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedProductId(p.id)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-primary/30 bg-primary/5 hover:bg-primary hover:text-white text-primary text-[11px] font-bold transition-all shadow-2xs"
+                              title={`Abrir vista detallada de Kardex para ${p.nombre}`}
+                            >
+                              <History size={13} />
+                              <span>Kardex</span>
+                            </button>
+                          </div>
+                        </td>
 
-                      {/* SKU */}
-                      <td className="px-4 py-3 font-mono font-bold text-primary whitespace-nowrap">
-                        {p.sku}
-                      </td>
+                        {/* SKU */}
+                        <td className="px-3 py-3 font-mono font-bold text-primary whitespace-nowrap">
+                          {p.sku}
+                        </td>
 
-                      {/* Producto */}
-                      <td className="px-4 py-3 font-bold text-foreground">
-                        <div className="max-w-xs truncate">{p.nombre}</div>
-                        {p.codigo_barras && p.codigo_barras !== p.sku && (
-                          <span className="text-[10px] text-muted-foreground font-mono">
-                            CB: {p.codigo_barras}
+                        {/* Producto */}
+                        <td className="px-3 py-3 font-bold text-foreground">
+                          <div className="max-w-xs truncate">{p.nombre}</div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {p.codigo_barras && p.codigo_barras !== p.sku && (
+                              <span className="text-[10px] text-muted-foreground font-mono">
+                                CB: {p.codigo_barras}
+                              </span>
+                            )}
+                            {p.producto_base_id && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] text-info bg-info/10 px-1.5 py-0.2 rounded font-medium">
+                                <Layers size={10} /> {p.unidad} ({p.factor_conversion}x)
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Categoría */}
+                        <td className="px-3 py-3 text-muted-foreground whitespace-nowrap">
+                          {p.categoria}
+                        </td>
+
+                        {/* Precio de venta unitario */}
+                        <td className="px-3 py-3 text-right font-mono font-bold text-foreground whitespace-nowrap">
+                          {formatRD(p.precio_venta)}
+                        </td>
+
+                        {/* Entradas (+) */}
+                        <td className="px-3 py-3 text-right font-mono whitespace-nowrap">
+                          {entriesWithoutOpening > 0 ? (
+                            <div>
+                              <span className="font-bold text-success">+{entriesWithoutOpening.toFixed(2)}</span>
+                              <span className="block text-[10px] text-muted-foreground">
+                                Apertura: {p.stock_apertura.toFixed(0)}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground" title="Stock de apertura">
+                              {p.stock_apertura > 0 ? `Ap: ${p.stock_apertura.toFixed(0)}` : '0'}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Salidas (-) */}
+                        <td className="px-3 py-3 text-right font-mono whitespace-nowrap">
+                          {p.total_salidas > 0 ? (
+                            <div>
+                              <span className="font-bold text-danger">-{p.total_salidas.toFixed(2)}</span>
+                              {p.total_vendido > 0 && (
+                                <span className="block text-[10px] text-muted-foreground">
+                                  Vend: {p.total_vendido.toFixed(2)}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">0</span>
+                          )}
+                        </td>
+
+                        {/* Stock actual */}
+                        <td className="px-3 py-3 text-right whitespace-nowrap font-mono font-bold">
+                          <span
+                            className={
+                              p.estado === 'Agotado'
+                                ? 'text-danger'
+                                : p.estado === 'Bajo'
+                                ? 'text-warning font-semibold'
+                                : 'text-foreground'
+                            }
+                          >
+                            {p.stock_actual.toLocaleString('es-DO', {
+                              minimumFractionDigits: p.es_pesado ? 2 : 0,
+                            })}{' '}
+                            <span className="text-[10px] uppercase font-semibold text-muted-foreground">
+                              {p.unidad}
+                            </span>
                           </span>
-                        )}
-                      </td>
+                        </td>
 
-                      {/* Variación */}
-                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                        {p.producto_base_id ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] text-info bg-info/10 px-2 py-0.5 rounded font-medium">
-                            <Layers size={11} /> {p.unidad} ({p.factor_conversion}x)
-                          </span>
-                        ) : p.es_pesado ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] text-warning bg-warning/10 px-2 py-0.5 rounded font-medium">
-                            Pesado ({p.unidad})
-                          </span>
-                        ) : (
-                          <span className="text-[11px] text-muted-foreground">Estándar ({p.unidad})</span>
-                        )}
-                      </td>
+                        {/* Valor Compra */}
+                        <td className="px-3 py-3 text-right font-mono text-muted-foreground whitespace-nowrap">
+                          {formatRD(p.valor_compra)}
+                        </td>
 
-                      {/* Categoría */}
-                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                        {p.categoria}
-                      </td>
+                        {/* Valor Venta */}
+                        <td className="px-3 py-3 text-right font-mono font-bold text-primary whitespace-nowrap">
+                          {formatRD(p.valor_venta)}
+                        </td>
+                      </tr>
 
-                      {/* Ubicación */}
-                      <td className="px-4 py-3 text-muted-foreground font-medium text-[11px] whitespace-nowrap uppercase">
-                        {p.ubicacion}
-                      </td>
+                      {/* Sub-tabla con los movimientos del producto */}
+                      {expanded && (
+                        <tr className="bg-secondary/10">
+                          <td colSpan={10} className="px-4 py-3 border-t border-border/60">
+                            <div className="rounded-xl border border-border/80 bg-card overflow-hidden shadow-2xs">
+                              <div className="px-3.5 py-2 bg-secondary/30 border-b border-border/60 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                                <div className="font-bold text-foreground flex items-center gap-1.5">
+                                  <History size={13} className="text-primary" />
+                                  <span>
+                                    Movimientos de {p.nombre} ({p.sku})
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-3 text-muted-foreground font-mono">
+                                  <span>
+                                    Apertura: <strong className="text-foreground">{p.stock_apertura.toFixed(2)}</strong>
+                                  </span>
+                                  <span>
+                                    Compras: <strong className="text-success">+{p.total_comprado.toFixed(2)}</strong>
+                                  </span>
+                                  {p.total_devuelto > 0 && (
+                                    <span>
+                                      Devoluciones: <strong className="text-success">+{p.total_devuelto.toFixed(2)}</strong>
+                                    </span>
+                                  )}
+                                  <span>
+                                    Ventas: <strong className="text-danger">-{p.total_vendido.toFixed(2)}</strong>
+                                  </span>
+                                  {p.total_ajustado_salida > 0 && (
+                                    <span>
+                                      Ajustes: <strong className="text-warning">-{p.total_ajustado_salida.toFixed(2)}</strong>
+                                    </span>
+                                  )}
+                                  <span>
+                                    Stock Actual: <strong className="text-primary">{p.stock_actual.toFixed(2)} {p.unidad}</strong>
+                                  </span>
+                                </div>
+                              </div>
 
-                      {/* Precio de venta unitario */}
-                      <td className="px-4 py-3 text-right font-mono font-bold text-foreground whitespace-nowrap">
-                        {formatRD(p.precio_venta)}
-                      </td>
-
-                      {/* Stock actual con unidad y badge */}
-                      <td className="px-4 py-3 text-right whitespace-nowrap font-mono font-bold">
-                        <span
-                          className={
-                            p.estado === 'Agotado'
-                              ? 'text-danger'
-                              : p.estado === 'Bajo'
-                              ? 'text-warning font-semibold'
-                              : 'text-foreground'
-                          }
-                        >
-                          {p.stock_actual.toLocaleString('es-DO', { minimumFractionDigits: p.es_pesado ? 2 : 0 })}{' '}
-                          <span className="text-[10px] uppercase font-semibold text-muted-foreground">
-                            {p.unidad}
-                          </span>
-                        </span>
-                      </td>
-
-                      {/* Valor actual de las acciones (Por precio de compra) */}
-                      <td className="px-4 py-3 text-right font-mono text-muted-foreground whitespace-nowrap">
-                        {formatRD(p.valor_compra)}
-                      </td>
-
-                      {/* Valor actual de las acciones (Por precio de venta) */}
-                      <td className="px-4 py-3 text-right font-mono font-bold text-primary whitespace-nowrap">
-                        {formatRD(p.valor_venta)}
-                      </td>
-                    </tr>
+                              {p.movimientos.length === 0 ? (
+                                <div className="px-4 py-3 text-center text-[11px] text-muted-foreground">
+                                  Sin movimientos registrados (Stock en 0).
+                                </div>
+                              ) : (
+                                <div className="overflow-x-auto max-h-64 overflow-y-auto">
+                                  <table className="w-full text-[11px]">
+                                    <thead>
+                                      <tr className="border-b border-border/60 bg-secondary/20 text-left text-muted-foreground font-semibold">
+                                        <th className="px-3 py-1.5">Fecha y Hora</th>
+                                        <th className="px-3 py-1.5">Tipo de Movimiento</th>
+                                        <th className="px-3 py-1.5">Documento / Referencia</th>
+                                        <th className="px-3 py-1.5 text-right">Entrada (+)</th>
+                                        <th className="px-3 py-1.5 text-right">Salida (-)</th>
+                                        <th className="px-3 py-1.5 text-right">Stock Anterior</th>
+                                        <th className="px-3 py-1.5 text-right font-bold text-foreground">Stock Resultante</th>
+                                        <th className="px-3 py-1.5">Cliente / Proveedor / Detalle</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-border/40">
+                                      {p.movimientos.map((m) => (
+                                        <tr key={m.id} className="hover:bg-secondary/20">
+                                          <td className="px-3 py-1.5 whitespace-nowrap font-mono text-muted-foreground">
+                                            {m.fecha_formateada}
+                                          </td>
+                                          <td className="px-3 py-1.5 whitespace-nowrap">
+                                            {renderMovementBadge(m.tipo)}
+                                          </td>
+                                          <td className="px-3 py-1.5 whitespace-nowrap font-mono font-bold text-primary">
+                                            {m.numero_referencia}
+                                          </td>
+                                          <td className="px-3 py-1.5 text-right font-mono font-bold text-success whitespace-nowrap">
+                                            {m.cantidad_entrada > 0 ? `+${m.cantidad_entrada.toFixed(2)}` : '—'}
+                                          </td>
+                                          <td className="px-3 py-1.5 text-right font-mono font-bold text-danger whitespace-nowrap">
+                                            {m.cantidad_salida > 0 ? `-${m.cantidad_salida.toFixed(2)}` : '—'}
+                                          </td>
+                                          <td className="px-3 py-1.5 text-right font-mono text-muted-foreground whitespace-nowrap">
+                                            {m.stock_anterior.toFixed(2)}
+                                          </td>
+                                          <td className="px-3 py-1.5 text-right font-mono font-extrabold text-foreground whitespace-nowrap">
+                                            {m.stock_resultante.toFixed(2)}
+                                          </td>
+                                          <td className="px-3 py-1.5 text-foreground truncate max-w-xs">
+                                            {m.cliente_proveedor_info}
+                                            {m.notas && m.notas !== m.cliente_proveedor_info && (
+                                              <span className="ml-1 text-muted-foreground italic">
+                                                ({m.notas})
+                                              </span>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })
               )}
@@ -1066,33 +1279,38 @@ export default function StockDetailReport({ dateFrom: _dateFrom, dateTo: _dateTo
         {filteredGeneralItems.length > 0 && (
           <div className="flex items-center justify-between p-3 border-t border-border bg-secondary/10 text-xs">
             <span className="text-muted-foreground">
-              Mostrando {Math.min((currentPage - 1) * pageSize + 1, filteredGeneralItems.length)} a{' '}
+              Mostrando{' '}
               {pageSize === -1
-                ? filteredGeneralItems.length
-                : Math.min(currentPage * pageSize, filteredGeneralItems.length)}{' '}
-              de {filteredGeneralItems.length} entradas
+                ? `todos los ${filteredGeneralItems.length}`
+                : `${Math.min((currentPage - 1) * pageSize + 1, filteredGeneralItems.length)} a ${Math.min(
+                    currentPage * pageSize,
+                    filteredGeneralItems.length
+                  )} de ${filteredGeneralItems.length}`}{' '}
+              productos
             </span>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                disabled={currentPage <= 1}
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                className="btn-secondary py-1 px-2 text-xs disabled:opacity-40"
-              >
-                <ChevronLeft size={14} /> Anterior
-              </button>
-              <span className="px-2 font-bold text-foreground font-mono">
-                {currentPage} / {totalPagesGeneral}
-              </span>
-              <button
-                type="button"
-                disabled={currentPage >= totalPagesGeneral}
-                onClick={() => setCurrentPage((p) => Math.min(totalPagesGeneral, p + 1))}
-                className="btn-secondary py-1 px-2 text-xs disabled:opacity-40"
-              >
-                Siguiente <ChevronRight size={14} />
-              </button>
-            </div>
+            {pageSize !== -1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="btn-secondary py-1 px-2 text-xs disabled:opacity-40"
+                >
+                  <ChevronLeft size={14} /> Anterior
+                </button>
+                <span className="px-2 font-bold text-foreground font-mono">
+                  {currentPage} / {totalPagesGeneral}
+                </span>
+                <button
+                  type="button"
+                  disabled={currentPage >= totalPagesGeneral}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPagesGeneral, p + 1))}
+                  className="btn-secondary py-1 px-2 text-xs disabled:opacity-40"
+                >
+                  Siguiente <ChevronRight size={14} />
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
