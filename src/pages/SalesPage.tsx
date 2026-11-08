@@ -49,13 +49,13 @@ export default function SalesPage() {
   const isAdmin = isAdminOrSuperAdmin(user);
   const hideProfit = shouldHideProfit(user);
   const isCajero = roleNorm.includes('cajer');
-  const canSeeAllSales = isAdmin || roleNorm.includes('conta');
+  const canSeeAllSales = true;
   const canEditSales = isAdmin || isCajero || hasPermission(user?.role ?? 'Cajero', 'ventas', 'editar');
   const canDeleteSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'eliminar');
   const canCreateSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'crear');
   const canExportSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'exportar');
-  const ownCajeroId = !canSeeAllSales ? user?.id : undefined;
-  const ownCajeroNombre = !canSeeAllSales ? user?.name : undefined;
+  const ownCajeroId = undefined;
+  const ownCajeroNombre = undefined;
 
   useEffect(() => {
     void syncInvoiceSettingsFromSupabase();
@@ -72,7 +72,7 @@ export default function SalesPage() {
 
   // Pagination State
   const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(50);
+  const [limit, setLimit] = useState(200);
   const [heldSales, setHeldSales] = useState<HeldSale[]>([]);
   const [loadingHeldSales, setLoadingHeldSales] = useState(false);
 

@@ -389,7 +389,134 @@ function normalizeVentaAmounts(row: any, detalles: DetalleVenta[], meta?: VentaM
 export function getLocalVentas(): VentaConDetalle[] {
   try {
     const raw = localStorage.getItem(LOCAL_VENTAS_KEY);
-    return raw ? (JSON.parse(raw) as VentaConDetalle[]) : [];
+    const list: VentaConDetalle[] = raw ? (JSON.parse(raw) as VentaConDetalle[]) : [];
+    const metaMap = getVentasMetaMap();
+    const existingIds = new Set(list.map((v) => String(v.id)));
+    const existingNums = new Set(
+      list.map((v) => String(v.numero_factura || '').trim().toUpperCase()).filter(Boolean)
+    );
+    let added = false;
+
+    // 1. Recuperar facturas que estén en el mapa de metadatos pero no en la lista local
+    for (const [vid, meta] of Object.entries(metaMap)) {
+      const num = String(meta?.numero_factura || '').trim().toUpperCase();
+      if (existingIds.has(vid) || (num && existingNums.has(num))) continue;
+      if (!meta || !(Number(meta.monto_total ?? 0) > 0 || (meta.detalle_ventas && meta.detalle_ventas.length > 0))) {
+        continue;
+      }
+      const reconstructed: VentaConDetalle = {
+        id: vid,
+        numero_factura: meta.numero_factura || `FAC-${vid.slice(0, 8).toUpperCase()}`,
+        ncf: meta.ncf ?? null,
+        tipo_ncf: meta.tipo_ncf ?? null,
+        sucursal_id: null,
+        cajero_id: meta.cajero_id ?? null,
+        cliente_id: meta.cliente_id ?? null,
+        caja_id: meta.caja_id ?? '1',
+        subtotal: round2(Number(meta.subtotal ?? meta.monto_total ?? 0)),
+        monto_impuesto: round2(Number(meta.monto_impuesto ?? 0)),
+        monto_descuento: round2(Number(meta.monto_descuento ?? 0)),
+        monto_total: round2(Number(meta.monto_total ?? 0)),
+        costo_total: round2(Number(meta.costo_total ?? 0)),
+        metodo_pago: meta.metodo_pago || 'efectivo',
+        monto_pagado: round2(Number(meta.monto_pagado ?? meta.monto_total ?? 0)),
+        monto_efectivo: round2(Number(meta.monto_efectivo ?? 0)),
+        monto_tarjeta: round2(Number(meta.monto_tarjeta ?? 0)),
+        monto_transferencia: round2(Number(meta.monto_transferencia ?? 0)),
+        monto_credito: round2(Number(meta.monto_credito ?? 0)),
+        devuelta_entregada: round2(Number(meta.devuelta_entregada ?? 0)),
+        estado: 'completada',
+        creado_en: (meta as any).creado_en || new Date().toISOString(),
+        cliente_nombre: meta.cliente_nombre || 'Cliente general',
+        cajero_nombre: meta.cajero_nombre || 'Cajero',
+        detalle_ventas: meta.detalle_ventas ?? [],
+      };
+      list.push(reconstructed);
+      existingIds.add(vid);
+      if (num) existingNums.add(num);
+      added = true;
+    }
+
+    // 2. Recuperar facturas fiscales emitidas en mercato_fiscal_invoices que no estén en la lista
+    try {
+      const rawFiscal = localStorage.getItem('mercato_fiscal_invoices');
+      if (rawFiscal) {
+        const fiscalList = JSON.parse(rawFiscal) as any[];
+        for (const fi of fiscalList) {
+          const fid = String(fi.venta_id || fi.id || '');
+          const fnum = String(fi.numero_factura || fi.ncf || '').trim().toUpperCase();
+          if (!fid || existingIds.has(fid) || (fnum && existingNums.has(fnum))) continue;
+          const tsMatch = String(fi.id || '').match(/inv-(\d{10,15})/);
+          const createdIso = tsMatch
+            ? new Date(Number(tsMatch[1])).toISOString()
+            : new Date().toISOString();
+          const items: DetalleVenta[] = Array.isArray(fi.items)
+            ? fi.items.map((it: any, idx: number) => ({
+                id: `${fid}-item-${idx + 1}`,
+                venta_id: fid,
+                producto_id: null,
+                combo_id: null,
+                tipo_item: 'producto' as TipoItemVenta,
+                nombre_item: it.name || 'Producto',
+                precio_unitario: round2(Number(it.price || 0)),
+                costo_unitario: 0,
+                cantidad: Number(it.qty || 1),
+                porcentaje_impuesto: 18,
+                subtotal: round2(Number(it.subtotal ?? Number(it.price || 0) * Number(it.qty || 1))),
+              }))
+            : [];
+          const recFiscal: VentaConDetalle = {
+            id: fid,
+            numero_factura: fi.numero_factura || `FAC-${fid.replace(/^inv-/, '').slice(-6)}`,
+            ncf: fi.ncf || null,
+            tipo_ncf: fi.ncfType || null,
+            sucursal_id: null,
+            cajero_id: null,
+            cliente_id: null,
+            caja_id: '1',
+            subtotal: round2(Number(fi.subtotal || fi.total || 0)),
+            monto_impuesto: round2(Number(fi.itbis || 0)),
+            monto_descuento: 0,
+            monto_total: round2(Number(fi.total || 0)),
+            costo_total: 0,
+            metodo_pago: (fi.paymentMethod === 'mixto' ? 'mixto' : 'efectivo') as MetodoPago,
+            monto_pagado: round2(Number(fi.cashReceived || fi.total || 0)),
+            monto_efectivo: round2(Number(fi.montoEfectivo ?? fi.total ?? 0)),
+            monto_tarjeta: round2(Number(fi.montoTarjeta ?? 0)),
+            monto_transferencia: round2(Number(fi.montoTransferencia ?? 0)),
+            monto_credito: round2(Number(fi.montoCredito ?? 0)),
+            devuelta_entregada: round2(Number(fi.change ?? 0)),
+            estado: 'completada',
+            creado_en: createdIso,
+            cliente_nombre: fi.companyName || 'Consumidor Final',
+            cajero_nombre: fi.cashier || 'Cajero',
+            detalle_ventas: items,
+          };
+          list.push(recFiscal);
+          existingIds.add(fid);
+          if (fnum) existingNums.add(fnum);
+          added = true;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // Ordenar siempre por hora exacta de emisión (más reciente primero)
+    list.sort((a, b) => {
+      const ta = a.creado_en ? new Date(a.creado_en).getTime() : 0;
+      const tb = b.creado_en ? new Date(b.creado_en).getTime() : 0;
+      return (isNaN(tb) ? 0 : tb) - (isNaN(ta) ? 0 : ta);
+    });
+
+    if (added) {
+      try {
+        localStorage.setItem(LOCAL_VENTAS_KEY, JSON.stringify(list.slice(0, 1000)));
+      } catch {
+        // ignore
+      }
+    }
+    return list;
   } catch {
     return [];
   }
@@ -643,17 +770,92 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
   };
 
   const sb = getSupabase();
+  let resultado: ResultadoVenta | null = null;
+
   const { data, error } = await sb.rpc('procesar_venta_pos', { p_payload: sanitizedPayload });
-  if (error) {
-    console.error('Error al ejecutar procesar_venta_pos en Supabase:', error);
-    if (error.code === '23502' || error.message?.includes('monto_pagado')) {
-      throw new Error(
-        'Error de base de datos: La función procesar_venta_pos requiere aplicar la migración 023 en Supabase para registrar el monto_pagado correctamente.'
-      );
+  if (!error && data) {
+    resultado = data as ResultadoVenta;
+  } else {
+    console.warn('Reintentando procesar_venta_pos sin FKs opcionales:', error?.message);
+    const retryPayload = {
+      ...sanitizedPayload,
+      cajero_id: null,
+      cliente_id: null,
+      sucursal_id: null,
+    };
+    const retryRpc = await sb.rpc('procesar_venta_pos', { p_payload: retryPayload });
+    if (!retryRpc.error && retryRpc.data) {
+      resultado = retryRpc.data as ResultadoVenta;
+    } else {
+      // Fallback de inserción directa en tabla ventas + detalle_ventas para no perder nunca una factura emitida
+      const fallbackId = crypto.randomUUID();
+      const fallbackNumero =
+        payload.numero_factura ||
+        `FAC-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${fallbackId.slice(0, 8).toUpperCase()}`;
+      try {
+        const { data: insertedVenta, error: directErr } = await sb
+          .from('ventas')
+          .insert({
+            id: fallbackId,
+            numero_factura: fallbackNumero,
+            ncf: payload.ncf ?? null,
+            tipo_ncf: payload.tipo_ncf ?? null,
+            cajero_id: null,
+            cliente_id: null,
+            caja_id: sanitizedPayload.caja_id,
+            subtotal: exactSubtotal,
+            monto_impuesto: exactTax,
+            monto_descuento: exactDiscount,
+            monto_total: exactTotal,
+            costo_total: exactCostoTotal,
+            metodo_pago: payload.metodo_pago,
+            monto_pagado: sanitizedPayload.monto_pagado,
+            monto_efectivo: sanitizedPayload.monto_efectivo,
+            monto_tarjeta: sanitizedPayload.monto_tarjeta,
+            monto_transferencia: sanitizedPayload.monto_transferencia,
+            monto_credito: sanitizedPayload.monto_credito,
+            devuelta_entregada: sanitizedPayload.devuelta_entregada,
+            estado: 'completada',
+          })
+          .select('id, numero_factura, ncf')
+          .single();
+
+        if (!directErr && insertedVenta) {
+          resultado = {
+            venta_id: String(insertedVenta.id),
+            numero_factura: String(insertedVenta.numero_factura || fallbackNumero),
+            ncf: insertedVenta.ncf ?? payload.ncf ?? null,
+          };
+          if (sanitizedPayload.items.length > 0) {
+            await sb.from('detalle_ventas').insert(
+              sanitizedPayload.items.map((it) => ({
+                venta_id: resultado!.venta_id,
+                producto_id: it.producto_id,
+                combo_id: it.combo_id,
+                tipo_item: it.tipo_item,
+                nombre_item: it.nombre_item,
+                precio_unitario: it.precio_unitario,
+                costo_unitario: it.costo_unitario,
+                cantidad: it.cantidad,
+                porcentaje_impuesto: it.porcentaje_impuesto,
+                subtotal: it.subtotal,
+              }))
+            );
+          }
+        }
+      } catch {
+        // Respaldo local garantizado abajo
+      }
+
+      if (!resultado) {
+        resultado = {
+          venta_id: fallbackId,
+          numero_factura: fallbackNumero,
+          ncf: payload.ncf ?? null,
+        };
+      }
     }
-    throw new Error(error.message || 'Error al registrar la venta en la base de datos');
   }
-  const resultado = data as ResultadoVenta;
 
   if (resultado?.venta_id) {
     const localItems: Array<DetalleVenta & { sku?: string | null }> = payload.items.map((it, idx) => ({
@@ -726,7 +928,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
         detalle_ventas: localItems,
       };
       const existingLocal = getLocalVentas().filter((v) => v.id !== resultado.venta_id);
-      saveLocalVentas([mirroredVenta, ...existingLocal].slice(0, 300));
+      saveLocalVentas([mirroredVenta, ...existingLocal].slice(0, 1000));
     } catch {
       // ignore local mirror error
     }
@@ -835,6 +1037,11 @@ export async function obtenerHistorialVentas(params: {
     if (params.excluirAnuladas) {
       list = list.filter((v) => v.estado !== 'anulada' && (v.estado as string) !== 'cancelled');
     }
+    list.sort((a, b) => {
+      const ta = a.creado_en ? new Date(a.creado_en).getTime() : 0;
+      const tb = b.creado_en ? new Date(b.creado_en).getTime() : 0;
+      return (isNaN(tb) ? 0 : tb) - (isNaN(ta) ? 0 : ta);
+    });
     return { datos: list.slice(desde, hasta + 1), total: list.length };
   }
 
@@ -862,13 +1069,23 @@ export async function obtenerHistorialVentas(params: {
         q = q.or(orClauses.join(','));
       }
     }
-    if (params.fechaInicio) q = q.gte('creado_en', params.fechaInicio);
+    if (params.fechaInicio) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(params.fechaInicio)) {
+        const [y, m, d] = params.fechaInicio.split('-').map(Number);
+        const localStart = new Date(y, m - 1, d, 0, 0, 0, 0);
+        q = q.gte('creado_en', !isNaN(localStart.getTime()) ? localStart.toISOString() : params.fechaInicio);
+      } else {
+        q = q.gte('creado_en', params.fechaInicio);
+      }
+    }
     if (params.fechaFin) {
-      const localEnd = new Date(`${params.fechaFin}T23:59:59.999`);
-      const endIso = !isNaN(localEnd.getTime())
-        ? localEnd.toISOString()
-        : `${params.fechaFin}T23:59:59`;
-      q = q.lte('creado_en', endIso);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(params.fechaFin)) {
+        const [y, m, d] = params.fechaFin.split('-').map(Number);
+        const localEnd = new Date(y, m - 1, d, 23, 59, 59, 999);
+        q = q.lte('creado_en', !isNaN(localEnd.getTime()) ? localEnd.toISOString() : `${params.fechaFin}T23:59:59`);
+      } else {
+        q = q.lte('creado_en', params.fechaFin);
+      }
     }
     if (params.cajaId) {
       if (Array.isArray(params.cajaId)) {
@@ -937,18 +1154,38 @@ export async function obtenerHistorialVentas(params: {
   const localList = getLocalVentas();
   const remoteRows: any[] = data ?? [];
   const remoteIds = new Set(remoteRows.map((r) => String(r.id)));
-  const unmergedLocal = localList.filter((lv) => !remoteIds.has(String(lv.id)));
+  const remoteNums = new Set(
+    remoteRows.map((r) => String(r.numero_factura || '').trim().toUpperCase()).filter(Boolean)
+  );
+  const unmergedLocal = localList.filter((lv) => {
+    const lid = String(lv.id);
+    const lnum = String(lv.numero_factura || '').trim().toUpperCase();
+    return !remoteIds.has(lid) && (!lnum || !remoteNums.has(lnum));
+  });
 
   const matchingLocal = unmergedLocal.filter((lv) => {
     if (params.excluirAnuladas && (lv.estado === 'anulada' || (lv.estado as string) === 'cancelled')) return false;
+    if (params.busqueda?.trim()) {
+      const q = params.busqueda.trim().toLowerCase();
+      const coreQ = q.replace(/^(?:fac|ven|vnt|vta|fact|factura|inv|doc)[-_:\s]*/i, '').trim();
+      const num = (lv.numero_factura || '').toLowerCase();
+      const numCore = num.replace(/^(?:fac|ven|vnt|vta|fact|factura|inv|doc)[-_:\s]*/i, '').trim();
+      const matchSearch =
+        num.includes(q) ||
+        (coreQ.length >= 2 && numCore.includes(coreQ)) ||
+        (lv.ncf ?? '').toLowerCase().includes(q) ||
+        (lv.cliente_nombre ?? '').toLowerCase().includes(q) ||
+        (lv.cajero_nombre ?? '').toLowerCase().includes(q);
+      if (!matchSearch) return false;
+    }
     if (params.fechaInicio || params.fechaFin) {
       const utcD = String(lv.creado_en || '').slice(0, 10);
       const dt = lv.creado_en ? new Date(lv.creado_en) : null;
       const localD = dt && !isNaN(dt.getTime()) ? dt.toLocaleDateString('en-CA') : utcD;
       const afterStart =
-        !params.fechaInicio || localD >= params.fechaInicio || utcD >= params.fechaInicio;
+        !params.fechaInicio || localD >= params.fechaInicio.slice(0, 10) || utcD >= params.fechaInicio.slice(0, 10);
       const beforeEnd =
-        !params.fechaFin || localD <= params.fechaFin || utcD <= params.fechaFin;
+        !params.fechaFin || localD <= params.fechaFin.slice(0, 10) || utcD <= params.fechaFin.slice(0, 10);
       if (!afterStart || !beforeEnd) return false;
     }
     if (params.cajaId) {
@@ -1083,10 +1320,20 @@ export async function obtenerHistorialVentas(params: {
       if (!cajeroIdIsUuid && !v.cajero_id && !targetName) return true;
       return false;
     });
+  }
+
+  // Ordenar todas las facturas estrictamente según la fecha y hora exacta en que se emitieron (más recientes primero)
+  datos.sort((a, b) => {
+    const ta = a.creado_en ? new Date(a.creado_en).getTime() : 0;
+    const tb = b.creado_en ? new Date(b.creado_en).getTime() : 0;
+    return (isNaN(tb) ? 0 : tb) - (isNaN(ta) ? 0 : ta);
+  });
+
+  if (params.cajeroId || params.cajeroNombre) {
     return { datos, total: datos.length };
   }
 
-  return { datos, total: Math.max(count ?? 0, datos.length) };
+  return { datos, total: Math.max((count ?? 0) + matchingLocal.length, datos.length) };
 }
 
 /**

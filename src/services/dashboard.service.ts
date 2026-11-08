@@ -15,10 +15,22 @@ export const emptyMetricas = (periodo: MetricasDashboard['periodo']): MetricasDa
   productos_activos: 0,
 });
 
-export function getRangoFechasPeriodo(periodo: 'hoy' | 'semana' | 'mes'): { desde: Date; hasta: Date } {
+export function getRangoFechasPeriodo(
+  periodo: 'hoy' | 'semana' | 'mes' | 'dia',
+  fechaEspecifica?: string
+): { desde: Date; hasta: Date } {
   const now = new Date();
 
-  if (periodo === 'hoy') {
+  if ((periodo === 'dia' || /^\d{4}-\d{2}-\d{2}$/.test(fechaEspecifica || '')) && fechaEspecifica) {
+    const [y, m, d] = fechaEspecifica.split('-').map(Number);
+    if (y && m && d) {
+      const desde = new Date(y, m - 1, d, 0, 0, 0, 0);
+      const hasta = new Date(y, m - 1, d, 23, 59, 59, 999);
+      return { desde, hasta };
+    }
+  }
+
+  if (periodo === 'hoy' || periodo === 'dia') {
     // 00:00:00.000 a 23:59:59.999 del día local en la zona horaria del usuario (evita truncados UTC a las 8 p.m.)
     const desde = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     const hasta = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
@@ -64,11 +76,13 @@ export function getEffectiveSaleTotal(v: any): number {
 }
 
 export async function obtenerMetricasDashboard(
-  periodo: 'hoy' | 'semana' | 'mes' = 'hoy',
-  signal?: AbortSignal
+  periodo: 'hoy' | 'semana' | 'mes' | 'dia' = 'hoy',
+  signal?: AbortSignal,
+  fechaEspecifica?: string
 ): Promise<MetricasDashboard> {
   const sb = tryGetSupabase();
-  const { desde, hasta } = getRangoFechasPeriodo(periodo);
+  const isCustomDay = Boolean(fechaEspecifica && /^\d{4}-\d{2}-\d{2}$/.test(fechaEspecifica));
+  const { desde, hasta } = getRangoFechasPeriodo(periodo, fechaEspecifica);
   const desdeIso = desde.toISOString();
   const hastaIso = hasta.toISOString();
 
@@ -76,17 +90,19 @@ export async function obtenerMetricasDashboard(
   let directQuerySucceeded = false;
   let rpcData: Partial<MetricasDashboard> | null = null;
 
-  // 1. Intentar llamar al RPC optimizado de Supabase con p_desde exacto
+  // 1. Intentar llamar al RPC optimizado de Supabase con p_desde exacto (solo para períodos estándar)
   if (sb) {
-    try {
-      let rpc = sb.rpc('obtener_metricas_dashboard', { p_periodo: periodo, p_desde: desdeIso });
-      if (signal) rpc = rpc.abortSignal(signal);
-      const { data, error } = await rpc;
-      if (!error && data) {
-        rpcData = data as MetricasDashboard;
+    if (!isCustomDay && periodo !== 'dia') {
+      try {
+        let rpc = sb.rpc('obtener_metricas_dashboard', { p_periodo: periodo, p_desde: desdeIso });
+        if (signal) rpc = rpc.abortSignal(signal);
+        const { data, error } = await rpc;
+        if (!error && data) {
+          rpcData = data as MetricasDashboard;
+        }
+      } catch {
+        // Ignorar fallback
       }
-    } catch {
-      // Ignorar fallback
     }
 
     // 2. Consultar directamente ventas para garantizar inclusión estricta de la fecha local
@@ -197,7 +213,7 @@ export async function obtenerMetricasDashboard(
   }
 
   return {
-    periodo,
+    periodo: (periodo === 'dia' ? 'hoy' : periodo) as MetricasDashboard['periodo'],
     desde: desdeIso,
     ventas_total: finalVentasTotal,
     ventas_count: finalVentasCount,

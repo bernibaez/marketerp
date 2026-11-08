@@ -22,8 +22,12 @@ function fmt(n: number) {
 export default function DashboardBentoGrid() {
   const { user } = useAuth();
   const hideProfit = shouldHideProfit(user);
-  const [periodo, setPeriodo] = useState<'hoy' | 'semana' | 'mes'>('hoy');
-  const { metricas, alertas, loading, refetch } = useDashboard(periodo);
+  const [periodo, setPeriodo] = useState<'hoy' | 'semana' | 'mes' | 'dia'>('hoy');
+  const [fechaEspecifica, setFechaEspecifica] = useState<string>('');
+  const { metricas, alertas, loading, refetch } = useDashboard(
+    periodo,
+    periodo === 'dia' && fechaEspecifica ? fechaEspecifica : undefined
+  );
 
   const m = metricas;
 
@@ -37,14 +41,38 @@ export default function DashboardBentoGrid() {
 
   const margenPct = ventasTotal > 0 ? (gananciaBruta / ventasTotal) * 100 : 0;
 
+  const formattedSpecificDate = React.useMemo(() => {
+    if (!fechaEspecifica) return '';
+    const [y, mo, d] = fechaEspecifica.split('-').map(Number);
+    if (!y || !mo || !d) return fechaEspecifica;
+    const dt = new Date(y, mo - 1, d);
+    return dt.toLocaleDateString('es-DO', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+  }, [fechaEspecifica]);
+
   const periodoLabel =
-    periodo === 'hoy' ? 'de hoy' : periodo === 'semana' ? 'de la semana' : 'del mes';
+    periodo === 'dia' && formattedSpecificDate
+      ? `del ${formattedSpecificDate}`
+      : periodo === 'hoy'
+        ? 'de hoy'
+        : periodo === 'semana'
+          ? 'de la semana'
+          : 'del mes';
   const periodoCardLabel =
-    periodo === 'hoy' ? 'Hoy' : periodo === 'semana' ? 'Esta semana' : 'Este mes';
+    periodo === 'dia' && formattedSpecificDate
+      ? `Día: ${formattedSpecificDate}`
+      : periodo === 'hoy'
+        ? 'Hoy'
+        : periodo === 'semana'
+          ? 'Esta semana'
+          : 'Este mes';
 
   return (
     <div className="space-y-3">
-      {/* Selector de período rápido */}
+      {/* Selector de período rápido + Selector de cualquier día en específico */}
       <div className="flex items-center justify-between flex-wrap gap-2 px-0.5">
         <div className="flex items-center gap-2">
           <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
@@ -55,48 +83,99 @@ export default function DashboardBentoGrid() {
           </span>
         </div>
 
-        <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700">
-          <button
-            type="button"
-            onClick={() => setPeriodo('hoy')}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              periodo === 'hoy'
-                ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+        <div className="flex items-center flex-wrap gap-2">
+          {/* Selector de día en específico */}
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border transition-all ${
+              periodo === 'dia' && fechaEspecifica
+                ? 'bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 shadow-xs'
+                : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-700 text-slate-600 dark:text-slate-300'
             }`}
           >
-            Hoy
-          </button>
-          <button
-            type="button"
-            onClick={() => setPeriodo('semana')}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              periodo === 'semana'
-                ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            Esta semana
-          </button>
-          <button
-            type="button"
-            onClick={() => setPeriodo('mes')}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              periodo === 'mes'
-                ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            Este mes
-          </button>
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            title="Refrescar métricas ahora"
-            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-all cursor-pointer ml-1"
-          >
-            <RefreshCw size={13} className={loading ? 'animate-spin text-emerald-600' : ''} />
-          </button>
+            <Calendar size={13} className="text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+            <span className="text-[11px] font-bold whitespace-nowrap">Ver día:</span>
+            <input
+              type="date"
+              value={fechaEspecifica}
+              onChange={(e) => {
+                const val = e.target.value;
+                setFechaEspecifica(val);
+                if (val) {
+                  setPeriodo('dia');
+                } else {
+                  setPeriodo('hoy');
+                }
+              }}
+              className="text-xs font-bold bg-transparent text-slate-800 dark:text-slate-100 focus:outline-none cursor-pointer"
+              title="Selecciona cualquier día en específico para ver sus métricas"
+            />
+            {periodo === 'dia' && fechaEspecifica && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFechaEspecifica('');
+                  setPeriodo('hoy');
+                }}
+                className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-md bg-emerald-200/60 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-300/70 cursor-pointer"
+                title="Volver a Hoy"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700">
+            <button
+              type="button"
+              onClick={() => {
+                setFechaEspecifica('');
+                setPeriodo('hoy');
+              }}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                periodo === 'hoy'
+                  ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              Hoy
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setFechaEspecifica('');
+                setPeriodo('semana');
+              }}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                periodo === 'semana'
+                  ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              Esta semana
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setFechaEspecifica('');
+                setPeriodo('mes');
+              }}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                periodo === 'mes'
+                  ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              Este mes
+            </button>
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              title="Refrescar métricas ahora"
+              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-all cursor-pointer ml-1"
+            >
+              <RefreshCw size={13} className={loading ? 'animate-spin text-emerald-600' : ''} />
+            </button>
+          </div>
         </div>
       </div>
 

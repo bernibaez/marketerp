@@ -61,8 +61,19 @@ export const SalesTable: React.FC<SalesTableProps> = ({
   onAnularSale,
 }) => {
   const [openActionsId, setOpenActionsId] = useState<string | null>(null);
+  const [sortByTimeDesc, setSortByTimeDesc] = useState(true);
 
-  const totalCount = totalSales || sales.length;
+  const sortedSales = React.useMemo(() => {
+    return [...sales].sort((a, b) => {
+      const ta = a.creado_en ? new Date(a.creado_en).getTime() : 0;
+      const tb = b.creado_en ? new Date(b.creado_en).getTime() : 0;
+      const safeA = isNaN(ta) ? 0 : ta;
+      const safeB = isNaN(tb) ? 0 : tb;
+      return sortByTimeDesc ? safeB - safeA : safeA - safeB;
+    });
+  }, [sales, sortByTimeDesc]);
+
+  const totalCount = Math.max(totalSales || 0, sortedSales.length);
   const totalPages = Math.max(1, Math.ceil(totalCount / limit));
   const startRecord = totalCount > 0 ? (page - 1) * limit + 1 : 0;
   const endRecord = Math.min(totalCount, page * limit);
@@ -101,10 +112,19 @@ export const SalesTable: React.FC<SalesTableProps> = ({
             <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/60 text-slate-600 dark:text-slate-400 text-xs font-bold uppercase tracking-wider">
               <th className="text-left px-5 py-3.5">Factura / NCF</th>
               <th className="text-left px-4 py-3.5">
-                <div className="flex items-center gap-1">
-                  <span>Fecha / Hora</span>
-                  <ArrowRightLeft size={12} className="rotate-90 text-slate-400" />
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setSortByTimeDesc((prev) => !prev)}
+                  title={
+                    sortByTimeDesc
+                      ? 'Ordenado por hora de emisión (más recientes primero). Clic para invertir.'
+                      : 'Ordenado por hora de emisión (más antiguas primero). Clic para invertir.'
+                  }
+                  className="flex items-center gap-1 font-bold uppercase tracking-wider hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer"
+                >
+                  <span>Fecha / Hora ({sortByTimeDesc ? 'Recientes' : 'Antiguas'})</span>
+                  <ArrowRightLeft size={12} className="rotate-90 text-emerald-500" />
+                </button>
               </th>
               <th className="text-left px-4 py-3.5">Cliente</th>
               <th className="text-left px-4 py-3.5">Cajero</th>
@@ -123,15 +143,15 @@ export const SalesTable: React.FC<SalesTableProps> = ({
                   Cargando ventas...
                 </td>
               </tr>
-            ) : sales.length === 0 ? (
+            ) : sortedSales.length === 0 ? (
               <tr>
                 <td colSpan={hideProfit ? 9 : 10} className="px-4 py-12 text-center text-slate-400">
                   No se encontraron ventas registradas
                 </td>
               </tr>
             ) : (
-              sales.map((s, i) => {
-                const openUpward = i >= sales.length - 2 || (sales.length > 3 && i >= sales.length / 2);
+              sortedSales.map((s, i) => {
+                const openUpward = i >= sortedSales.length - 2 || (sortedSales.length > 3 && i >= sortedSales.length / 2);
                 const ganancia = s.monto_total - s.costo_total;
                 const marginPct = s.monto_total > 0 ? ((ganancia / s.monto_total) * 100).toFixed(1) : '0.0';
 
@@ -161,11 +181,12 @@ export const SalesTable: React.FC<SalesTableProps> = ({
                       <div className="font-semibold text-slate-800 dark:text-slate-200">
                         {new Date(s.creado_en).toLocaleDateString('es-DO')}
                       </div>
-                      <div className="text-[11px] text-slate-400 font-medium">
+                      <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold tabular-nums">
                         {new Date(s.creado_en).toLocaleTimeString('es-DO', {
                           hour: '2-digit',
                           minute: '2-digit',
                           second: '2-digit',
+                          hour12: true,
                         })}
                       </div>
                     </td>
@@ -402,6 +423,7 @@ export const SalesTable: React.FC<SalesTableProps> = ({
               <option value="50">50</option>
               <option value="100">100</option>
               <option value="200">200</option>
+              <option value="500">500</option>
             </select>
             <span>por página</span>
           </div>

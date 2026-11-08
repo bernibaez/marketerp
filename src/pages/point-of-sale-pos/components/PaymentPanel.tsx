@@ -344,18 +344,11 @@ export default function PaymentPanel({
         };
       }
 
-      logAuditEvent({
-        user: effectiveCashierName,
-        role: user?.role || 'Cajero',
-        action: 'Venta',
-        module: 'POS',
-        details: fiscalInvoice
-          ? `Factura Fiscal (${fiscalInvoice.ncfType}) por ${fmt(total)} (${parts.join(' · ')})`
-          : `Venta procesada por ${fmt(total)} (${parts.join(' · ')})`,
-        after: { total, payments, ncfType: fiscalInvoice?.ncfType, change: computedChange, cartCount: cart.length },
-      });
-
       const res = await Promise.resolve(onComplete(payments, fiscalInvoice));
+      if (!res) {
+        setProcessing(false);
+        return;
+      }
       if (res && typeof res === 'object' && (res as any).numero_factura) {
         setCompletedSaleResult(res as any);
       }
@@ -373,6 +366,25 @@ export default function PaymentPanel({
       const actualInvoiceNumber =
         (effectiveRes as any)?.numero_factura ||
         `FAC-${Date.now().toString().slice(-6)}`;
+
+      logAuditEvent({
+        user: effectiveCashierName,
+        role: user?.role || 'Cajero',
+        action: 'Venta',
+        module: 'POS',
+        details: fiscalInvoice
+          ? `Factura Fiscal ${actualInvoiceNumber} (${fiscalInvoice.ncfType}) por ${fmt(total)} (${parts.join(' · ')})`
+          : `Venta procesada ${actualInvoiceNumber} por ${fmt(total)} (${parts.join(' · ')})`,
+        after: {
+          invoiceNumber: actualInvoiceNumber,
+          ventaId: (effectiveRes as any)?.venta_id,
+          total,
+          payments,
+          ncfType: fiscalInvoice?.ncfType,
+          change: computedChange,
+          cartCount: cart.length,
+        },
+      });
 
       const actualNcf =
         (effectiveRes as any)?.ncf ||
