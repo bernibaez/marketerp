@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Banknote, CreditCard, ArrowLeftRight, Wallet } from 'lucide-react';
-import { KpiCard, ReportTable, formatRD, ReportLoading, ReportError, type ReportPeriodProps } from './shared';
+import { KpiCard, ReportTable, ReportSectionTabs, formatRD, ReportLoading, ReportError, type ReportPeriodProps } from './shared';
 import { informeCaja, type InformeCaja } from '@/services/informes.service';
 
 const diffBadge = (v: string) => {
@@ -10,10 +10,13 @@ const diffBadge = (v: string) => {
   return <span className="badge-warning">{v}</span>;
 };
 
+type CashierTab = 'sessions' | 'movements';
+
 export default function CashierReport({ dateFrom, dateTo }: ReportPeriodProps) {
   const [data, setData] = useState<InformeCaja | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<CashierTab>('sessions');
 
   useEffect(() => {
     let alive = true;
@@ -47,36 +50,51 @@ export default function CashierReport({ dateFrom, dateTo }: ReportPeriodProps) {
         <KpiCard label="Fondo de caja" value={formatRD(data.fondo)} trend="Aperturas" icon={<Wallet size={16} className="text-primary" />} />
       </div>
 
-      <div className="card p-5 space-y-3">
-        <h3 className="font-semibold text-foreground">Resumen de arqueo</h3>
-        {[
-          { label: 'Efectivo (cierres)', value: formatRD(data.efectivo) },
-          { label: 'Tarjeta (cierres)', value: formatRD(data.tarjeta) },
-          { label: 'Fondo apertura', value: formatRD(data.fondo) },
-          { label: 'Diferencia total', value: formatRD(data.diferencia) },
-        ].map((row) => (
-          <div key={row.label} className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">{row.label}</span>
-            <span className="font-semibold text-foreground">{row.value}</span>
-          </div>
-        ))}
+      <div className="card overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-border bg-secondary/30">
+          <h3 className="text-sm font-semibold text-foreground">Resumen de arqueo</h3>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-border">
+          {[
+            { label: 'Efectivo (cierres)', value: formatRD(data.efectivo) },
+            { label: 'Tarjeta (cierres)', value: formatRD(data.tarjeta) },
+            { label: 'Fondo apertura', value: formatRD(data.fondo) },
+            { label: 'Diferencia total', value: formatRD(data.diferencia) },
+          ].map((row) => (
+            <div key={row.label} className="flex items-center justify-between px-4 py-2.5 text-xs border-b border-border/60 last:border-b-0">
+              <span className="text-muted-foreground">{row.label}</span>
+              <span className="font-semibold text-foreground font-mono">{row.value}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
-      <div>
-        <h3 className="font-semibold text-foreground mb-3">Sesiones de caja</h3>
+      <ReportSectionTabs
+        activeTab={activeTab}
+        onChange={setActiveTab}
+        tabs={[
+          { id: 'sessions', label: 'Sesiones de caja', count: data.sessions.length },
+          { id: 'movements', label: 'Movimientos (ventas del periodo)', count: data.movements.length },
+        ]}
+      />
+
+      {activeTab === 'sessions' ? (
         <ReportTable
+          key="cashier-sessions"
           headers={['Sesión', 'Apertura', 'Caja', 'Ventas', 'Efectivo', 'Esperado', 'Contado', 'Dif.']}
           rows={data.sessions.map((r) => [...r.slice(0, 7), diffBadge(String(r[7]))])}
+          searchPlaceholder="Buscar sesión o caja…"
+          itemLabel="sesiones"
         />
-      </div>
-
-      <div>
-        <h3 className="font-semibold text-foreground mb-3">Movimientos (ventas del periodo)</h3>
+      ) : (
         <ReportTable
+          key="cashier-movements"
           headers={['Hora', 'Tipo', 'Detalle', 'Efectivo', 'Total']}
           rows={data.movements}
+          searchPlaceholder="Buscar factura o método…"
+          itemLabel="movimientos"
         />
-      </div>
+      )}
     </div>
   );
 }

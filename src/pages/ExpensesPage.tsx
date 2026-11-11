@@ -204,6 +204,7 @@ export default function ExpensesPage() {
             responsable_nombre: respFinal,
             tiene_recibo: tieneRecibo,
             estado: 'aprobado',
+            omitirMovimientoCaja: true,
           });
           toast.success('Gasto registrado con éxito');
         }

@@ -1,5 +1,15 @@
-import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupabase';
-import { VENTA_COLUMNS, type MetodoPago, type Venta, type DetalleVenta, type TipoItemVenta } from '@/types/database';
+import {
+  getSafeSupabaseClient,
+  isSafeSupabaseConfigured,
+} from './supabaseSafeClient';
+import {
+  VENTA_COLUMNS,
+  VENTA_COLUMNS_LEGACY,
+  type MetodoPago,
+  type Venta,
+  type DetalleVenta,
+  type TipoItemVenta,
+} from '@/types/database';
 import { updateProductStockInStore, getStoredProducts } from '@/lib/productStore';
 import { getCashClosures } from '@/lib/cashClosureStore';
 import { crearCxcDesdeVenta } from './cxc.service';
@@ -7,7 +17,14 @@ import { AUTH_ACCOUNTS } from '@/lib/auth';
 import { isAbortError } from '@/lib/isAbortError';
 import { logAuditEvent } from '@/lib/auditStore';
 import { movimientoInventarioPresentacion } from './presentaciones.service';
-import { invalidarCacheProductos } from './productos.service';
+import {
+  actualizarStockEnCacheProductos,
+  hayCatalogoProductosEnCache,
+  invalidarCacheProductos,
+  obtenerProductoEnCachePorId,
+  type StockDelta,
+} from './productos.service';
+import { obtenerComboDesdeCachePorId } from './combos.service';
 import { getCombos } from '@/lib/comboStore';
 import { registrarMovimientoInventario } from './movimientosInventarioCentral.service';
 
@@ -59,6 +76,7 @@ export type PayloadVenta = {
   cliente_id?: string | null;
   cliente_nombre?: string | null;
   caja_id?: string | null;
+  cierre_id?: string | null;
   subtotal: number;
   monto_impuesto: number;
   monto_descuento: number;
@@ -76,6 +94,7 @@ export type PayloadVenta = {
 
 export type ResultadoVenta = {
   venta_id: string;
+  cierre_id?: string | null;
   numero_factura: string;
   ncf: string | null;
 };
@@ -99,6 +118,7 @@ type VentaMetaInfo = {
   cliente_id?: string | null;
   cliente_nombre?: string | null;
   caja_id?: string | null;
+  cierre_id?: string | null;
   subtotal?: number;
   monto_impuesto?: number;
   monto_descuento?: number;
@@ -223,7 +243,7 @@ let cachedPerfilesTimestamp = 0;
 
 async function fetchPerfilesDirectory(): Promise<Map<string, string>> {
   const map = getLocalPerfilesMap();
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
   if (!sb) return map;
 
   const now = Date.now();
@@ -407,6 +427,27 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
   const effectiveClienteNombre =
     (payload.cliente_nombre && payload.cliente_nombre.trim()) || 'Cliente General';
 
+  let effectiveCierreId: string | null =
+    payload.cierre_id && String(payload.cierre_id).trim() !== ''
+      ? String(payload.cierre_id).trim()
+      : null;
+
+  if (!effectiveCierreId && !isSafeSupabaseConfigured() && payload.caja_id) {
+    const abiertaCaja = getCashClosures()
+      .filter((c) => c.status === 'abierta' && String(c.cashRegisterId) === String(payload.caja_id))
+      .sort((a, b) => ((a.openedAt || '') < (b.openedAt || '') ? 1 : -1))[0];
+    if (abiertaCaja) {
+      const sameOwner =
+        !effectiveCajeroId ||
+        !abiertaCaja.userId ||
+        String(abiertaCaja.userId) === String(effectiveCajeroId) ||
+        abiertaCaja.userId === '0';
+      if (sameOwner) {
+        effectiveCierreId = abiertaCaja.id;
+      }
+    }
+  }
+
   if (effectiveCajeroId && effectiveCajeroNombre) {
     rememberCajeroNombre(effectiveCajeroId, effectiveCajeroNombre);
   }
@@ -435,7 +476,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
       : payload.items.reduce((s, it) => s + Number(it.costo_unitario || 0) * Number(it.cantidad || 0), 0)
   );
 
-  if (!isSupabaseConfigured()) {
+  if (!isSafeSupabaseConfigured()) {
     const id = crypto.randomUUID();
     const numero =
       payload.numero_factura ??
@@ -467,6 +508,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
       cajero_id: effectiveCajeroId,
       cliente_id: payload.cliente_id ?? null,
       caja_id: payload.caja_id ?? null,
+      cierre_id: effectiveCierreId,
       subtotal: exactSubtotal,
       monto_impuesto: exactTax,
       monto_descuento: exactDiscount,
@@ -494,6 +536,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
       cliente_id: payload.cliente_id ?? null,
       cliente_nombre: effectiveClienteNombre,
       caja_id: payload.caja_id ?? null,
+      cierre_id: effectiveCierreId,
       subtotal: exactSubtotal,
       monto_impuesto: exactTax,
       monto_descuento: exactDiscount,
@@ -592,7 +635,11 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
       }
     }
 
-    return { venta_id: id, numero_factura: numero, ncf: payload.ncf ?? null };
+    if (hayCatalogoProductosEnCache()) {
+      sincronizarStockPostVentaEnCache(payload.items);
+    }
+
+    return { venta_id: id, cierre_id: effectiveCierreId, numero_factura: numero, ncf: payload.ncf ?? null };
   }
 
   const sanitizedPayload = {
@@ -612,6 +659,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     cajero_id: isUUID(effectiveCajeroId) ? effectiveCajeroId : null,
     cliente_id: isUUID(payload.cliente_id) ? payload.cliente_id : null,
     caja_id: payload.caja_id ? String(payload.caja_id) : null,
+    cierre_id: effectiveCierreId,
     items: payload.items.map((it) => ({
       ...it,
       precio_unitario: round2(it.precio_unitario),
@@ -626,7 +674,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     })),
   };
 
-  const sb = getSupabase();
+  const sb = getSafeSupabaseClient()!;
   const { data, error } = await sb.rpc('procesar_venta_pos', { p_payload: sanitizedPayload });
   if (error) {
     console.error('Error al ejecutar procesar_venta_pos en Supabase:', error);
@@ -657,6 +705,8 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
       ),
     }));
 
+    const resolvedSaleCierreId = resultado.cierre_id ?? effectiveCierreId;
+
     saveVentaMeta(resultado.venta_id, {
       numero_factura: resultado.numero_factura,
       ncf: resultado.ncf ?? payload.ncf ?? null,
@@ -665,6 +715,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
       cliente_id: payload.cliente_id ?? null,
       cliente_nombre: effectiveClienteNombre,
       caja_id: payload.caja_id ?? null,
+      cierre_id: resolvedSaleCierreId,
       subtotal: exactSubtotal,
       monto_impuesto: exactTax,
       monto_descuento: exactDiscount,
@@ -683,6 +734,7 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
         cajero_id: effectiveCajeroId,
         cliente_id: payload.cliente_id ?? null,
         caja_id: payload.caja_id ?? null,
+        cierre_id: resolvedSaleCierreId,
         subtotal: exactSubtotal,
         monto_impuesto: exactTax,
         monto_descuento: exactDiscount,
@@ -723,8 +775,92 @@ export async function procesarVenta(payload: PayloadVenta): Promise<ResultadoVen
     }
   }
 
-  invalidarCacheProductos();
+  sincronizarStockPostVentaEnCache(payload.items);
   return resultado;
+}
+
+function sincronizarStockPostVentaEnCache(items: PayloadVenta['items']): void {
+  if (!hayCatalogoProductosEnCache()) {
+    invalidarCacheProductos();
+    return;
+  }
+
+  const deltas: StockDelta[] = [];
+
+  for (const item of items) {
+    const qty = Number(item.cantidad || 0);
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+
+    if (item.tipo_item === 'combo' && item.combo_id) {
+      const cachedCombo = obtenerComboDesdeCachePorId(item.combo_id);
+      if (cachedCombo && Array.isArray(cachedCombo.items)) {
+        for (const ci of cachedCombo.items) {
+          if (!ci.producto_id) continue;
+          deltas.push({
+            productoId: ci.producto_id,
+            delta: -(Number(ci.cantidad || 1) * qty),
+          });
+        }
+        continue;
+      }
+      const localCombo = getCombos().find((c) => c.id === item.combo_id);
+      if (localCombo && Array.isArray(localCombo.items)) {
+        for (const ci of localCombo.items) {
+          if (!ci.productId) continue;
+          deltas.push({
+            productoId: ci.productId,
+            delta: -(Number(ci.quantity || 1) * qty),
+          });
+        }
+        continue;
+      }
+      invalidarCacheProductos();
+      return;
+    }
+
+    if (item.tipo_item === 'producto' && item.producto_id) {
+      const prod = obtenerProductoEnCachePorId(item.producto_id);
+      if (!prod) {
+        invalidarCacheProductos();
+        return;
+      }
+
+      const compositeItems = (prod as any).composite_items;
+      if (Array.isArray(compositeItems) && compositeItems.length > 0) {
+        for (const ci of compositeItems) {
+          const compId = ci.product_id || ci.productId;
+          if (!compId) continue;
+          deltas.push({
+            productoId: String(compId),
+            delta: -(Number(ci.quantity || 1) * qty),
+          });
+        }
+        continue;
+      }
+
+      const isWeight = prod.es_pesado === true || prod.sale_type === 'weight';
+      if (isWeight) {
+        deltas.push({
+          productoId: prod.producto_base_id || prod.id,
+          delta: -qty,
+        });
+      } else if (prod.producto_base_id && Number(prod.factor_conversion || 1) > 1) {
+        deltas.push({
+          productoId: prod.producto_base_id,
+          delta: -(qty * Number(prod.factor_conversion)),
+        });
+      } else {
+        deltas.push({
+          productoId: prod.id,
+          delta: -qty,
+        });
+      }
+    }
+  }
+
+  if (deltas.length > 0) {
+    actualizarStockEnCacheProductos(deltas);
+  }
 }
 
 export async function obtenerHistorialVentas(params: {
@@ -735,6 +871,9 @@ export async function obtenerHistorialVentas(params: {
   busqueda?: string;
   cajaId?: string | string[];
   cajeroId?: string;
+  cierreId?: string;
+  incluirLegacySinCierreId?: boolean;
+  omitirDetalles?: boolean;
   excluirAnuladas?: boolean;
   signal?: AbortSignal;
 }): Promise<{ datos: VentaConDetalle[]; total: number }> {
@@ -743,7 +882,50 @@ export async function obtenerHistorialVentas(params: {
   const desde = (pagina - 1) * limite;
   const hasta = desde + limite - 1;
 
-  const sb = tryGetSupabase();
+  const matchesLocalFilters = (v: VentaConDetalle): boolean => {
+    if (params.excluirAnuladas && (v.estado === 'anulada' || (v.estado as string) === 'cancelled')) {
+      return false;
+    }
+    if (params.cierreId) {
+      if (v.cierre_id != null && String(v.cierre_id).trim() !== '') {
+        if (String(v.cierre_id) !== String(params.cierreId)) return false;
+      } else if (!params.incluirLegacySinCierreId) {
+        return false;
+      }
+    }
+    if (params.fechaInicio && v.creado_en && v.creado_en < params.fechaInicio) {
+      if (v.creado_en.slice(0, 10) < params.fechaInicio.slice(0, 10)) return false;
+    }
+    if (params.fechaFin && v.creado_en && v.creado_en > params.fechaFin + 'T23:59:59') {
+      return false;
+    }
+    if (params.cajaId && !params.cierreId) {
+      if (Array.isArray(params.cajaId)) {
+        const allowed = new Set(params.cajaId.map(String));
+        if (!allowed.has(String(v.caja_id ?? ''))) return false;
+      } else {
+        if (String(v.caja_id ?? '') !== String(params.cajaId)) return false;
+      }
+    } else if (params.cajaId && params.cierreId && (v.cierre_id == null || String(v.cierre_id).trim() === '')) {
+      // Para compatibilidad legacy sin cierre_id, exigir que coincida la caja
+      if (Array.isArray(params.cajaId)) {
+        const allowed = new Set(params.cajaId.map(String));
+        if (!allowed.has(String(v.caja_id ?? ''))) return false;
+      } else if (String(v.caja_id ?? '') !== String(params.cajaId)) {
+        return false;
+      }
+    }
+    if (params.cajeroId) {
+      if (v.cajero_id != null && String(v.cajero_id).trim() !== '') {
+        if (String(v.cajero_id) !== String(params.cajeroId)) return false;
+      } else if (!params.cierreId) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const sb = getSafeSupabaseClient();
   if (!sb) {
     const perfilesMap = getLocalPerfilesMap();
     const metaMap = getVentasMetaMap();
@@ -753,6 +935,7 @@ export async function obtenerHistorialVentas(params: {
       return {
         ...v,
         ...amounts,
+        cierre_id: v.cierre_id ?? meta?.cierre_id ?? null,
         cajero_nombre: resolveCajeroForRow(v, perfilesMap, metaMap),
         cliente_nombre: v.cliente_nombre || meta?.cliente_nombre || 'Cliente general',
       };
@@ -772,26 +955,7 @@ export async function obtenerHistorialVentas(params: {
         );
       });
     }
-    if (params.fechaInicio) {
-      list = list.filter((v) => v.creado_en >= params.fechaInicio!);
-    }
-    if (params.fechaFin) {
-      list = list.filter((v) => v.creado_en <= params.fechaFin! + 'T23:59:59');
-    }
-    if (params.cajaId) {
-      if (Array.isArray(params.cajaId)) {
-        const allowed = new Set(params.cajaId.map(String));
-        list = list.filter((v) => allowed.has(String(v.caja_id ?? '')));
-      } else {
-        list = list.filter((v) => String(v.caja_id ?? '') === String(params.cajaId));
-      }
-    }
-    if (params.cajeroId) {
-      list = list.filter((v) => String(v.cajero_id ?? '') === String(params.cajeroId));
-    }
-    if (params.excluirAnuladas) {
-      list = list.filter((v) => v.estado !== 'anulada' && (v.estado as string) !== 'cancelled');
-    }
+    list = list.filter(matchesLocalFilters);
     return { datos: list.slice(desde, hasta + 1), total: list.length };
   }
 
@@ -801,7 +965,7 @@ export async function obtenerHistorialVentas(params: {
 
   const cajeroIdIsUuid = Boolean(params.cajeroId && isUUID(params.cajeroId));
 
-  const buildQuery = (selectClause: string) => {
+  const buildQuery = (selectClause: string, useCierreFilter = true) => {
     let q = sb
       .from('ventas')
       .select(selectClause, { count: 'exact' })
@@ -821,7 +985,14 @@ export async function obtenerHistorialVentas(params: {
     }
     if (params.fechaInicio) q = q.gte('creado_en', params.fechaInicio);
     if (params.fechaFin) q = q.lte('creado_en', params.fechaFin + 'T23:59:59');
-    if (params.cajaId) {
+    if (params.cierreId && useCierreFilter) {
+      if (params.incluirLegacySinCierreId) {
+        q = q.or(`cierre_id.eq.${params.cierreId},cierre_id.is.null`);
+      } else {
+        q = q.eq('cierre_id', params.cierreId);
+      }
+    }
+    if (params.cajaId && (!params.cierreId || !useCierreFilter || params.incluirLegacySinCierreId)) {
       if (Array.isArray(params.cajaId)) {
         if (params.cajaId.length === 1) {
           q = q.eq('caja_id', params.cajaId[0]);
@@ -832,7 +1003,7 @@ export async function obtenerHistorialVentas(params: {
         q = q.eq('caja_id', params.cajaId);
       }
     }
-    if (params.cajeroId && cajeroIdIsUuid) {
+    if (params.cajeroId && cajeroIdIsUuid && !params.cierreId) {
       q = q.eq('cajero_id', params.cajeroId);
     }
     if (params.excluirAnuladas) q = q.neq('estado', 'anulada');
@@ -840,14 +1011,17 @@ export async function obtenerHistorialVentas(params: {
     return q;
   };
 
-  let { data, error, count } = await buildQuery(
-    '*, clientes(nombre), perfiles!cajero_id(nombre_completo), detalle_ventas(*)'
-  );
+  let remoteUsedFallbackLocal = false;
+  const primarySelect = params.omitirDetalles
+    ? VENTA_COLUMNS
+    : '*, clientes(nombre), perfiles!cajero_id(nombre_completo), detalle_ventas(*)';
+  let { data, error, count } = await buildQuery(primarySelect, true);
   if (error) {
     if (params.signal?.aborted || isAbortError(error)) {
       throw new DOMException('The operation was aborted.', 'AbortError');
     }
-    const fallback1 = await buildQuery('*, detalle_ventas(*)');
+    const fallbackSelect1 = params.omitirDetalles ? VENTA_COLUMNS_LEGACY : '*, detalle_ventas(*)';
+    const fallback1 = await buildQuery(fallbackSelect1, true);
     if (!fallback1.error) {
       data = fallback1.data;
       count = fallback1.count;
@@ -856,7 +1030,7 @@ export async function obtenerHistorialVentas(params: {
       if (params.signal?.aborted || isAbortError(fallback1.error)) {
         throw new DOMException('The operation was aborted.', 'AbortError');
       }
-      const fallback2 = await buildQuery('*');
+      const fallback2 = await buildQuery(params.omitirDetalles ? VENTA_COLUMNS_LEGACY : '*', false);
       if (!fallback2.error) {
         data = fallback2.data;
         count = fallback2.count;
@@ -865,8 +1039,9 @@ export async function obtenerHistorialVentas(params: {
         if (params.signal?.aborted || isAbortError(fallback2.error)) {
           throw new DOMException('The operation was aborted.', 'AbortError');
         }
-        const localFallback = getLocalVentas();
-        data = localFallback as any[];
+        remoteUsedFallbackLocal = true;
+        const localFallback = getLocalVentas().filter(matchesLocalFilters);
+        data = localFallback.slice(desde, hasta + 1) as any[];
         count = localFallback.length;
         error = null;
       }
@@ -883,40 +1058,31 @@ export async function obtenerHistorialVentas(params: {
     getLocalVentas().map((lv) => [String(lv.id), lv])
   );
 
-  const localList = getLocalVentas();
-  const remoteRows: any[] = data ?? [];
-  const remoteIds = new Set(remoteRows.map((r) => String(r.id)));
-  const unmergedLocal = localList.filter((lv) => !remoteIds.has(String(lv.id)));
-
-  const matchingLocal = unmergedLocal.filter((lv) => {
-    if (params.excluirAnuladas && (lv.estado === 'anulada' || (lv.estado as string) === 'cancelled')) return false;
-    if (params.fechaInicio && lv.creado_en && lv.creado_en.slice(0, 10) < params.fechaInicio) return false;
-    if (params.fechaFin && lv.creado_en && lv.creado_en.slice(0, 10) > params.fechaFin) return false;
-    if (params.cajaId) {
-      const boxIds = Array.isArray(params.cajaId) ? params.cajaId.map(String) : [String(params.cajaId)];
-      if (!boxIds.includes(String(lv.caja_id ?? ''))) return false;
-    }
-    return true;
-  });
-
-  const rowsList: any[] = [...remoteRows, ...matchingLocal];
-  const missingDetalleIds = rowsList
-    .filter((r) => !Array.isArray(r.detalle_ventas) || r.detalle_ventas.length === 0)
-    .map((r) => String(r.id))
-    .filter((id) => isUUID(id));
+  // Cuando Supabase está activo y respondió correctamente, NO mezclar localStorage
+  // como segunda fuente contable dentro de las páginas remotas.
+  const rowsList: any[] = remoteUsedFallbackLocal ? (data ?? []) : (data ?? []);
+  const missingDetalleIds = params.omitirDetalles
+    ? []
+    : rowsList
+        .filter((r) => !Array.isArray(r.detalle_ventas) || r.detalle_ventas.length === 0)
+        .map((r) => String(r.id))
+        .filter((id) => isUUID(id));
 
   const extraDetallesByVenta = new Map<string, DetalleVenta[]>();
   if (missingDetalleIds.length > 0) {
     try {
-      const { data: extraDetalles } = await sb
-        .from('detalle_ventas')
-        .select('*')
-        .in('venta_id', missingDetalleIds);
-      for (const d of extraDetalles ?? []) {
-        const vid = String((d as any).venta_id);
-        const arr = extraDetallesByVenta.get(vid) ?? [];
-        arr.push(d as DetalleVenta);
-        extraDetallesByVenta.set(vid, arr);
+      for (let i = 0; i < missingDetalleIds.length; i += 100) {
+        const chunk = missingDetalleIds.slice(i, i + 100);
+        const { data: extraDetalles } = await sb
+          .from('detalle_ventas')
+          .select('*')
+          .in('venta_id', chunk);
+        for (const d of extraDetalles ?? []) {
+          const vid = String((d as any).venta_id);
+          const arr = extraDetallesByVenta.get(vid) ?? [];
+          arr.push(d as DetalleVenta);
+          extraDetallesByVenta.set(vid, arr);
+        }
       }
     } catch {
       // ignore if RLS or network fails; metaMap/localVentasMap will provide fallback
@@ -972,6 +1138,7 @@ export async function obtenerHistorialVentas(params: {
       cajero_id: row.cajero_id ?? meta?.cajero_id ?? localMirror?.cajero_id ?? null,
       cliente_id: row.cliente_id ?? meta?.cliente_id ?? localMirror?.cliente_id ?? null,
       caja_id: row.caja_id ?? meta?.caja_id ?? localMirror?.caja_id ?? null,
+      cierre_id: row.cierre_id ?? meta?.cierre_id ?? localMirror?.cierre_id ?? null,
       subtotal: amounts.subtotal,
       monto_impuesto: amounts.monto_impuesto,
       monto_descuento: amounts.monto_descuento,
@@ -996,16 +1163,12 @@ export async function obtenerHistorialVentas(params: {
     };
   });
 
-  if (params.cajeroId && !cajeroIdIsUuid) {
+  if (params.cajeroId && !cajeroIdIsUuid && !params.cierreId) {
     datos = datos.filter((v) => {
-      // Si la venta tiene cajero_id explícito, comparar
       if (v.cajero_id != null && String(v.cajero_id).trim() !== '') {
         return String(v.cajero_id) === String(params.cajeroId);
       }
-      // Si cajero_id es null (típico en ventas Supabase de usuarios locales sin UUID en perfiles),
-      // no descartar si se especificó cajaId ya que la venta pertenece a la registradora
-      if (params.cajaId) return true;
-      return true;
+      return Boolean(params.cajaId);
     });
     return { datos, total: datos.length };
   }
@@ -1013,65 +1176,109 @@ export async function obtenerHistorialVentas(params: {
   return { datos, total: count ?? datos.length };
 }
 
-/** Ventas del turno (caja/cajero) con detalle de ítems — para resumen POS / admin. */
+/** Ventas del turno (caja/sesión) paginadas completamente (>1,000 soportadas). */
 export async function obtenerVentasTurno(params: {
   cajaId?: string | string[];
   cajeroId?: string;
+  cierreId?: string;
+  incluirLegacySinCierreId?: boolean;
+  omitirDetalles?: boolean;
   desde?: string;
   limite?: number;
+  todasPaginas?: boolean;
 }): Promise<VentaConDetalle[]> {
+  const pageSize = params.limite && params.limite > 0 ? Math.min(params.limite, 1000) : 1000;
+  const fetchAll = params.todasPaginas !== false && params.limite == null;
   const cajeroIdIsUuid = Boolean(params.cajeroId && isUUID(params.cajeroId));
-  const { datos } = await obtenerHistorialVentas({
-    pagina: 1,
-    limite: params.limite ?? 500,
-    cajaId: params.cajaId,
-    cajeroId: cajeroIdIsUuid ? params.cajeroId : undefined,
-    fechaInicio: params.desde?.slice(0, 10),
-    excluirAnuladas: true,
-  });
 
-  if (datos.length === 0) return [];
+  const collected: VentaConDetalle[] = [];
+  let pagina = 1;
+  const maxPages = 100;
 
-  // Filtrar por hora exacta de apertura comparando timestamps numéricos (con 60s de margen por sincronización de reloj)
-  const desdeTime = params.desde ? new Date(params.desde).getTime() : 0;
-  const filtradas = desdeTime > 0
-    ? datos.filter((v) => {
-        const t = new Date(v.creado_en).getTime();
-        return !isNaN(t) ? t >= desdeTime - 60_000 : true;
-      })
-    : datos;
-
-  const sb = tryGetSupabase();
-  if (!sb) {
-    return filtradas.map((v) => {
-      const local = getLocalVentas().find((x) => x.id === v.id);
-      return local ?? v;
+  while (pagina <= maxPages) {
+    const { datos: batch, total } = await obtenerHistorialVentas({
+      pagina,
+      limite: pageSize,
+      cajaId: params.cajaId,
+      cajeroId: !params.cierreId && cajeroIdIsUuid ? params.cajeroId : undefined,
+      cierreId: params.cierreId,
+      incluirLegacySinCierreId: params.incluirLegacySinCierreId,
+      omitirDetalles: params.omitirDetalles,
+      fechaInicio: params.cierreId && !params.incluirLegacySinCierreId ? undefined : params.desde?.slice(0, 10),
+      excluirAnuladas: true,
     });
+
+    if (batch.length === 0) break;
+    collected.push(...batch);
+    if (!fetchAll || batch.length < pageSize || collected.length >= total) {
+      break;
+    }
+    pagina += 1;
   }
 
-  // Si obtenerHistorialVentas ya trajo detalle_ventas, solo consultar las que falten
+  if (collected.length === 0) return [];
+
+  const desdeTime = params.desde ? new Date(params.desde).getTime() : 0;
+  const filtradas = collected.filter((v) => {
+    // Si la venta pertenece explícitamente a una sesión, exigir coincidencia exacta con params.cierreId
+    if (params.cierreId) {
+      if (v.cierre_id != null && String(v.cierre_id).trim() !== '') {
+        return String(v.cierre_id) === String(params.cierreId);
+      }
+      if (!params.incluirLegacySinCierreId) return false;
+      // Para compatibilidad legacy sin cierre_id, exigir timestamp >= apertura exacta (cero solapamiento previo)
+      if (desdeTime > 0 && v.creado_en) {
+        const t = new Date(v.creado_en).getTime();
+        if (!isNaN(t) && t < desdeTime) return false;
+      }
+      if (params.cajeroId && v.cajero_id && String(v.cajero_id) !== String(params.cajeroId)) {
+        return false;
+      }
+      return true;
+    }
+
+    if (desdeTime > 0 && v.creado_en) {
+      const t = new Date(v.creado_en).getTime();
+      if (!isNaN(t) && t < desdeTime) return false;
+    }
+    return true;
+  });
+
+  const sb = getSafeSupabaseClient();
+  if (!sb) {
+    return filtradas;
+  }
+
+  if (params.omitirDetalles) {
+    return filtradas;
+  }
+
+  // Si obtenerHistorialVentas ya trajo detalle_ventas, solo consultar las que falten en lotes de 100
   const missingIds = filtradas
-    .filter((v) => !Array.isArray(v.detalle_ventas) || v.detalle_ventas.length === 0)
+    .filter((v) => (!Array.isArray(v.detalle_ventas) || v.detalle_ventas.length === 0) && isUUID(v.id))
     .map((v) => v.id);
 
   if (missingIds.length === 0) {
     return filtradas;
   }
 
-  const { data: detalles } = await sb.from('detalle_ventas').select('*').in('venta_id', missingIds);
   const byVenta = new Map<string, DetalleVenta[]>();
-  for (const d of detalles ?? []) {
-    const row = d as DetalleVenta;
-    const arr = byVenta.get(row.venta_id) ?? [];
-    arr.push({
-      ...row,
-      precio_unitario: Number(row.precio_unitario),
-      costo_unitario: Number(row.costo_unitario),
-      cantidad: Number(row.cantidad),
-      porcentaje_impuesto: Number(row.porcentaje_impuesto || 0),
-      subtotal: Number(row.subtotal),
-    });
-    byVenta.set(row.venta_id, arr);
+  for (let i = 0; i < missingIds.length; i += 100) {
+    const chunk = missingIds.slice(i, i + 100);
+    const { data: detalles } = await sb.from('detalle_ventas').select('*').in('venta_id', chunk);
+    for (const d of detalles ?? []) {
+      const row = d as DetalleVenta;
+      const arr = byVenta.get(row.venta_id) ?? [];
+      arr.push({
+        ...row,
+        precio_unitario: Number(row.precio_unitario),
+        costo_unitario: Number(row.costo_unitario),
+        cantidad: Number(row.cantidad),
+        porcentaje_impuesto: Number(row.porcentaje_impuesto || 0),
+        subtotal: Number(row.subtotal),
+      });
+      byVenta.set(row.venta_id, arr);
+    }
   }
 
   return filtradas.map((v) => ({
@@ -1212,7 +1419,7 @@ export async function obtenerVentaPorNumeroFactura(
   const lookup = normalizeInvoiceLookupKey(numeroFactura);
   if (!lookup.raw) return null;
 
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
   if (sb) {
     try {
       const filterTerms = new Set<string>();
@@ -1291,7 +1498,7 @@ export async function obtenerVentaPorNumeroFactura(
 
 export async function obtenerUltimasVentasParaDevolucion(limite = 8): Promise<VentaConDetalle[]> {
   const localList = getLocalVentas().filter((v) => v.estado !== 'anulada');
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
   if (!sb) {
     return localList.slice(0, limite);
   }
@@ -1320,7 +1527,7 @@ export async function obtenerUltimasVentasParaDevolucion(limite = 8): Promise<Ve
 }
 
 export async function obtenerVentaPorId(ventaId: string): Promise<VentaConDetalle | null> {
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
   const metaMap = getVentasMetaMap();
   const localFound = getLocalVentas().find((v) => v.id === ventaId);
   if (!sb) {
@@ -1442,7 +1649,7 @@ export async function obtenerVentaPorId(ventaId: string): Promise<VentaConDetall
 }
 
 export async function anularVenta(ventaId: string, motivo: string = 'Anulación'): Promise<void> {
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
   let currentSale: VentaConDetalle | null = null;
   try {
     currentSale = await obtenerVentaPorId(ventaId);
@@ -1631,7 +1838,7 @@ export async function actualizarVenta(
   ventaId: string,
   payload: ActualizarVentaPayload
 ): Promise<void> {
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
 
   // 1. Obtener la venta actual antes de modificaciones para calcular deltas y auditoría
   let currentSale: VentaConDetalle | null = null;

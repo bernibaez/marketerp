@@ -1,7 +1,8 @@
-import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupabase';
+import { isSafeSupabaseConfigured, getSafeSupabaseClient } from './supabaseSafeClient';
 import type { Devolucion, EstadoDevolucion } from '@/types/database';
 import { updateProductStockInStore, getStoredProducts } from '@/lib/productStore';
 import { movimientoInventarioPresentacion } from './presentaciones.service';
+import { registrarMovimientoCaja } from './movimientosCaja.service';
 
 export interface ItemDevolucionPayload {
   producto_id?: string | null;
@@ -17,6 +18,10 @@ export interface PayloadDevolucion {
   numero_factura?: string | null;
   cliente_id?: string | null;
   cajero_id?: string | null;
+  cajero_nombre?: string | null;
+  caja_id?: string | null;
+  cierre_id?: string | null;
+  omitirMovimientoCaja?: boolean;
   monto_total: number;
   motivo: string;
   metodo_reembolso: 'efectivo' | 'tarjeta' | 'nota_credito' | 'cambio';
@@ -27,6 +32,8 @@ export interface PayloadDevolucion {
 export interface DevolucionConDetalle extends Devolucion {
   cliente_nombre?: string;
   cajero_nombre?: string;
+  caja_id?: string | null;
+  cierre_id?: string | null;
   revisado_por_nombre?: string;
   motivo_rechazo?: string | null;
   revisado_por?: string | null;
@@ -68,7 +75,7 @@ export async function obtenerDevoluciones(params: {
   const desde = (pagina - 1) * limite;
   const hasta = desde + limite - 1;
 
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
   if (!sb) {
     let list = getLocalDevoluciones();
     if (params.estado) {
@@ -165,7 +172,7 @@ export async function obtenerDevoluciones(params: {
 }
 
 export async function crearDevolucion(payload: PayloadDevolucion): Promise<DevolucionConDetalle> {
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
   const codigo = `DEV-${Date.now().toString(36).toUpperCase()}`;
   const id = crypto.randomUUID();
 
@@ -176,6 +183,8 @@ export async function crearDevolucion(payload: PayloadDevolucion): Promise<Devol
     numero_factura: payload.numero_factura ?? null,
     cliente_id: payload.cliente_id ?? null,
     cajero_id: payload.cajero_id ?? null,
+    caja_id: payload.caja_id ?? null,
+    cierre_id: payload.cierre_id ?? null,
     monto_total: payload.monto_total,
     motivo: payload.motivo,
     metodo_reembolso: payload.metodo_reembolso,
@@ -183,7 +192,7 @@ export async function crearDevolucion(payload: PayloadDevolucion): Promise<Devol
     estado: 'pendiente',
     creado_en: new Date().toISOString(),
     cliente_nombre: 'Cliente',
-    cajero_nombre: 'Cajero',
+    cajero_nombre: payload.cajero_nombre || 'Cajero',
     items: payload.items.map((it) => ({
       id: crypto.randomUUID(),
       producto_id: it.producto_id,
@@ -195,29 +204,72 @@ export async function crearDevolucion(payload: PayloadDevolucion): Promise<Devol
     })),
   };
 
-  // 1. Guardar de inmediato en almacenamiento local para asegurar persistencia
+  // 1. Registrar salida en movimientos_caja UNA sola vez si es devolución en efectivo de caja/sesión
+  const isCashRefund =
+    String(payload.metodo_reembolso || '').toLowerCase() === 'efectivo' ||
+    String(payload.metodo_reembolso || '').toLowerCase() === 'cash';
+
+  if (
+    !payload.omitirMovimientoCaja &&
+    isCashRefund &&
+    (Boolean(payload.cierre_id) || Boolean(payload.caja_id) || !isSafeSupabaseConfigured())
+  ) {
+    try {
+      await registrarMovimientoCaja({
+        caja_id: payload.caja_id ? String(payload.caja_id) : '1',
+        cierre_id: payload.cierre_id ?? null,
+        cajero_id: payload.cajero_id ?? null,
+        cajero_nombre: payload.cajero_nombre || 'Cajero',
+        tipo: 'salida',
+        monto: Number(payload.monto_total || 0),
+        concepto: payload.numero_factura
+          ? `Devolución de efectivo en Factura ${payload.numero_factura} (${codigo})`
+          : `Devolución de efectivo (${codigo}): ${payload.motivo || 'Reembolso'}`,
+        categoria: 'Devolución',
+      });
+    } catch {
+      // ignore movement recording warning
+    }
+  }
+
+  // 2. Guardar en almacenamiento local (offline o respaldo)
   saveLocalDevoluciones([devLocal, ...getLocalDevoluciones()]);
 
-  // 2. Intentar guardar en Supabase si está disponible
+  // 3. Intentar guardar en Supabase si está disponible
   if (sb) {
     try {
-      const { data: devData, error: devErr } = await sb
+      const insertRow: Record<string, unknown> = {
+        id,
+        codigo,
+        venta_id: payload.venta_id ?? null,
+        numero_factura: payload.numero_factura ?? null,
+        cliente_id: payload.cliente_id ?? null,
+        cajero_id: payload.cajero_id ?? null,
+        caja_id: payload.caja_id ?? null,
+        cierre_id: payload.cierre_id ?? null,
+        monto_total: payload.monto_total,
+        motivo: payload.motivo,
+        metodo_reembolso: payload.metodo_reembolso,
+        tipo: payload.tipo,
+        estado: 'pendiente',
+      };
+
+      let { data: devData, error: devErr } = await sb
         .from('devoluciones')
-        .insert({
-          id,
-          codigo,
-          venta_id: payload.venta_id ?? null,
-          numero_factura: payload.numero_factura ?? null,
-          cliente_id: payload.cliente_id ?? null,
-          cajero_id: payload.cajero_id ?? null,
-          monto_total: payload.monto_total,
-          motivo: payload.motivo,
-          metodo_reembolso: payload.metodo_reembolso,
-          tipo: payload.tipo,
-          estado: 'pendiente',
-        })
+        .insert(insertRow)
         .select('*, clientes(nombre)')
         .single();
+
+      if (devErr && (devErr.message?.includes('column') || devErr.code === '42703')) {
+        const { caja_id: _cId, cierre_id: _sId, ...legacyRow } = insertRow;
+        const retry = await sb
+          .from('devoluciones')
+          .insert(legacyRow)
+          .select('*, clientes(nombre)')
+          .single();
+        devData = retry.data;
+        devErr = retry.error;
+      }
 
       if (!devErr && devData) {
         devLocal.id = devData.id;
@@ -251,7 +303,7 @@ export async function cambiarEstadoDevolucion(
   nuevoEstado: EstadoDevolucion,
   motivoRechazo?: string
 ): Promise<void> {
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
   if (!sb) {
     const local = getLocalDevoluciones().map((d) => {
       if (d.id === devolucionId) {

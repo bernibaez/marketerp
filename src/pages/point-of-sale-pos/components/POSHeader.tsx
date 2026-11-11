@@ -46,7 +46,7 @@ interface POSHeaderProps {
   onCloseCash?: () => void;
 }
 
-export default function POSHeader({
+const POSHeader = React.memo(function POSHeader({
   cartCount,
   total,
   heldCount,
@@ -338,4 +338,6 @@ export default function POSHeader({
       <PosCalculatorModal isOpen={calcOpen} onClose={() => setCalcOpen(false)} />
     </>
   );
-}
+});
+
+export default POSHeader;

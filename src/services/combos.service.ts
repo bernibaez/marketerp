@@ -1,5 +1,6 @@
 import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupabase';
 import { COMBO_COLUMNS, type Combo, type ComboItem, type TipoDescuento } from '@/types/database';
+import { trackPosCacheHit, trackPosNetworkRequest } from '@/lib/posPerfMetrics';
 import {
   getCombos as getLocalCombos,
   saveOrUpdateCombo,
@@ -107,75 +108,148 @@ export function uiComboADb(c: UiCombo): { combo: Partial<Combo>; items: Omit<Com
   };
 }
 
+const COMBOS_CACHE_TTL = 5 * 60_000;
+const combosCache = new Map<'activos' | 'todos', { timestamp: number; data: ComboConItems[] }>();
+const combosInFlight = new Map<'activos' | 'todos', Promise<ComboConItems[]>>();
+
+export function invalidarCacheCombos(): void {
+  combosCache.clear();
+  combosInFlight.clear();
+}
+
+export function obtenerComboDesdeCachePorId(id: string): ComboConItems | null {
+  const cleanId = (id || '').trim();
+  if (!cleanId) return null;
+  for (const entry of combosCache.values()) {
+    const found = entry.data.find((c) => c.id === cleanId);
+    if (found) return found;
+  }
+  return null;
+}
+
 export async function obtenerCombos(opts?: {
   soloActivos?: boolean;
   signal?: AbortSignal;
 }): Promise<ComboConItems[]> {
-  const sb = tryGetSupabase();
-  if (!sb) {
-    return getLocalCombos().map((c) => {
-      const { combo } = uiComboADb(c);
-      return {
-        ...(combo as Combo),
-        id: c.id,
-        items: c.items.map((it) => ({
-          id: it.id,
-          combo_id: c.id,
-          producto_id: it.productId,
-          cantidad: it.quantity,
-          costo_unitario: it.costPrice,
-          precio_unitario: it.unitPrice,
-          subtotal: it.subtotal,
-          _nombre: it.name,
-          _sku: it.sku,
-        })) as ComboItem[],
-      };
-    });
+  if (opts?.signal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError');
   }
 
-  let query = sb.from('combos').select(COMBO_COLUMNS).order('nombre');
-  if (opts?.soloActivos) query = query.eq('activo', true);
-  if (opts?.signal) query = query.abortSignal(opts.signal);
-  const { data, error } = await query;
-  if (error) throw error;
+  const key: 'activos' | 'todos' = opts?.soloActivos ? 'activos' : 'todos';
+  const now = Date.now();
 
-  const combos = (data ?? []) as Combo[];
-  if (combos.length === 0) return [];
-
-  const ids = combos.map((c) => c.id);
-  const { data: items, error: itemsErr } = await sb
-    .from('combo_items')
-    .select('id, combo_id, producto_id, cantidad, costo_unitario, precio_unitario, subtotal')
-    .in('combo_id', ids);
-  if (itemsErr) throw itemsErr;
-
-  const byCombo = new Map<string, ItemConMeta[]>();
-  for (const it of (items ?? []) as ComboItem[]) {
-    const arr = byCombo.get(it.combo_id) ?? [];
-    arr.push(it);
-    byCombo.set(it.combo_id, arr);
+  const cached = combosCache.get(key);
+  if (cached && now - cached.timestamp < COMBOS_CACHE_TTL) {
+    trackPosCacheHit('combos');
+    return [...cached.data];
   }
-
-  const productIds = [...new Set(((items ?? []) as ComboItem[]).map((it) => it.producto_id).filter(Boolean))];
-  const productMeta = new Map<string, { nombre: string; sku: string }>();
-  if (productIds.length > 0) {
-    const { data: prods } = await sb.from('productos').select('id, nombre, sku').in('id', productIds);
-    for (const p of prods ?? []) {
-      productMeta.set(String((p as { id: string }).id), {
-        nombre: String((p as { nombre: string }).nombre ?? ''),
-        sku: String((p as { sku: string }).sku ?? ''),
-      });
+  if (key === 'activos') {
+    const allCached = combosCache.get('todos');
+    if (allCached && now - allCached.timestamp < COMBOS_CACHE_TTL) {
+      const filtered = allCached.data.filter((c) => c.activo);
+      combosCache.set('activos', { timestamp: allCached.timestamp, data: filtered });
+      trackPosCacheHit('combos');
+      return [...filtered];
     }
   }
 
-  return combos.map((c) => ({
-    ...c,
-    items: (byCombo.get(c.id) ?? []).map((it) => ({
-      ...it,
-      _nombre: productMeta.get(it.producto_id)?.nombre ?? '',
-      _sku: productMeta.get(it.producto_id)?.sku ?? '',
-    })),
-  }));
+  if (!opts?.signal) {
+    const inFlight = combosInFlight.get(key);
+    if (inFlight) return inFlight;
+  }
+
+  const run = async (): Promise<ComboConItems[]> => {
+    const sb = tryGetSupabase();
+    if (!sb) {
+      const localList = getLocalCombos()
+        .filter((c) => !opts?.soloActivos || c.active)
+        .map((c) => {
+          const { combo } = uiComboADb(c);
+          return {
+            ...(combo as Combo),
+            id: c.id,
+            items: c.items.map((it) => ({
+              id: it.id,
+              combo_id: c.id,
+              producto_id: it.productId,
+              cantidad: it.quantity,
+              costo_unitario: it.costPrice,
+              precio_unitario: it.unitPrice,
+              subtotal: it.subtotal,
+              _nombre: it.name,
+              _sku: it.sku,
+            })) as ComboItem[],
+          };
+        });
+      combosCache.set(key, { timestamp: Date.now(), data: localList });
+      return localList;
+    }
+
+    trackPosNetworkRequest('combos');
+    let query = sb.from('combos').select(COMBO_COLUMNS).order('nombre');
+    if (opts?.soloActivos) query = query.eq('activo', true);
+    if (opts?.signal) query = query.abortSignal(opts.signal);
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const combos = (data ?? []) as Combo[];
+    if (combos.length === 0) {
+      if (!opts?.signal?.aborted) {
+        combosCache.set(key, { timestamp: Date.now(), data: [] });
+      }
+      return [];
+    }
+
+    const ids = combos.map((c) => c.id);
+    const { data: items, error: itemsErr } = await sb
+      .from('combo_items')
+      .select('id, combo_id, producto_id, cantidad, costo_unitario, precio_unitario, subtotal')
+      .in('combo_id', ids);
+    if (itemsErr) throw itemsErr;
+
+    const byCombo = new Map<string, ItemConMeta[]>();
+    for (const it of (items ?? []) as ComboItem[]) {
+      const arr = byCombo.get(it.combo_id) ?? [];
+      arr.push(it);
+      byCombo.set(it.combo_id, arr);
+    }
+
+    const productIds = [...new Set(((items ?? []) as ComboItem[]).map((it) => it.producto_id).filter(Boolean))];
+    const productMeta = new Map<string, { nombre: string; sku: string }>();
+    if (productIds.length > 0) {
+      const { data: prods } = await sb.from('productos').select('id, nombre, sku').in('id', productIds);
+      for (const p of prods ?? []) {
+        productMeta.set(String((p as { id: string }).id), {
+          nombre: String((p as { nombre: string }).nombre ?? ''),
+          sku: String((p as { sku: string }).sku ?? ''),
+        });
+      }
+    }
+
+    const result = combos.map((c) => ({
+      ...c,
+      items: (byCombo.get(c.id) ?? []).map((it) => ({
+        ...it,
+        _nombre: productMeta.get(it.producto_id)?.nombre ?? '',
+        _sku: productMeta.get(it.producto_id)?.sku ?? '',
+      })),
+    }));
+
+    if (!opts?.signal?.aborted) {
+      combosCache.set(key, { timestamp: Date.now(), data: result });
+    }
+    return result;
+  };
+
+  if (!opts?.signal) {
+    const promise = run().finally(() => {
+      combosInFlight.delete(key);
+    });
+    combosInFlight.set(key, promise);
+    return promise;
+  }
+
+  return run();
 }
 
 export async function obtenerComboPorId(id: string): Promise<ComboConItems | null> {
@@ -186,6 +260,7 @@ export async function obtenerComboPorId(id: string): Promise<ComboConItems | nul
 export async function guardarCombo(uiCombo: UiCombo): Promise<string> {
   if (!isSupabaseConfigured()) {
     saveOrUpdateCombo(uiCombo);
+    invalidarCacheCombos();
     return uiCombo.id;
   }
 
@@ -221,17 +296,20 @@ export async function guardarCombo(uiCombo: UiCombo): Promise<string> {
     if (itemsError) throw itemsError;
   }
 
+  invalidarCacheCombos();
   return comboId;
 }
 
 export async function eliminarCombo(id: string): Promise<void> {
   if (!isSupabaseConfigured()) {
     deleteLocalCombo(id);
+    invalidarCacheCombos();
     return;
   }
   const sb = getSupabase();
   const { error } = await sb.from('combos').delete().eq('id', id);
   if (error) throw error;
+  invalidarCacheCombos();
 }
 
 export { getLocalComboById, comboDbAUi as mapComboToUi };

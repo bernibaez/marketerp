@@ -1,4 +1,4 @@
-import { tryGetSupabase } from './clienteSupabase';
+import { isSafeSupabaseConfigured, getSafeSupabaseClient } from './supabaseSafeClient';
 import { GASTO_COLUMNS, type EstadoGasto } from '@/types/database';
 import { registrarMovimientoCaja } from './movimientosCaja.service';
 
@@ -38,6 +38,7 @@ export type NuevoGastoInput = {
   responsable_id?: string | null;
   caja_id?: string;
   cierre_id?: string;
+  omitirMovimientoCaja?: boolean;
   tiene_recibo?: boolean;
   estado?: EstadoGasto;
 };
@@ -121,7 +122,7 @@ function isUUID(str?: string | null): boolean {
 
 export async function obtenerCategoriasGasto(signal?: AbortSignal): Promise<CategoriaGastoUi[]> {
   const localList = getLocalCategorias();
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
   if (!sb) return localList;
 
   try {
@@ -186,7 +187,7 @@ export async function sugerirSiguienteCodigoGasto(): Promise<string> {
     }
   }
 
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
   if (sb) {
     try {
       const { data } = await sb
@@ -212,7 +213,7 @@ export async function sugerirSiguienteCodigoGasto(): Promise<string> {
 export async function obtenerGastos(signal?: AbortSignal): Promise<GastoUi[]> {
   const localList = getLocalGastos();
   const catsMap = new Map(getLocalCategorias().map((c) => [c.id, c.name]));
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
 
   let combined: GastoUi[] = [...localList];
 
@@ -355,13 +356,16 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
   // 1. Guardar de inmediato en almacenamiento local para no perder nunca el registro
   saveLocalGastos([newGastoUi, ...localGastos]);
 
-  // Si es un gasto pagado en efectivo o caja chica, reflejar en movimientos de caja para cuadre de caja
+  // Si es un gasto pagado en efectivo o caja chica asociado a caja/sesión,
+  // registrar exactamente UNA vez en movimientos_caja para arqueo y cuadre
   if (
-    effectiveMetodoPago.toLowerCase() === 'efectivo' ||
-    effectiveMetodoPago.toLowerCase() === 'caja_chica'
+    !input.omitirMovimientoCaja &&
+    (effectiveMetodoPago.toLowerCase() === 'efectivo' ||
+      effectiveMetodoPago.toLowerCase() === 'caja_chica') &&
+    (Boolean(input.cierre_id) || Boolean(input.caja_id) || !isSafeSupabaseConfigured())
   ) {
     try {
-      void registrarMovimientoCaja({
+      await registrarMovimientoCaja({
         caja_id: input.caja_id ? String(input.caja_id) : '1',
         cierre_id: input.cierre_id ?? null,
         cajero_id: authUser?.id && isUUID(authUser.id) ? authUser.id : null,
@@ -370,22 +374,14 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
         monto: Number(input.monto),
         concepto: input.descripcion.trim(),
         categoria: catName,
-      }).catch(() => {});
+      });
     } catch {
       // ignore
     }
   }
 
-  // 2. Intentar guardar en Supabase si está disponible (excluyendo entornos de pruebas automatizadas para no contaminar la base de datos de producción)
-  const isTestEnv =
-    typeof process !== 'undefined' &&
-    Boolean(
-      process.env.VITEST ||
-        process.env.NODE_ENV === 'test' ||
-        process.env.JEST_WORKER_ID
-    );
-
-  const sb = !isTestEnv ? tryGetSupabase() : null;
+  // 2. Intentar guardar en Supabase si está disponible (en tests sin mock getSafeSupabaseClient() retorna null)
+  const sb = getSafeSupabaseClient();
   if (sb) {
     try {
       const payloadWithMeta: Record<string, unknown> = {
@@ -397,6 +393,7 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
         metodo_pago: effectiveMetodoPago,
         fecha: effectiveFecha,
         caja_id: input.caja_id || null,
+        cierre_id: input.cierre_id || null,
         responsable_id: authUser?.id && isUUID(authUser.id) ? authUser.id : null,
         responsable_nombre: effectiveResponsable,
         tiene_recibo: input.tiene_recibo ?? false,
@@ -417,7 +414,7 @@ export async function crearGasto(input: NuevoGastoInput): Promise<GastoUi> {
             categoria_id: dbCatId,
             descripcion: input.descripcion.trim(),
             monto: input.monto,
-            caja_id: input.caja_id || null,
+            caja_id: isUUID(input.caja_id) ? input.caja_id : null,
             responsable_id: authUser?.id && isUUID(authUser.id) ? authUser.id : null,
             tiene_recibo: input.tiene_recibo ?? false,
             estado: input.estado ?? 'aprobado',
@@ -447,7 +444,7 @@ export async function actualizarEstadoGasto(id: string, estado: EstadoGasto): Pr
   });
   saveLocalGastos(local);
 
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
   if (sb) {
     try {
       await sb.from('gastos').update({ estado }).eq('id', id);
@@ -478,7 +475,7 @@ export async function actualizarGasto(
   });
   saveLocalGastos(local);
 
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
   if (sb) {
     try {
       const patch: Record<string, unknown> = {};
@@ -500,7 +497,7 @@ export async function eliminarGasto(id: string): Promise<void> {
   const local = getLocalGastos().filter((g) => g.id !== id);
   saveLocalGastos(local);
 
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
   if (sb) {
     try {
       await sb.from('gastos').delete().eq('id', id);
@@ -530,7 +527,7 @@ export async function crearCategoriaGasto(input: NuevaCategoriaGastoInput): Prom
 
   saveLocalCategorias([...localCats, newCat]);
 
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
   if (sb) {
     try {
       await sb.from('categorias_gasto').insert({
@@ -553,7 +550,7 @@ export async function eliminarCategoriaGasto(id: string): Promise<void> {
   const localCats = getLocalCategorias().filter((c) => c.id !== id);
   saveLocalCategorias(localCats);
 
-  const sb = tryGetSupabase();
+  const sb = getSafeSupabaseClient();
   if (sb) {
     try {
       await sb.from('categorias_gasto').update({ activo: false }).eq('id', id);

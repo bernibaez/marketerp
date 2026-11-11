@@ -152,6 +152,8 @@ export const POSModals: React.FC<POSModalsProps> = ({
         <PosReturnModal
           onClose={onCloseReturn}
           activeCashLabel={activeCashLabel}
+          activeCashId={String(activeCashDbId || activeCashId)}
+          cierreId={activeCashCierreId}
         />
       )}
 
@@ -166,8 +168,9 @@ export const POSModals: React.FC<POSModalsProps> = ({
       {registerDetailsOpen && (
         <RegisterDetailsModal
           onClose={onCloseRegisterDetails}
-          cajaId={String(activeCashId)}
+          cajaId={String(activeCashDbId || activeCashId)}
           cajaLabel={activeCashLabel}
+          cierreId={activeCashCierreId}
           includeUserSales={isAdminUser}
         />
       )}
@@ -190,6 +193,7 @@ export const POSModals: React.FC<POSModalsProps> = ({
       {closeCashModalOpen && (
         <PosCashCloseModal
           initialCajaId={String(activeCashDbId || activeCashId)}
+          initialCierreId={activeCashCierreId}
           onSuccess={onSuccessCloseCash}
           onClose={onCloseCloseCash}
         />

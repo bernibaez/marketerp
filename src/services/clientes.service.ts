@@ -1,6 +1,16 @@
 import { getSupabase, isSupabaseConfigured, tryGetSupabase } from './clienteSupabase';
 import { CLIENTE_COLUMNS, type Cliente } from '@/types/database';
 import { getPosCustomers, addPosCustomer } from '@/lib/posCustomers';
+import { trackPosCacheHit, trackPosNetworkRequest } from '@/lib/posPerfMetrics';
+
+const CLIENTES_CACHE_TTL = 5 * 60_000;
+const clientesCache = new Map<string, { timestamp: number; result: { datos: Cliente[]; total: number } }>();
+const clientesInFlight = new Map<string, Promise<{ datos: Cliente[]; total: number }>>();
+
+export function invalidarCacheClientes(): void {
+  clientesCache.clear();
+  clientesInFlight.clear();
+}
 
 export async function obtenerClientes(params: {
   busqueda?: string;
@@ -8,53 +18,89 @@ export async function obtenerClientes(params: {
   limite?: number;
   signal?: AbortSignal;
 }): Promise<{ datos: Cliente[]; total: number }> {
+  if (params.signal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError');
+  }
+
   const pagina = params.pagina ?? 1;
   const limite = params.limite ?? 20;
   const desde = (pagina - 1) * limite;
   const hasta = desde + limite - 1;
+  const busquedaKey = (params.busqueda || '').trim().toLowerCase();
+  const cacheKey = `${pagina}:${limite}:${busquedaKey}`;
 
-  const sb = tryGetSupabase();
-  if (!sb) {
-    let list = getPosCustomers().map(
-      (c, i): Cliente => ({
-        id: String(c.id ?? `local-${i}`),
-        codigo: `CLI-${String(i + 1).padStart(3, '0')}`,
-        nombre: c.name,
-        rnc_cedula: null,
-        telefono: c.phone ?? null,
-        correo: null,
-        direccion: null,
-        tipo_cliente: c.credit ? 'credito' : 'final',
-        limite_credito: c.credit ?? 0,
-        balance_actual: 0,
-        activo: true,
-      })
-    );
-    if (params.busqueda?.trim()) {
-      const q = params.busqueda.trim().toLowerCase();
-      list = list.filter(
-        (c) => c.nombre.toLowerCase().includes(q) || (c.telefono ?? '').includes(q)
+  const cached = clientesCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CLIENTES_CACHE_TTL) {
+    trackPosCacheHit('clientes');
+    return { datos: [...cached.result.datos], total: cached.result.total };
+  }
+
+  if (!params.signal) {
+    const inFlight = clientesInFlight.get(cacheKey);
+    if (inFlight) return inFlight;
+  }
+
+  const run = async (): Promise<{ datos: Cliente[]; total: number }> => {
+    const sb = tryGetSupabase();
+    if (!sb) {
+      let list = getPosCustomers().map(
+        (c, i): Cliente => ({
+          id: String(c.id ?? `local-${i}`),
+          codigo: `CLI-${String(i + 1).padStart(3, '0')}`,
+          nombre: c.name,
+          rnc_cedula: null,
+          telefono: c.phone ?? null,
+          correo: null,
+          direccion: null,
+          tipo_cliente: c.credit ? 'credito' : 'final',
+          limite_credito: c.credit ?? 0,
+          balance_actual: 0,
+          activo: true,
+        })
       );
+      if (params.busqueda?.trim()) {
+        const q = params.busqueda.trim().toLowerCase();
+        list = list.filter(
+          (c) => c.nombre.toLowerCase().includes(q) || (c.telefono ?? '').includes(q)
+        );
+      }
+      const res = { datos: list.slice(desde, hasta + 1), total: list.length };
+      clientesCache.set(cacheKey, { timestamp: Date.now(), result: res });
+      return res;
     }
-    return { datos: list.slice(desde, hasta + 1), total: list.length };
+
+    trackPosNetworkRequest('clientes');
+    let query = sb
+      .from('clientes')
+      .select(CLIENTE_COLUMNS, { count: 'exact' })
+      .eq('activo', true)
+      .order('nombre')
+      .range(desde, hasta);
+
+    if (params.busqueda?.trim()) {
+      const q = params.busqueda.trim();
+      query = query.or(`nombre.ilike.%${q}%,telefono.ilike.%${q}%,codigo.ilike.%${q}%`);
+    }
+    if (params.signal) query = query.abortSignal(params.signal);
+
+    const { data, error, count } = await query;
+    if (error) throw error;
+    const res = { datos: (data ?? []) as Cliente[], total: count ?? 0 };
+    if (!params.signal?.aborted) {
+      clientesCache.set(cacheKey, { timestamp: Date.now(), result: res });
+    }
+    return res;
+  };
+
+  if (!params.signal) {
+    const promise = run().finally(() => {
+      clientesInFlight.delete(cacheKey);
+    });
+    clientesInFlight.set(cacheKey, promise);
+    return promise;
   }
 
-  let query = sb
-    .from('clientes')
-    .select(CLIENTE_COLUMNS, { count: 'exact' })
-    .eq('activo', true)
-    .order('nombre')
-    .range(desde, hasta);
-
-  if (params.busqueda?.trim()) {
-    const q = params.busqueda.trim();
-    query = query.or(`nombre.ilike.%${q}%,telefono.ilike.%${q}%,codigo.ilike.%${q}%`);
-  }
-  if (params.signal) query = query.abortSignal(params.signal);
-
-  const { data, error, count } = await query;
-  if (error) throw error;
-  return { datos: (data ?? []) as Cliente[], total: count ?? 0 };
+  return run();
 }
 
 export async function crearCliente(datos: {
@@ -72,6 +118,7 @@ export async function crearCliente(datos: {
       phone: datos.telefono ?? '',
       credit: datos.limite_credito ?? 0,
     });
+    invalidarCacheClientes();
     return {
       id: String(added.id),
       codigo: `CLI-${added.id}`,
@@ -106,6 +153,7 @@ export async function crearCliente(datos: {
     .select(CLIENTE_COLUMNS)
     .single();
   if (error) throw error;
+  invalidarCacheClientes();
   return data as Cliente;
 }
 
@@ -133,6 +181,7 @@ export async function actualizarCliente(
     .select(CLIENTE_COLUMNS)
     .single();
   if (error) throw error;
+  invalidarCacheClientes();
   return data as Cliente;
 }
 
@@ -144,6 +193,7 @@ export async function eliminarCliente(id: string): Promise<void> {
   const sb = getSupabase();
   const { error } = await sb.from('clientes').update({ activo: false }).eq('id', id);
   if (error) throw error;
+  invalidarCacheClientes();
 }
 
 export async function obtenerCliente(id: string): Promise<Cliente | null> {

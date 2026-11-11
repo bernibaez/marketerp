@@ -129,6 +129,8 @@ export default function ExpensesReport({ dateFrom, dateTo }: ReportPeriodProps) 
         <ReportTable
           headers={['Código', 'Fecha', 'Categoría', 'Descripción', 'Monto', 'Estado']}
           rows={data.rows.map((r) => [r[0], r[1], r[2], r[3], r[4], statusBadge(String(r[5]))])}
+          searchPlaceholder="Buscar por código, categoría o descripción…"
+          itemLabel="gastos"
         />
       </div>
     </div>

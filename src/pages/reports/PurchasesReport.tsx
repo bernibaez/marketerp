@@ -86,6 +86,8 @@ export default function PurchasesReport({ dateFrom, dateTo }: ReportPeriodProps)
         <ReportTable
           headers={['Orden', 'Fecha', 'Proveedor', 'Estado', 'Ítems', 'Total']}
           rows={data.rows.map((r) => [r[0], r[1], r[2], statusBadge(String(r[3])), r[4], r[5]])}
+          searchPlaceholder="Buscar por orden, proveedor o estado…"
+          itemLabel="órdenes"
         />
       </div>
     </div>

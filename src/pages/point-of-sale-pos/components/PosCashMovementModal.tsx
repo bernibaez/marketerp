@@ -65,6 +65,7 @@ export default function PosCashMovementModal({
             cierre_id: cierreId,
             responsable_nombre: user?.name ?? 'Usuario',
             estado: 'aprobado',
+            omitirMovimientoCaja: true,
           });
         } catch (eGasto) {
           console.warn('Error al registrar gasto asociado al retiro:', eGasto);

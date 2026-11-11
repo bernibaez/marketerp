@@ -53,6 +53,8 @@ export default function AgentsReport({ dateFrom: _dateFrom, dateTo: _dateTo }: R
         <ReportTable
           headers={['Agente', 'Correo', 'Teléfono', 'Comisión %', 'Estado']}
           rows={statusRows}
+          searchPlaceholder="Buscar agente, correo o teléfono…"
+          itemLabel="agentes"
         />
       </div>
     </div>

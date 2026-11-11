@@ -5,6 +5,7 @@ import type { NCFType } from '@/lib/ncfStore';
 import type { CartItem, Customer } from '../components/POSTerminal';
 import { calculateCartTotals } from '@/lib/cartCalculations';
 import { getStoredProducts } from '@/lib/productStore';
+import { posPerfNow, recordAddToCart, recordUpdateQty } from '@/lib/posPerfMetrics';
 
 export function usePOSCart() {
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -105,6 +106,8 @@ export function usePOSCart() {
       qty = 1,
       replaceQty = false
     ) => {
+      const startedAt = posPerfNow();
+      try {
       if (
         product.sku.toUpperCase() === DELETE_SKU ||
         product.sku.toUpperCase() === 'ELIMINAR' ||
@@ -280,7 +283,7 @@ export function usePOSCart() {
           return [updatedItem, ...prev.filter((item) => item.id !== existing.id)];
         }
 
-        return [
+          return [
           {
             ...product,
             regularPrice,
@@ -296,6 +299,9 @@ export function usePOSCart() {
           ...prev,
         ];
       });
+      } finally {
+        recordAddToCart(posPerfNow() - startedAt);
+      }
     },
     [awaitingDeleteScan, deductOrRemoveFromCart, toggleDeleteMode, isWholesaleMode]
   );
@@ -371,8 +377,10 @@ export function usePOSCart() {
   }, []);
 
   const updateQty = useCallback((cartId: string, qty: number) => {
+    const startedAt = posPerfNow();
     const safeQty = Math.max(0, isNaN(qty) ? 0 : qty);
     setCart((prev) => prev.map((item) => (item.id === cartId ? { ...item, qty: safeQty } : item)));
+    recordUpdateQty(posPerfNow() - startedAt);
   }, []);
 
   const updateDiscount = useCallback((cartId: string, discount: number) => {

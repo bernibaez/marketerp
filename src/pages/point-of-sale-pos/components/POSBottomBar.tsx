@@ -26,7 +26,7 @@ interface POSBottomBarProps {
   onCreatePreSale: () => void;
 }
 
-export const POSBottomBar: React.FC<POSBottomBarProps> = ({
+export const POSBottomBar: React.FC<POSBottomBarProps> = React.memo(({
   total,
   fiscalEnabled,
   onToggleFiscal,
@@ -152,4 +152,4 @@ export const POSBottomBar: React.FC<POSBottomBarProps> = ({
       </div>
     </div>
   );
-};
+});

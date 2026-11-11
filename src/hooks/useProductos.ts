@@ -1,58 +1,127 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   actualizarProducto,
+  applyStockDeltasToCatalog,
   crearProducto,
   eliminarProducto,
+  hayCatalogoProductosEnCache,
+  hidratarRestoCatalogoEnCache,
   obtenerProductos,
   productoAUi,
   uiAProductoInsert,
   type ProductosFiltro,
+  type StockDelta,
 } from '@/services/productos.service';
 import type { Product } from '@/pages/product-management/components/ProductManagementScreen';
 import type { Producto } from '@/types/database';
 import { isAbortError } from '@/lib/isAbortError';
 
-export function useProductos(params: ProductosFiltro = {}) {
+export type UseProductosParams = ProductosFiltro & {
+  enabled?: boolean;
+  /** Límite rápido para apertura inicial cuando el catálogo maestro aún no está en caché. */
+  progressiveInitialLimit?: number;
+};
+
+export function useProductos(params: UseProductosParams = {}) {
+  const enabled = params.enabled ?? true;
   const [productos, setProductos] = useState<Producto[]>([]);
-  const [productosUi, setProductosUi] = useState<Product[]>([]);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
   const reqIdRef = useRef(0);
   const mountedRef = useRef(true);
+  const hydrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pagina = params.pagina ?? 1;
   const limite = params.limite ?? 5000;
+  const progressiveInitialLimit = params.progressiveInitialLimit;
   const busqueda = params.busqueda ?? '';
   const categoria = params.categoria;
   const estado = params.estado;
 
+  const productosUi = useMemo<Product[]>(
+    () => productos.map(productoAUi),
+    [productos]
+  );
+
+  const applyStockDeltas = useCallback((deltas: StockDelta[]) => {
+    if (deltas.length === 0) return;
+    setProductos((prev) => applyStockDeltasToCatalog(prev, deltas));
+  }, []);
+
+  const clearHydrationTimer = useCallback(() => {
+    if (hydrationTimerRef.current !== null) {
+      clearTimeout(hydrationTimerRef.current);
+      hydrationTimerRef.current = null;
+    }
+  }, []);
+
   const refetch = useCallback(async () => {
+    clearHydrationTimer();
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     const reqId = ++reqIdRef.current;
     setLoading(true);
     setError(null);
     try {
+      const canProgressive =
+        Boolean(progressiveInitialLimit && progressiveInitialLimit > 0 && progressiveInitialLimit < limite) &&
+        pagina === 1 &&
+        !busqueda &&
+        (!categoria || categoria === 'Todas') &&
+        !hayCatalogoProductosEnCache(estado ?? 'todos');
+
+      const initialLimit = canProgressive ? progressiveInitialLimit! : limite;
       const res = await obtenerProductos({
         pagina,
-        limite,
+        limite: initialLimit,
         busqueda,
         categoria,
         estado,
       });
       if (!mountedRef.current || reqId !== reqIdRef.current) return;
       setProductos(res.datos);
-      setProductosUi(res.datos.map(productoAUi));
       setTotal(res.total);
+      setLoading(false);
+
+      if (canProgressive && res.total > res.datos.length) {
+        hydrationTimerRef.current = setTimeout(() => {
+          hydrationTimerRef.current = null;
+          if (!mountedRef.current || reqId !== reqIdRef.current) return;
+          void hidratarRestoCatalogoEnCache({
+            estado: estado ?? 'todos',
+            initialPage: res,
+            maxLimite: limite,
+          })
+            .then((fullRes) => {
+              if (!mountedRef.current || reqId !== reqIdRef.current) return;
+              setProductos(fullRes.datos);
+              setTotal(fullRes.total);
+            })
+            .catch(() => {
+              // Silenciar error de hidratación en segundo plano; la búsqueda remota cubre faltantes
+            });
+        }, 120);
+      }
     } catch (e) {
       if (isAbortError(e) || !mountedRef.current || reqId !== reqIdRef.current) return;
       setError(e instanceof Error ? e.message : 'Error al cargar productos');
-    } finally {
-      if (mountedRef.current && reqId === reqIdRef.current) setLoading(false);
+      setLoading(false);
     }
-  }, [pagina, limite, busqueda, categoria, estado]);
+  }, [enabled, pagina, limite, progressiveInitialLimit, busqueda, categoria, estado, clearHydrationTimer]);
 
   useEffect(() => {
     mountedRef.current = true;
+    if (!enabled) {
+      setLoading(false);
+      return () => {
+        mountedRef.current = false;
+        reqIdRef.current += 1;
+        clearHydrationTimer();
+      };
+    }
     void refetch();
 
     const handleProductsUpdated = () => {
@@ -65,9 +134,10 @@ export function useProductos(params: ProductosFiltro = {}) {
     return () => {
       mountedRef.current = false;
       reqIdRef.current += 1;
+      clearHydrationTimer();
       window.removeEventListener('mercato_products_updated', handleProductsUpdated);
     };
-  }, [refetch]);
+  }, [enabled, refetch, clearHydrationTimer]);
 
   const crear = useCallback(
     async (product: Omit<Product, 'id' | 'stockStatus'> & { id?: string }) => {
@@ -134,6 +204,7 @@ export function useProductos(params: ProductosFiltro = {}) {
     loading,
     error,
     refetch,
+    applyStockDeltas,
     crear,
     actualizar,
     eliminar,

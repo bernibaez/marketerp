@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { toast } from '@/lib/toast';
 import { RotateCcw } from 'lucide-react';
 import POSHeader from './POSHeader';
@@ -27,6 +27,15 @@ import { useNavigate } from 'react-router-dom';
 import { useProductos } from '@/hooks/useProductos';
 import { useCombos } from '@/hooks/useCombos';
 import { syncInvoiceSettingsFromSupabase } from '@/lib/invoiceSettingsStore';
+import { buildPosCatalogIndex } from '../utils/posCatalogIndex';
+import { createPOSSearchStore } from '../utils/posSearchStore';
+import { hayCatalogoProductosEnCache, type StockDelta } from '@/services/productos.service';
+import {
+  markPosOpenReady,
+  markPosOpenStart,
+  posPerfNow,
+  recordPostSaleReady,
+} from '@/lib/posPerfMetrics';
 
 const ADMIN_OWN_CASH: CashRegisterId = '1';
 
@@ -128,11 +137,34 @@ export default function POSTerminal() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const isAdminUser = isAdminOrSuperAdmin(user);
-  const { registers, loading: registersLoading, refetch: refetchRegisters, markRegisterClosed } = useCashRegisters();
+  const [wasCatalogCacheHit] = useState<boolean>(() => {
+    markPosOpenStart();
+    return hayCatalogoProductosEnCache('activo');
+  });
+  const { registers, loading: registersLoading, refetch: refetchRegisters, markRegisterClosed, recordSaleOnRegister } = useCashRegisters();
 
-  // 1. Data Catalogs
-  const { productosUi, refetch: refetchProductos } = useProductos({ pagina: 1, limite: 5000, estado: 'activo' });
+  // 1. Data Catalogs (carga inicial rápida progresiva + índice O(n) + store externo)
+  const { productosUi, loading: productosLoading, applyStockDeltas } = useProductos({
+    pagina: 1,
+    limite: 5000,
+    progressiveInitialLimit: 250,
+    estado: 'activo',
+  });
   const { combos } = useCombos(true);
+  const catalogIndex = useMemo(
+    () => buildPosCatalogIndex(productosUi, !productosLoading),
+    [productosUi, productosLoading]
+  );
+  const searchStore = useMemo(() => createPOSSearchStore(), []);
+
+  useEffect(() => {
+    if (!registersLoading && !productosLoading) {
+      markPosOpenReady({
+        catalogCount: productosUi.length,
+        cacheHit: wasCatalogCacheHit,
+      });
+    }
+  }, [registersLoading, productosLoading, productosUi.length, wasCatalogCacheHit]);
 
   // 2. Cart & Calculations Hook
   const {
@@ -233,7 +265,28 @@ export default function POSTerminal() {
     clearCart,
   });
 
-  // 5. Checkout & Payment Hook
+  // 5. Checkout & Payment Hook (actualización incremental post-venta sin recargar 5,000 productos ni 500 ventas)
+  const cartRef = useRef(cart);
+  cartRef.current = cart;
+  const selectedCustomerRef = useRef(selectedCustomer);
+  selectedCustomerRef.current = selectedCustomer;
+  const fiscalEnabledRef = useRef(fiscalEnabled);
+  fiscalEnabledRef.current = fiscalEnabled;
+
+  const handleSaleSuccess = useCallback(
+    ({ saleTotal, stockDeltas }: { saleTotal: number; stockDeltas: StockDelta[] }) => {
+      const t0 = posPerfNow();
+      recordSaleOnRegister(activeCashId, activeCash.cierreId, saleTotal);
+      applyStockDeltas(stockDeltas);
+      recordPostSaleReady(posPerfNow() - t0, {
+        deltaCount: stockDeltas.length,
+        skippedFullCatalogReload: true,
+        skippedFullRegisterReload: true,
+      });
+    },
+    [recordSaleOnRegister, activeCashId, activeCash.cierreId, applyStockDeltas]
+  );
+
   const {
     paymentOpen,
     setPaymentOpen,
@@ -261,15 +314,14 @@ export default function POSTerminal() {
     cashIsOpen,
     activeCashId,
     activeCashLabel: activeCash.label,
+    activeCashSessionId: activeCash.cierreId,
     activeCashCashierId: activeCashSession?.open ? activeCashSession.cashierId : undefined,
     activeCashCashierName: activeCashSession?.open ? activeCashSession.cashier : undefined,
     user,
+    combos,
     clearCart,
     navigate,
-    onSaleSuccess: () => {
-      void refetchRegisters();
-      void refetchProductos();
-    },
+    onSaleSuccess: handleSaleSuccess,
   });
 
   // 6. Auxiliary Modals State
@@ -288,43 +340,46 @@ export default function POSTerminal() {
   const [closeCashModalOpen, setCloseCashModalOpen] = useState(false);
   const [weightScanOpen, setWeightScanOpen] = useState(false);
 
-  const handleOpenScale = (productId?: string | any, weight?: number, product?: any, replaceExisting?: boolean) => {
-    let actualProductId = typeof productId === 'string' ? productId : undefined;
-    let actualProduct = product;
-    let actualWeight = weight;
-    let actualReplace = replaceExisting;
+  const handleOpenScale = useCallback(
+    (productId?: string | any, weight?: number, product?: any, replaceExisting?: boolean) => {
+      let actualProductId = typeof productId === 'string' ? productId : undefined;
+      let actualProduct = product;
+      let actualWeight = weight;
+      let actualReplace = replaceExisting;
 
-    if (productId && typeof productId === 'object') {
-      actualProduct = productId;
-      actualProductId = productId.productId || productId.id;
-      actualWeight = weight !== undefined ? weight : (productId.qty ?? 1.0);
-      actualReplace = replaceExisting !== undefined ? replaceExisting : true;
-    }
+      if (productId && typeof productId === 'object') {
+        actualProduct = productId;
+        actualProductId = productId.productId || productId.id;
+        actualWeight = weight !== undefined ? weight : (productId.qty ?? 1.0);
+        actualReplace = replaceExisting !== undefined ? replaceExisting : true;
+      }
 
-    const existingInCart = actualProductId
-      ? cart.find(
-          (i) =>
-            i.productId === actualProductId ||
-            (actualProduct?.sku && i.sku && i.sku.toLowerCase() === String(actualProduct.sku).toLowerCase())
-        )
-      : undefined;
-    const effectiveWeight = actualWeight !== undefined ? actualWeight : existingInCart?.qty ?? 1.0;
-    const effectiveProduct = actualProduct || existingInCart;
-    setScaleParams(
-      actualProductId || effectiveWeight || effectiveProduct
-        ? {
-            productId: actualProductId,
-            weight: effectiveWeight,
-            product: effectiveProduct,
-            replaceExisting: actualReplace !== undefined ? actualReplace : Boolean(existingInCart),
-          }
-        : null
-    );
-    setScaleOpen(true);
-  };
+      const existingInCart = actualProductId
+        ? cartRef.current.find(
+            (i) =>
+              i.productId === actualProductId ||
+              (actualProduct?.sku && i.sku && i.sku.toLowerCase() === String(actualProduct.sku).toLowerCase())
+          )
+        : undefined;
+      const effectiveWeight = actualWeight !== undefined ? actualWeight : existingInCart?.qty ?? 1.0;
+      const effectiveProduct = actualProduct || existingInCart;
+      setScaleParams(
+        actualProductId || effectiveWeight || effectiveProduct
+          ? {
+              productId: actualProductId,
+              weight: effectiveWeight,
+              product: effectiveProduct,
+              replaceExisting: actualReplace !== undefined ? actualReplace : Boolean(existingInCart),
+            }
+          : null
+      );
+      setScaleOpen(true);
+    },
+    []
+  );
 
   // 7. Scanner, Scale Parser & Global Keyboard Shortcuts Hook
-  const { searchQuery, setSearchQuery, realScaleCatalog, handleSearchSubmit } = usePOSScanner({
+  const { realScaleCatalog, handleSearchSubmit } = usePOSScanner({
     enabled: cashIsOpen,
     cart,
     addToCart,
@@ -334,6 +389,8 @@ export default function POSTerminal() {
     toggleDeleteMode,
     handleCancelDeleteMode,
     productosUi,
+    catalogIndex,
+    searchStore,
     combos,
     orderCompleted,
     paymentOpen,
@@ -356,25 +413,31 @@ export default function POSTerminal() {
   } | null>(null);
   const [authorizedSupervisor, setAuthorizedSupervisor] = useState<AuthUser | null>(null);
 
-  const handleRequestPriceChange = (item: CartItem) => {
-    if (!isAdminUser && !canChangePrice(user)) {
-      toast.error('Acceso denegado: Solo el Administrador o Super Administrador pueden cambiar precios de productos.');
-      return;
-    }
-    setAuthorizedSupervisor(user);
-    setPriceEditTargetItem(item);
-    setPriceEditModalOpen(true);
-  };
+  const handleRequestPriceChange = useCallback(
+    (item: CartItem) => {
+      if (!isAdminUser && !canChangePrice(user)) {
+        toast.error('Acceso denegado: Solo el Administrador o Super Administrador pueden cambiar precios de productos.');
+        return;
+      }
+      setAuthorizedSupervisor(user);
+      setPriceEditTargetItem(item);
+      setPriceEditModalOpen(true);
+    },
+    [isAdminUser, user]
+  );
 
-  const handleOpenCartItemDiscount = (item: CartItem) => {
-    if (isAdminUser) {
-      setDiscountTargetProduct(item);
-      setDiscountModalOpen(true);
-    } else {
-      setPendingSupervisorAction({ type: 'discount', item });
-      setSupervisorAuthModalOpen(true);
-    }
-  };
+  const handleOpenCartItemDiscount = useCallback(
+    (item: CartItem) => {
+      if (isAdminUser) {
+        setDiscountTargetProduct(item);
+        setDiscountModalOpen(true);
+      } else {
+        setPendingSupervisorAction({ type: 'discount', item });
+        setSupervisorAuthModalOpen(true);
+      }
+    },
+    [isAdminUser]
+  );
 
   const handleSupervisorAuthorized = (adminUser: AuthUser) => {
     setAuthorizedSupervisor(adminUser);
@@ -436,6 +499,79 @@ export default function POSTerminal() {
     setDiscountTargetProduct(null);
   };
 
+  const handleOpenHold = useCallback(() => setHoldOpen(true), []);
+  const handleOpenExpense = useCallback(() => setExpenseOpen(true), []);
+  const handleOpenReturn = useCallback(() => setReturnOpen(true), []);
+  const handleSwitchCash = useCallback(() => setCashSwitchOpen(true), []);
+  const handleOpenRegisterDetails = useCallback(() => setRegisterDetailsOpen(true), []);
+  const handleOpenCash = useCallback(() => setOpenCashModalOpen(true), []);
+  const handleCloseCash = useCallback(() => setCloseCashModalOpen(true), []);
+  const handleOpenWeightScan = useCallback(() => setWeightScanOpen(true), []);
+
+  const handleSetCustomer = useCallback(
+    (c: Customer | null) => {
+      setSelectedCustomer(c);
+      if (c?.tipo_ncf) {
+        setSelectedNcfType(c.tipo_ncf as NCFType);
+      } else if (c?.rnc_cedula) {
+        setSelectedNcfType('B01');
+      }
+    },
+    [setSelectedCustomer, setSelectedNcfType]
+  );
+
+  const handleSelectNcfType = useCallback(
+    (t: NCFType) => {
+      setSelectedNcfType(t);
+      setFiscalEnabled(true);
+    },
+    [setSelectedNcfType, setFiscalEnabled]
+  );
+
+  const handleEditWeight = useCallback(
+    (item: CartItem) => handleOpenScale(item.productId, item.qty, item, true),
+    [handleOpenScale]
+  );
+
+  const handleOpenCheckout = useCallback(() => openPayment(), [openPayment]);
+  const handleToggleFiscal = useCallback(() => setFiscalEnabled((prev) => !prev), [setFiscalEnabled]);
+
+  const handleToggleFiscalToast = useCallback(() => {
+    const next = !fiscalEnabledRef.current;
+    setFiscalEnabled(next);
+    if (next) {
+      toast.info('Factura Fiscal (NCF) activada para esta venta');
+    } else {
+      toast.info('Factura Fiscal desactivada');
+    }
+  }, [setFiscalEnabled]);
+
+  const handleCardPayment = useCallback(() => openPayment('card'), [openPayment]);
+  const handleSplitPayment = useCallback(() => openPayment('split'), [openPayment]);
+  const handleCreditPayment = useCallback(() => {
+    if (cartRef.current.length === 0) {
+      toast.error('El carrito está vacío');
+      return;
+    }
+    if (!selectedCustomerRef.current) {
+      toast.error('Selecciona un cliente para venta a crédito');
+      return;
+    }
+    setPreferredPayMethod('credit');
+    openPayment('credit');
+  }, [setPreferredPayMethod, openPayment]);
+
+  const handleCreatePreSale = useCallback(() => {
+    if (cartRef.current.length === 0) {
+      toast.error('Agrega productos para crear una preventa');
+      return;
+    }
+    setHoldOpen(true);
+    toast.info('Guarda la preventa como venta suspendida');
+  }, []);
+
+  const cartItemsCount = useMemo(() => cart.reduce((s, i) => s + i.qty, 0), [cart]);
+
   const isAnyModalOpen =
     paymentOpen ||
     expenseOpen ||
@@ -464,7 +600,7 @@ export default function POSTerminal() {
         aria-hidden={!cashIsOpen || isAnyModalOpen}
       >
         <POSHeader
-          cartCount={cart.reduce((s, i) => s + i.qty, 0)}
+          cartCount={cartItemsCount}
           total={total}
           heldCount={heldSales.length}
           awaitingDelete={awaitingDeleteScan}
@@ -473,15 +609,15 @@ export default function POSTerminal() {
           cashierName={user?.name || activeCash.cashier || 'Cajero'}
           isRemoteAdmin={isRemoteAdmin}
           onClear={clearCart}
-          onHold={() => setHoldOpen(true)}
-          onExpense={() => setExpenseOpen(true)}
-          onReturn={() => setReturnOpen(true)}
+          onHold={handleOpenHold}
+          onExpense={handleOpenExpense}
+          onReturn={handleOpenReturn}
           onCancelDelete={handleCancelDeleteMode}
-          onSwitchCash={() => setCashSwitchOpen(true)}
-          onOpenRegisterDetails={() => setRegisterDetailsOpen(true)}
+          onSwitchCash={handleSwitchCash}
+          onOpenRegisterDetails={handleOpenRegisterDetails}
           cashIsOpen={cashIsOpen}
-          onOpenCash={() => setOpenCashModalOpen(true)}
-          onCloseCash={() => setCloseCashModalOpen(true)}
+          onOpenCash={handleOpenCash}
+          onCloseCash={handleCloseCash}
         />
 
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 overflow-hidden min-h-0">
@@ -489,35 +625,23 @@ export default function POSTerminal() {
             <CartPanel
               cart={cart}
               customer={selectedCustomer}
-              onSetCustomer={(c) => {
-                setSelectedCustomer(c);
-                if (c?.tipo_ncf) {
-                  setSelectedNcfType(c.tipo_ncf as NCFType);
-                } else if (c?.rnc_cedula) {
-                  setSelectedNcfType('B01');
-                }
-              }}
+              onSetCustomer={handleSetCustomer}
               selectedNcfType={selectedNcfType}
-              onSelectNcfType={(t) => {
-                setSelectedNcfType(t);
-                setFiscalEnabled(true);
-              }}
+              onSelectNcfType={handleSelectNcfType}
               onUpdateQty={updateQty}
               onUpdateDiscount={updateDiscount}
               onRemove={removeFromCart}
-              onEditWeight={(item) => handleOpenScale(item.productId, item.qty, item, true)}
-              onOpenWeightScan={() => setWeightScanOpen(true)}
+              onEditWeight={handleEditWeight}
+              onOpenWeightScan={handleOpenWeightScan}
               globalDiscount={globalDiscount}
               onSetGlobalDiscount={setGlobalDiscount}
               subtotal={subtotal}
               taxTotal={taxTotal}
               globalDiscountAmount={globalDiscountAmount}
               total={total}
-              onCheckout={() => openPayment()}
+              onCheckout={handleOpenCheckout}
               fiscalEnabled={fiscalEnabled}
-              onToggleFiscal={() => setFiscalEnabled((prev) => !prev)}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
+              onToggleFiscal={handleToggleFiscal}
               onSearchSubmit={handleSearchSubmit}
               onAddToCart={addToCart}
               awaitingDelete={awaitingDeleteScan}
@@ -530,6 +654,8 @@ export default function POSTerminal() {
               onOpenPriceModal={handleRequestPriceChange}
               isAdmin={isAdminUser}
               catalogProducts={productosUi}
+              catalogIndex={catalogIndex}
+              searchStore={searchStore}
             />
           </div>
 
@@ -538,53 +664,28 @@ export default function POSTerminal() {
               onAddToCart={addToCart}
               onOpenScale={handleOpenScale}
               awaitingDelete={awaitingDeleteScan}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              catalogProducts={productosUi}
+              catalogIndex={catalogIndex}
+              combos={combos}
+              searchStore={searchStore}
+              catalogLoading={productosLoading}
             />
           </div>
         </div>
 
         <POSBottomBar
           total={total}
-          cartCount={cart.reduce((s, i) => s + i.qty, 0)}
+          cartCount={cartItemsCount}
           selectedCustomer={selectedCustomer}
           fiscalEnabled={fiscalEnabled}
-          onToggleFiscal={() => {
-            const next = !fiscalEnabled;
-            setFiscalEnabled(next);
-            if (next) {
-              toast.info('Factura Fiscal (NCF) activada para esta venta');
-            } else {
-              toast.info('Factura Fiscal desactivada');
-            }
-          }}
+          onToggleFiscal={handleToggleFiscalToast}
           onQuickCash={handleQuickCashSale}
-          onCardPayment={() => openPayment('card')}
-          onSplitPayment={() => openPayment('split')}
-          onCreditPayment={() => {
-            if (cart.length === 0) {
-              toast.error('El carrito está vacío');
-              return;
-            }
-            if (!selectedCustomer) {
-              toast.error('Selecciona un cliente para venta a crédito');
-              return;
-            }
-            setPreferredPayMethod('credit');
-            openPayment('credit');
-          }}
+          onCardPayment={handleCardPayment}
+          onSplitPayment={handleSplitPayment}
+          onCreditPayment={handleCreditPayment}
           onClearCart={clearCart}
-          onOpenHold={() => setHoldOpen(true)}
+          onOpenHold={handleOpenHold}
           onCreateQuote={handleCreateQuote}
-          onCreatePreSale={() => {
-            if (cart.length === 0) {
-              toast.error('Agrega productos para crear una preventa');
-              return;
-            }
-            setHoldOpen(true);
-            toast.info('Guarda la preventa como venta suspendida');
-          }}
+          onCreatePreSale={handleCreatePreSale}
         />
       </div>
 

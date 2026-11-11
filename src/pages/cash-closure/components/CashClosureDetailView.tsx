@@ -69,6 +69,12 @@ export const CashClosureDetailView: React.FC<CashClosureDetailViewProps> = ({
                   <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 uppercase">
                     Turno Cerrado
                   </span>
+                  {closure.isInconsistent && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 uppercase">
+                      <AlertTriangle size={12} />
+                      Registro Inconsistente
+                    </span>
+                  )}
                 </div>
                 <p className="text-sm font-semibold text-muted-foreground mt-0.5">
                   {closure.cashRegisterLabel || `Caja #${closure.cashRegisterId}`} · Fecha {closure.date}
@@ -102,6 +108,28 @@ export const CashClosureDetailView: React.FC<CashClosureDetailViewProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Read-only inconsistency alert (never alters persisted figures) */}
+        {closure.isInconsistent && (
+          <div className="p-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200 flex items-start gap-3">
+            <AlertTriangle size={20} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+            <div className="space-y-1 text-xs">
+              <p className="font-extrabold uppercase tracking-wider">
+                Advertencia de consistencia contable (solo lectura)
+              </p>
+              <p className="text-amber-800/90 dark:text-amber-200/90">
+                Los importes mostrados corresponden exactamente a los valores persistidos en el cierre original y no fueron recalculados automáticamente:
+              </p>
+              {closure.inconsistencyReasons && closure.inconsistencyReasons.length > 0 && (
+                <ul className="list-disc pl-4 space-y-0.5 font-semibold">
+                  {closure.inconsistencyReasons.map((reason, idx) => (
+                    <li key={idx}>{reason}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* User & Shift Info Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -216,7 +244,10 @@ export const CashClosureDetailView: React.FC<CashClosureDetailViewProps> = ({
                 RD$ {closure.expectedCash.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
               </span>
               <p className="text-[11px] text-muted-foreground">
-                (Fondo Inicial RD$ {(closure.baseCash ?? 0).toLocaleString()} + Ventas Efectivo RD$ {(closure.totalCash ?? 0).toLocaleString()})
+                Fondo Inicial RD$ {(closure.baseCash ?? 0).toLocaleString()} + Ventas Efectivo RD$ {(closure.totalCash ?? 0).toLocaleString()}
+                {(closure.totalEntradas ?? 0) > 0 ? ` + Entradas RD$ ${(closure.totalEntradas ?? 0).toLocaleString()}` : ''}
+                {(closure.totalRetiros ?? 0) > 0 ? ` - Retiros/Gastos RD$ ${(closure.totalRetiros ?? 0).toLocaleString()}` : ''}
+                {(closure.totalDevoluciones ?? 0) > 0 ? ` - Devoluciones RD$ ${(closure.totalDevoluciones ?? 0).toLocaleString()}` : ''}
               </p>
             </div>
 

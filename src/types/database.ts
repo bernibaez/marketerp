@@ -132,6 +132,7 @@ export interface Venta {
   cajero_id: string | null;
   cliente_id: string | null;
   caja_id: string | null;
+  cierre_id?: string | null;
   subtotal: number;
   monto_impuesto: number;
   monto_descuento: number;
@@ -186,7 +187,10 @@ export interface CierreCaja {
   id: string;
   codigo: string;
   caja_id: string;
+  caja_label?: string | null;
   cajero_id: string | null;
+  cajero_nombre?: string | null;
+  cajero_username?: string | null;
   sucursal_id: string | null;
   monto_apertura: number;
   monto_esperado: number;
@@ -196,6 +200,13 @@ export interface CierreCaja {
   total_efectivo: number;
   total_tarjeta: number;
   total_transferencia: number;
+  total_otros?: number;
+  total_entradas?: number;
+  total_retiros?: number;
+  total_devoluciones?: number;
+  notes?: string | null;
+  usuario_cierre_id?: string | null;
+  usuario_cierre_nombre?: string | null;
   estado: EstadoCaja;
   abierta_en: string;
   cerrada_en: string | null;
@@ -228,14 +239,20 @@ export const COMBO_COLUMNS =
 export const CLIENTE_COLUMNS =
   'id, codigo, nombre, rnc_cedula, telefono, correo, direccion, tipo_cliente, grupo_id, limite_credito, balance_actual, activo, creado_en' as const;
 
-export const VENTA_COLUMNS =
+export const VENTA_COLUMNS_LEGACY =
   'id, numero_factura, ncf, tipo_ncf, sucursal_id, cajero_id, cliente_id, caja_id, subtotal, monto_impuesto, monto_descuento, monto_total, costo_total, metodo_pago, monto_pagado, monto_efectivo, monto_tarjeta, monto_transferencia, monto_credito, devuelta_entregada, estado, creado_en' as const;
+
+export const VENTA_COLUMNS =
+  'id, numero_factura, ncf, tipo_ncf, sucursal_id, cajero_id, cliente_id, caja_id, cierre_id, subtotal, monto_impuesto, monto_descuento, monto_total, costo_total, metodo_pago, monto_pagado, monto_efectivo, monto_tarjeta, monto_transferencia, monto_credito, devuelta_entregada, estado, creado_en' as const;
 
 export const AJUSTE_COLUMNS =
   'id, codigo, producto_id, tipo_ajuste, cantidad_anterior, cantidad_nueva, cantidad_variacion, motivo, responsable_id, creado_en' as const;
 
-export const CIERRE_COLUMNS =
+export const CIERRE_COLUMNS_LEGACY =
   'id, codigo, caja_id, cajero_id, sucursal_id, monto_apertura, monto_esperado, monto_real, monto_diferencia, total_ventas, total_efectivo, total_tarjeta, total_transferencia, estado, abierta_en, cerrada_en' as const;
+
+export const CIERRE_COLUMNS =
+  'id, codigo, caja_id, caja_label, cajero_id, cajero_nombre, cajero_username, sucursal_id, monto_apertura, monto_esperado, monto_real, monto_diferencia, total_ventas, total_efectivo, total_tarjeta, total_transferencia, total_otros, total_entradas, total_retiros, total_devoluciones, notes, estado, abierta_en, cerrada_en' as const;
 
 export const PERFIL_COLUMNS =
   'id, nombre_completo, correo, telefono, rol, sucursal_id, codigo_acceso, activo, creado_en, actualizado_en' as const;

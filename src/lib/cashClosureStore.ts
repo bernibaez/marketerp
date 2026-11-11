@@ -32,8 +32,13 @@ export type CashClosure = {
   difference: number; // countedCash - expectedCash
   
   baseCash?: number;
+  totalEntradas?: number;
+  totalRetiros?: number;
+  totalDevoluciones?: number;
   status?: 'abierta' | 'cerrada';
   notes?: string;
+  isInconsistent?: boolean;
+  inconsistencyReasons?: string[];
 };
 
 const STORAGE_KEY = 'mercato_cash_closures';
@@ -54,6 +59,13 @@ export function getCashClosures(): CashClosure[] {
 export function saveCashClosure(closure: CashClosure): CashClosure[] {
   const current = getCashClosures();
   const updated = [closure, ...current.filter((c) => c.id !== closure.id)];
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  return updated;
+}
+
+export function removeCashClosure(id: string): CashClosure[] {
+  const current = getCashClosures();
+  const updated = current.filter((c) => c.id !== id);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   return updated;
 }

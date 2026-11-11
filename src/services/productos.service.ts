@@ -11,6 +11,7 @@ import {
 } from '@/lib/scaleBarcode';
 import { isAbortError } from '@/lib/isAbortError';
 import { calcularStockPresentacion } from './presentaciones.service';
+import { trackPosCacheHit, trackPosNetworkRequest } from '@/lib/posPerfMetrics';
 
 export type ProductosFiltro = {
   pagina?: number;
@@ -423,10 +424,46 @@ interface MasterCatalogEntry {
 }
 const masterCatalogCache = new Map<string, MasterCatalogEntry>();
 
+export type StockDelta = {
+  productoId: string;
+  delta: number;
+};
+
 export function invalidarCacheProductos(): void {
   productosCache.clear();
   inFlightRequests.clear();
   masterCatalogCache.clear();
+}
+
+export function obtenerProductoEnCachePorId(id: string): Producto | null {
+  const cleanId = (id || '').trim();
+  if (!cleanId) return null;
+  for (const entry of masterCatalogCache.values()) {
+    const found = entry.data.find((p) => p.id === cleanId);
+    if (found) return found;
+  }
+  for (const entry of productosCache.values()) {
+    const found = entry.result.datos.find((p) => p.id === cleanId);
+    if (found) return found;
+  }
+  return null;
+}
+
+export function hayCatalogoProductosEnCache(estado?: EstadoProducto | 'todos'): boolean {
+  const now = Date.now();
+  if (estado) {
+    const direct = masterCatalogCache.get(estado);
+    if (direct && now - direct.timestamp < PRODUCTOS_CACHE_TTL) return true;
+    if (estado !== 'todos') {
+      const all = masterCatalogCache.get('todos');
+      if (all && now - all.timestamp < PRODUCTOS_CACHE_TTL) return true;
+    }
+    return false;
+  }
+  for (const entry of masterCatalogCache.values()) {
+    if (now - entry.timestamp < PRODUCTOS_CACHE_TTL) return true;
+  }
+  return false;
 }
 
 export function applyPresentationConversions(
@@ -435,6 +472,9 @@ export function applyPresentationConversions(
 ): Producto[] {
   const byId = new Map<string, Producto>();
   const bySku = new Map<string, Producto>();
+  const nonSixProducts: Array<{ prod: Producto; nameLower: string }> = [];
+  const seenNonSixIds = new Set<string>();
+
   const index = (p: Producto) => {
     if (p.id) byId.set(p.id, p);
     if (p.sku) bySku.set(p.sku.toLowerCase().trim(), p);
@@ -451,6 +491,51 @@ export function applyPresentationConversions(
   }
   for (const p of products) index(p);
 
+  // Pre-indexar nombres en minúsculas una sola vez para evitar O(n^2) en presentaciones sin producto_base_id
+  let needsNameFallback = false;
+  for (const p of products) {
+    if (!p.producto_base_id && !Array.isArray((p as any).composite_items)) {
+      const nameLower = (p.nombre || '').toLowerCase();
+      const unitLower = (p.unidad || '').toLowerCase();
+      const skuClean = (p.sku || '').toLowerCase().trim();
+      if (
+        unitLower.includes('six') ||
+        nameLower.includes('six') ||
+        skuClean === '23653' ||
+        nameLower.includes('fardo de agua pureza sana') ||
+        skuClean === '0686' ||
+        nameLower === 'huevos 1 carton' ||
+        skuClean === '0875' ||
+        nameLower === 'huevo 1 carton'
+      ) {
+        needsNameFallback = true;
+        break;
+      }
+    }
+  }
+
+  let specialPureza: Producto | undefined;
+  let specialMedioCarton: Producto | undefined;
+  let specialHuevoMedio: Producto | undefined;
+  if (needsNameFallback) {
+    for (const p of byId.values()) {
+      const nameLower = (p.nombre || '').toLowerCase();
+      if (!specialPureza && nameLower.includes('botella de agua pureza sana')) {
+        specialPureza = p;
+      }
+      if (!specialMedioCarton && nameLower.includes('huevos medio carton')) {
+        specialMedioCarton = p;
+      }
+      if (!specialHuevoMedio && nameLower === 'huevo medio carton') {
+        specialHuevoMedio = p;
+      }
+      if (!nameLower.includes('six') && p.id && !seenNonSixIds.has(p.id)) {
+        seenNonSixIds.add(p.id);
+        nonSixProducts.push({ prod: p, nameLower });
+      }
+    }
+  }
+
   return products.map((p) => {
     // 1. Paquetes compuestos (Six Pack Mixto, combos con múltiples productos)
     const compositeItems = (p as any).composite_items;
@@ -462,6 +547,7 @@ export function applyPresentationConversions(
         return compProd ? Math.floor(Number(compProd.stock_actual || 0) / q) : 0;
       });
       const derivedStock = compStocks.length > 0 ? Math.min(...compStocks) : 0;
+      if (Number(p.stock_actual || 0) === derivedStock) return p;
       return {
         ...p,
         stock_actual: derivedStock,
@@ -484,39 +570,95 @@ export function applyPresentationConversions(
 
     const skuClean = (p.sku || '').toLowerCase().trim();
 
-    if (!baseProd) {
+    if (!baseProd && needsNameFallback) {
       if (skuClean === '23653' || nameLower.includes('fardo de agua pureza sana')) {
-        baseProd = bySku.get('7461136665069') || [...byId.values()].find((x) => x.nombre.toLowerCase().includes('botella de agua pureza sana'));
+        baseProd = bySku.get('7461136665069') || specialPureza;
         factor = 20;
       } else if (skuClean === '0686' || nameLower === 'huevos 1 carton') {
-        baseProd = bySku.get('0685') || [...byId.values()].find((x) => x.nombre.toLowerCase().includes('huevos medio carton'));
+        baseProd = bySku.get('0685') || specialMedioCarton;
         factor = 2;
       } else if (skuClean === '0875' || nameLower === 'huevo 1 carton') {
-        baseProd = bySku.get('0874') || [...byId.values()].find((x) => x.nombre.toLowerCase() === 'huevo medio carton');
+        baseProd = bySku.get('0874') || specialHuevoMedio;
         factor = 2;
       } else if (isSixPack) {
         // Buscar producto base por coincidencia de nombre (ej: "Six Pack Cerveza Modelo" -> "Cerveza Modelo")
         const baseNameCandidate = nameLower.replace(/six\s*pack/gi, '').replace(/sixpack/gi, '').trim();
         if (baseNameCandidate.length >= 3) {
-          baseProd = [...byId.values()].find(
-            (x) => x.id !== p.id && x.nombre.toLowerCase().includes(baseNameCandidate) && !x.nombre.toLowerCase().includes('six')
-          );
+          baseProd = nonSixProducts.find(
+            (entry) => entry.prod.id !== p.id && entry.nameLower.includes(baseNameCandidate)
+          )?.prod;
         }
       }
     }
 
     if (baseProd && factor > 0) {
+      const nextStock = calcularStockPresentacion(Number(baseProd.stock_actual || 0), factor);
+      const nextUnidadBase = baseProd.unidad || 'unidad';
+      if (
+        p.producto_base_id === baseProd.id &&
+        Number(p.factor_conversion || 1) === factor &&
+        p.unidad_base === nextUnidadBase &&
+        Number(p.stock_actual || 0) === nextStock
+      ) {
+        return p;
+      }
       return {
         ...p,
         producto_base_id: baseProd.id,
         factor_conversion: factor,
-        unidad_base: baseProd.unidad || 'unidad',
-        stock_actual: calcularStockPresentacion(Number(baseProd.stock_actual || 0), factor),
+        unidad_base: nextUnidadBase,
+        stock_actual: nextStock,
       };
     }
 
     return p;
   });
+}
+
+export function applyStockDeltasToCatalog(
+  products: Producto[],
+  deltas: StockDelta[]
+): Producto[] {
+  if (products.length === 0 || deltas.length === 0) return products;
+
+  const deltaById = new Map<string, number>();
+  for (const d of deltas) {
+    if (!d.productoId || !Number.isFinite(d.delta) || d.delta === 0) continue;
+    deltaById.set(d.productoId, (deltaById.get(d.productoId) ?? 0) + d.delta);
+  }
+  if (deltaById.size === 0) return products;
+
+  let anyUpdated = false;
+  const updatedBase = products.map((p) => {
+    const delta = deltaById.get(p.id);
+    if (delta === undefined) return p;
+    anyUpdated = true;
+    const nextStock = Math.round((Number(p.stock_actual || 0) + delta) * 1000) / 1000;
+    return {
+      ...p,
+      stock_actual: nextStock,
+    };
+  });
+
+  if (!anyUpdated) return products;
+  return applyPresentationConversions(updatedBase);
+}
+
+export function actualizarStockEnCacheProductos(deltas: StockDelta[]): void {
+  if (deltas.length === 0) return;
+
+  for (const entry of masterCatalogCache.values()) {
+    entry.data = applyStockDeltasToCatalog(entry.data, deltas);
+  }
+  for (const entry of productosCache.values()) {
+    const updated = applyStockDeltasToCatalog(entry.result.datos, deltas);
+    if (updated !== entry.result.datos) {
+      entry.result = {
+        ...entry.result,
+        datos: updated,
+      };
+    }
+  }
 }
 
 export async function resolveSingleProductPresentation(prod: Producto, sbClient?: any): Promise<Producto> {
@@ -648,7 +790,10 @@ export async function buscarProductoPorCodigo(codigo: string): Promise<Producto 
         (p.sku && p.sku.toLowerCase() === code) ||
         (p.plu && p.plu.toLowerCase() === code)
     );
-    if (found) return found;
+    if (found) {
+      trackPosCacheHit('producto_codigo');
+      return found;
+    }
   }
 
   // 2. Buscar en caché reciente
@@ -659,7 +804,10 @@ export async function buscarProductoPorCodigo(codigo: string): Promise<Producto 
         (p.sku && p.sku.toLowerCase() === code) ||
         (p.plu && p.plu.toLowerCase() === code)
     );
-    if (found) return found;
+    if (found) {
+      trackPosCacheHit('producto_codigo');
+      return found;
+    }
   }
 
   const sb = tryGetSupabase();
@@ -676,6 +824,7 @@ export async function buscarProductoPorCodigo(codigo: string): Promise<Producto 
 
   // 3. Consulta puntual a Supabase (solo 1 fila con maybeSingle, ~0.2 KB en vez de descargar 2 MB)
   try {
+    trackPosNetworkRequest('producto_codigo');
     const { data, error } = await sb
       .from('productos')
       .select('*')
@@ -693,6 +842,10 @@ export async function buscarProductoPorCodigo(codigo: string): Promise<Producto 
 }
 
 export async function obtenerProductos(params: ProductosFiltro = {}): Promise<ProductosResultado> {
+  if (params.signal?.aborted) {
+    throw new DOMException('The operation was aborted.', 'AbortError');
+  }
+
   const pagina = params.pagina ?? 1;
   const limite = params.limite ?? 5000;
   const desde = (pagina - 1) * limite;
@@ -707,50 +860,54 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
     e: params.estado || '',
   });
 
-  if (!params.signal) {
-    const cached = productosCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < PRODUCTOS_CACHE_TTL) {
-      return {
-        ...cached.result,
-        datos: [...cached.result.datos],
-      };
+  const cached = productosCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < PRODUCTOS_CACHE_TTL) {
+    trackPosCacheHit('productos');
+    return {
+      ...cached.result,
+      datos: [...cached.result.datos],
+    };
+  }
+
+  // Servir desde el Catálogo Maestro en memoria si ya fue descargado previamente (0 egress a Supabase!)
+  const estadoKey = params.estado || 'todos';
+  const masterEntry =
+    masterCatalogCache.get(estadoKey) ||
+    (estadoKey !== 'todos' ? masterCatalogCache.get('todos') : null);
+  if (masterEntry && Date.now() - masterEntry.timestamp < PRODUCTOS_CACHE_TTL) {
+    trackPosCacheHit('productos_master');
+    let filtered = masterEntry.data;
+    if (params.estado && params.estado !== 'todos') {
+      filtered = filtered.filter((p) => p.estado === params.estado);
+    }
+    if (params.categoria && params.categoria !== 'Todas') {
+      filtered = filtered.filter((p) => p.categoria === params.categoria);
+    }
+    if (params.busqueda && params.busqueda.trim()) {
+      const q = params.busqueda.trim().toLowerCase();
+      filtered = filtered.filter(
+        (p) =>
+          (p.nombre && p.nombre.toLowerCase().includes(q)) ||
+          (p.sku && p.sku.toLowerCase().includes(q)) ||
+          (p.codigo_barras && p.codigo_barras.toLowerCase().includes(q)) ||
+          (p.plu && p.plu.toLowerCase().includes(q)) ||
+          (p.categoria && p.categoria.toLowerCase().includes(q)) ||
+          (p.marca && p.marca.toLowerCase().includes(q))
+      );
     }
 
+    const total = filtered.length;
+    const datos = filtered.slice(desde, desde + limite);
+    const res: ProductosResultado = { datos, total, pagina, limite };
+    productosCache.set(cacheKey, { timestamp: Date.now(), result: res });
+    return res;
+  }
+
+  if (!params.signal) {
     // Si ya existe una petición idéntica en vuelo, reutilizarla (Deduplicación de peticiones)
     const inFlight = inFlightRequests.get(cacheKey);
     if (inFlight) {
       return inFlight;
-    }
-
-    // Servir desde el Catálogo Maestro en memoria si ya fue descargado previamente (0 egress a Supabase!)
-    const estadoKey = params.estado || 'todos';
-    const masterEntry = masterCatalogCache.get(estadoKey) || (estadoKey !== 'todos' ? masterCatalogCache.get('todos') : null);
-    if (masterEntry && Date.now() - masterEntry.timestamp < PRODUCTOS_CACHE_TTL) {
-      let filtered = masterEntry.data;
-      if (params.estado && params.estado !== 'todos') {
-        filtered = filtered.filter((p) => p.estado === params.estado);
-      }
-      if (params.categoria && params.categoria !== 'Todas') {
-        filtered = filtered.filter((p) => p.categoria === params.categoria);
-      }
-      if (params.busqueda && params.busqueda.trim()) {
-        const q = params.busqueda.trim().toLowerCase();
-        filtered = filtered.filter(
-          (p) =>
-            (p.nombre && p.nombre.toLowerCase().includes(q)) ||
-            (p.sku && p.sku.toLowerCase().includes(q)) ||
-            (p.codigo_barras && p.codigo_barras.toLowerCase().includes(q)) ||
-            (p.plu && p.plu.toLowerCase().includes(q)) ||
-            (p.categoria && p.categoria.toLowerCase().includes(q)) ||
-            (p.marca && p.marca.toLowerCase().includes(q))
-        );
-      }
-
-      const total = filtered.length;
-      const datos = filtered.slice(desde, desde + limite);
-      const res: ProductosResultado = { datos, total, pagina, limite };
-      productosCache.set(cacheKey, { timestamp: Date.now(), result: res });
-      return res;
     }
   }
 
@@ -762,6 +919,7 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
 
   if (sb) {
     try {
+      trackPosNetworkRequest('productos');
       let query = sb
         .from('productos')
         .select('*', { count: 'exact' })
@@ -782,7 +940,9 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
       if (params.signal) query = query.abortSignal(params.signal);
 
       let { data, error, count } = await query.range(desde, hasta);
+      let useSimpleSearch = false;
       if (error && q && isSchemaColumnError(error)) {
+        useSimpleSearch = true;
         let fallbackQuery = sb
           .from('productos')
           .select('*', { count: 'exact' })
@@ -807,19 +967,27 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
         dbProducts = data as Producto[];
         dbCount = count ?? dbProducts.length;
 
-        // Si la base de datos tiene más de 1,000 productos, paginar lotes para cargar todos
+        // Si la base de datos tiene más de 1,000 productos, paginar lotes en paralelo para reducir latencia
         if (dbCount > dbProducts.length && hasta >= 1000 && dbProducts.length === 1000) {
-          let currentOffset = 1000;
-          while (currentOffset < dbCount && currentOffset <= hasta) {
-            const nextHasta = Math.min(hasta, currentOffset + 999);
+          const batchRanges: Array<{ from: number; to: number }> = [];
+          for (let offset = 1000; offset < dbCount && offset <= hasta; offset += 1000) {
+            batchRanges.push({
+              from: offset,
+              to: Math.min(hasta, offset + 999),
+            });
+          }
+
+          const fetchBatch = async (from: number, to: number) => {
             let nextQuery = sb
               .from('productos')
               .select('*')
               .order('nombre')
-              .range(currentOffset, nextHasta);
+              .range(from, to);
             if (q) {
               nextQuery = nextQuery.or(
-                `nombre.ilike."%${q}%",sku.ilike."%${q}%",codigo_barras.ilike."%${q}%",plu.ilike."%${q}%",categoria.ilike."%${q}%",marca.ilike."%${q}%"`
+                useSimpleSearch
+                  ? `nombre.ilike."%${q}%",sku.ilike."%${q}%",codigo_barras.ilike."%${q}%"`
+                  : `nombre.ilike."%${q}%",sku.ilike."%${q}%",codigo_barras.ilike."%${q}%",plu.ilike."%${q}%",categoria.ilike."%${q}%",marca.ilike."%${q}%"`
               );
             }
             if (params.categoria && params.categoria !== 'Todas') {
@@ -829,13 +997,15 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
               nextQuery = nextQuery.eq('estado', params.estado);
             }
             if (params.signal) nextQuery = nextQuery.abortSignal(params.signal);
+            const res = await nextQuery;
+            return (res.data as Producto[]) || [];
+          };
 
-            const nextBatch = await nextQuery;
-            if (nextBatch.data && nextBatch.data.length > 0) {
-              dbProducts.push(...(nextBatch.data as Producto[]));
-              currentOffset += nextBatch.data.length;
-            } else {
-              break;
+          for (let i = 0; i < batchRanges.length; i += 4) {
+            const chunk = batchRanges.slice(i, i + 4);
+            const results = await Promise.all(chunk.map((r) => fetchBatch(r.from, r.to)));
+            for (const rows of results) {
+              if (rows.length > 0) dbProducts.push(...rows);
             }
           }
         }
@@ -923,10 +1093,14 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
     limite,
   };
 
-  if (!params.signal) {
+  if (!params.signal?.aborted) {
     productosCache.set(cacheKey, { timestamp: Date.now(), result });
-    // Si fue una carga masiva sin filtros, registrarla como Catálogo Maestro en memoria
-    if (limite >= 1000 && !params.busqueda && (!params.categoria || params.categoria === 'Todas')) {
+    // Si fue una carga sin filtros (masiva o catálogo completo dentro del límite), guardarla como Catálogo Maestro en memoria
+    if (
+      !params.busqueda &&
+      (!params.categoria || params.categoria === 'Todas') &&
+      (limite >= 1000 || combined.length >= total)
+    ) {
       masterCatalogCache.set(params.estado || 'todos', {
         timestamp: Date.now(),
         data: combined,
@@ -947,6 +1121,135 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
   }
 
   return runQuery();
+}
+
+const hydrationInFlight = new Map<string, Promise<ProductosResultado>>();
+
+/**
+ * Hidrata en segundo plano el resto del catálogo más allá de una página inicial rápida,
+ * evitando bloquear la apertura del POS y reutilizando los registros ya descargados.
+ */
+export async function hidratarRestoCatalogoEnCache(params: {
+  estado?: EstadoProducto | 'todos';
+  initialPage: ProductosResultado;
+  maxLimite?: number;
+  signal?: AbortSignal;
+}): Promise<ProductosResultado> {
+  const estado = params.estado || 'todos';
+  const maxLimite = params.maxLimite ?? 5000;
+  const cacheKey = `${estado}:${maxLimite}`;
+
+  const masterEntry =
+    masterCatalogCache.get(estado) ||
+    (estado !== 'todos' ? masterCatalogCache.get('todos') : null);
+  if (masterEntry && Date.now() - masterEntry.timestamp < PRODUCTOS_CACHE_TTL) {
+    trackPosCacheHit('productos_hydration');
+    const filtered =
+      estado !== 'todos'
+        ? masterEntry.data.filter((p) => p.estado === estado)
+        : masterEntry.data;
+    return {
+      datos: filtered.slice(0, maxLimite),
+      total: filtered.length,
+      pagina: 1,
+      limite: maxLimite,
+    };
+  }
+
+  if (params.initialPage.datos.length >= params.initialPage.total) {
+    return params.initialPage;
+  }
+
+  if (!params.signal) {
+    const existing = hydrationInFlight.get(cacheKey);
+    if (existing) return existing;
+  }
+
+  const runHydration = async (): Promise<ProductosResultado> => {
+    const sb = tryGetSupabase();
+    if (!sb) {
+      return obtenerProductos({ pagina: 1, limite: maxLimite, estado, signal: params.signal });
+    }
+
+    const startOffset = params.initialPage.datos.length;
+    const endCap = Math.min(params.initialPage.total, maxLimite) - 1;
+    const batchRanges: Array<{ from: number; to: number }> = [];
+    for (let offset = startOffset; offset <= endCap; offset += 1000) {
+      batchRanges.push({
+        from: offset,
+        to: Math.min(endCap, offset + 999),
+      });
+    }
+
+    const extraRows: Producto[] = [];
+    for (let i = 0; i < batchRanges.length; i += 4) {
+      const chunk = batchRanges.slice(i, i + 4);
+      const chunkResults = await Promise.all(
+        chunk.map(async (r) => {
+          trackPosNetworkRequest('productos_hydration');
+          let q = sb.from('productos').select('*').order('nombre').range(r.from, r.to);
+          if (estado !== 'todos') q = q.eq('estado', estado);
+          if (params.signal) q = q.abortSignal(params.signal);
+          const { data, error } = await q;
+          if (error) throw error;
+          return (data as Producto[]) || [];
+        })
+      );
+      for (const rows of chunkResults) {
+        if (rows.length > 0) extraRows.push(...rows);
+      }
+    }
+
+    const mergedById = new Map<string, Producto>();
+    for (const p of params.initialPage.datos) mergedById.set(p.id, p);
+    for (const p of extraRows) mergedById.set(p.id, p);
+    const mergedRaw = [...mergedById.values()];
+
+    const knownIds = new Set(mergedRaw.map((p) => p.id));
+    const missingBaseIds = [
+      ...new Set(
+        mergedRaw
+          .map((p) => p.producto_base_id)
+          .filter((id): id is string => Boolean(id) && !knownIds.has(id!) && esUuid(id!))
+      ),
+    ];
+    let extraBases: Producto[] = [];
+    if (missingBaseIds.length > 0) {
+      try {
+        const { data: bases } = await sb.from('productos').select('*').in('id', missingBaseIds);
+        extraBases = (bases as Producto[]) || [];
+      } catch {
+        extraBases = [];
+      }
+    }
+
+    const combined = applyPresentationConversions(mergedRaw, extraBases).slice(0, maxLimite);
+    const total = Math.max(params.initialPage.total, combined.length);
+    const result: ProductosResultado = {
+      datos: combined,
+      total,
+      pagina: 1,
+      limite: maxLimite,
+    };
+
+    if (!params.signal?.aborted) {
+      masterCatalogCache.set(estado, {
+        timestamp: Date.now(),
+        data: combined,
+        total,
+      });
+    }
+
+    return result;
+  };
+
+  if (!params.signal) {
+    const p = runHydration().finally(() => hydrationInFlight.delete(cacheKey));
+    hydrationInFlight.set(cacheKey, p);
+    return p;
+  }
+
+  return runHydration();
 }
 
 

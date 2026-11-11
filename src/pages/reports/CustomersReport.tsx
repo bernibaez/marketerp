@@ -1,17 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Users, CreditCard, Star, Clock } from 'lucide-react';
-import { KpiCard, ReportTable, formatRD, chartTooltipStyle, ReportLoading, ReportError, type ReportPeriodProps } from './shared';
+import { KpiCard, ReportTable, ReportSectionTabs, formatRD, chartTooltipStyle, ReportLoading, ReportError, type ReportPeriodProps } from './shared';
 import { informeClientes, type InformeClientes } from '@/services/informes.service';
 
 function parseMoney(v: string | number) {
   return Number(String(v).replace(/[^\d.-]/g, '') || 0);
 }
 
+type CustomersTab = 'list' | 'pending';
+
 export default function CustomersReport({ dateFrom, dateTo }: ReportPeriodProps) {
   const [data, setData] = useState<InformeClientes | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<CustomersTab>('list');
 
   useEffect(() => {
     let alive = true;
@@ -70,24 +73,36 @@ export default function CustomersReport({ dateFrom, dateTo }: ReportPeriodProps)
         )}
       </div>
 
-      <div>
-        <h3 className="font-semibold text-foreground mb-3">Detalle de clientes</h3>
-        <ReportTable
-          headers={['Código', 'Cliente', 'Teléfono', 'Saldo', 'Total periodo']}
-          rows={data.rows}
-        />
-      </div>
+      <ReportSectionTabs
+        activeTab={activeTab}
+        onChange={setActiveTab}
+        tabs={[
+          { id: 'list', label: 'Detalle de clientes', count: data.rows.length, icon: <Users size={13} /> },
+          { id: 'pending', label: 'Balance pendiente (CxC)', count: data.pendingRows.length, icon: <Clock size={13} /> },
+        ]}
+      />
 
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <Clock size={16} className="text-warning" />
-          <h3 className="font-semibold text-foreground">Balance pendiente (CxC)</h3>
+      {activeTab === 'list' ? (
+        <div>
+          <ReportTable
+            key="customers-list"
+            headers={['Código', 'Cliente', 'Teléfono', 'Saldo', 'Total periodo']}
+            rows={data.rows}
+            searchPlaceholder="Buscar por código, cliente o teléfono…"
+            itemLabel="clientes"
+          />
         </div>
-        <ReportTable
-          headers={['Código', 'Cliente', 'Factura', 'Vencimiento', 'Saldo', 'Estado']}
-          rows={data.pendingRows}
-        />
-      </div>
+      ) : (
+        <div>
+          <ReportTable
+            key="customers-pending"
+            headers={['Código', 'Cliente', 'Factura', 'Vencimiento', 'Saldo', 'Estado']}
+            rows={data.pendingRows}
+            searchPlaceholder="Buscar por cliente o factura…"
+            itemLabel="cuentas"
+          />
+        </div>
+      )}
     </div>
   );
 }

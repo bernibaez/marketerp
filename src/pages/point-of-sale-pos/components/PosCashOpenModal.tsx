@@ -133,7 +133,6 @@ export default function PosCashOpenModal({
         cajero_username: cajeroUsername,
         monto_apertura: monto,
         notes: notes.trim() || undefined,
-        forzarNueva: true,
       });
 
       logAuditEvent({

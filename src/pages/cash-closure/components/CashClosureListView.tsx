@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  Lock, PlayCircle, Download, FileSpreadsheet, User, Eye,
+  Lock, PlayCircle, Download, FileSpreadsheet, User, Eye, AlertTriangle,
 } from 'lucide-react';
 import type { CashClosure } from '@/lib/cashClosureStore';
 
@@ -213,7 +213,23 @@ export const CashClosureListView: React.FC<CashClosureListViewProps> = ({
                     key={c.id}
                     className={`border-b border-border hover:bg-secondary/30 transition-colors ${idx % 2 === 0 ? '' : 'bg-secondary/10'}`}
                   >
-                    <td className="px-4 py-3 font-mono font-bold text-primary">{c.code}</td>
+                    <td className="px-4 py-3 font-mono font-bold text-primary">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span>{c.code}</span>
+                        {c.isInconsistent && (
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-sans font-extrabold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30"
+                            title={
+                              c.inconsistencyReasons?.join(' · ') ||
+                              'Cierre histórico con datos incompletos o inconsistentes'
+                            }
+                          >
+                            <AlertTriangle size={11} />
+                            Inconsistente
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-foreground font-medium whitespace-nowrap">{c.date}</td>
                     <td className="px-4 py-3 text-xs font-semibold text-foreground whitespace-nowrap">
                       {c.cashRegisterLabel || `Caja #${c.cashRegisterId}`}

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import AppLayout from '@/components/AppLayout';
 import {
   BarChart2,
@@ -18,6 +19,7 @@ import {
   ClipboardList,
   Sliders,
   Tag,
+  Boxes,
 } from 'lucide-react';
 import ProfitLossReport from './reports/ProfitLossReport';
 import ProductProfitReport from './reports/ProductProfitReport';
@@ -34,7 +36,6 @@ import FiscalDGIIReport from './reports/FiscalDGIIReport';
 import CashierReport from './reports/CashierReport';
 import CombosReport from './reports/CombosReport';
 import { exportReportPdf } from './reports/exportReportPdf';
-import { Boxes } from 'lucide-react';
 
 type ReportId =
   | 'profit-loss'
@@ -53,21 +54,23 @@ type ReportId =
   | 'cashier';
 
 const reportTypes: { id: ReportId; label: string; icon: React.ReactNode; color: string }[] = [
-  { id: 'profit-loss', label: 'Ganancias y Pérdidas', icon: <TrendingUp size={18} />, color: 'text-success' },
-  { id: 'product-profit', label: 'Ganancias por Producto', icon: <Tag size={18} />, color: 'text-primary' },
-  { id: 'combos', label: 'Informe de Combos', icon: <Boxes size={18} />, color: 'text-purple-600' },
-  { id: 'sales', label: 'Ventas', icon: <ShoppingCart size={18} />, color: 'text-info' },
-  { id: 'purchases', label: 'Compras', icon: <ShoppingBag size={18} />, color: 'text-warning' },
-  { id: 'stock', label: 'Inventario', icon: <Package size={18} />, color: 'text-primary' },
-  { id: 'stock-detail', label: 'Informe de Stock', icon: <ClipboardList size={18} />, color: 'text-primary' },
-  { id: 'adjustments', label: 'Informe Ajustes', icon: <Sliders size={18} />, color: 'text-warning' },
-  { id: 'expenses', label: 'Gastos', icon: <DollarSign size={18} />, color: 'text-danger' },
-  { id: 'customers', label: 'Clientes', icon: <Users size={18} />, color: 'text-info' },
-  { id: 'suppliers', label: 'Proveedores', icon: <Truck size={18} />, color: 'text-warning' },
-  { id: 'agents', label: 'Agentes', icon: <UserCheck size={18} />, color: 'text-primary' },
-  { id: 'fiscal', label: 'Informe Fiscal DGII', icon: <FileText size={18} />, color: 'text-warning' },
-  { id: 'cashier', label: 'Informe de Caja', icon: <Wallet size={18} />, color: 'text-success' },
+  { id: 'profit-loss', label: 'Ganancias y Pérdidas', icon: <TrendingUp size={17} />, color: 'text-success' },
+  { id: 'product-profit', label: 'Ganancias por Producto', icon: <Tag size={17} />, color: 'text-primary' },
+  { id: 'combos', label: 'Informe de Combos', icon: <Boxes size={17} />, color: 'text-purple-600' },
+  { id: 'sales', label: 'Ventas', icon: <ShoppingCart size={17} />, color: 'text-info' },
+  { id: 'purchases', label: 'Compras', icon: <ShoppingBag size={17} />, color: 'text-warning' },
+  { id: 'stock', label: 'Inventario', icon: <Package size={17} />, color: 'text-primary' },
+  { id: 'stock-detail', label: 'Informe de Stock', icon: <ClipboardList size={17} />, color: 'text-primary' },
+  { id: 'adjustments', label: 'Informe Ajustes', icon: <Sliders size={17} />, color: 'text-warning' },
+  { id: 'expenses', label: 'Gastos', icon: <DollarSign size={17} />, color: 'text-danger' },
+  { id: 'customers', label: 'Clientes', icon: <Users size={17} />, color: 'text-info' },
+  { id: 'suppliers', label: 'Proveedores', icon: <Truck size={17} />, color: 'text-warning' },
+  { id: 'agents', label: 'Agentes', icon: <UserCheck size={17} />, color: 'text-primary' },
+  { id: 'fiscal', label: 'Informe Fiscal DGII', icon: <FileText size={17} />, color: 'text-warning' },
+  { id: 'cashier', label: 'Informe de Caja', icon: <Wallet size={17} />, color: 'text-success' },
 ];
+
+const SNAPSHOT_REPORTS = new Set<ReportId>(['stock', 'stock-detail', 'agents']);
 
 function renderReport(id: ReportId, dateFrom: string, dateTo: string) {
   const period = { dateFrom, dateTo };
@@ -105,151 +108,209 @@ function renderReport(id: ReportId, dateFrom: string, dateTo: string) {
   }
 }
 
+function toIsoDate(d: Date) {
+  const yr = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${yr}-${mo}-${day}`;
+}
+
 function defaultDateRange() {
   const now = new Date();
-  const hasta = now.toISOString().slice(0, 10);
-  const desde = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-  return { desde, hasta };
+  return {
+    desde: toIsoDate(new Date(now.getFullYear(), now.getMonth(), 1)),
+    hasta: toIsoDate(now),
+  };
 }
 
 export default function ReportsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const resolvedTab: ReportId =
+    tabParam && reportTypes.some((r) => r.id === tabParam) ? (tabParam as ReportId) : 'profit-loss';
+
   const defaults = defaultDateRange();
-  const [activeReport, setActiveReport] = useState<ReportId>(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const tab = params.get('tab');
-      if (tab && reportTypes.some((r) => r.id === tab)) {
-        return tab as ReportId;
-      }
-    }
-    return 'profit-loss';
-  });
+  const [activeReport, setActiveReport] = useState<ReportId>(resolvedTab);
   const [dateFrom, setDateFrom] = useState(defaults.desde);
   const [dateTo, setDateTo] = useState(defaults.hasta);
-  const [branch, setBranch] = useState('all');
-  const [generated, setGenerated] = useState(true);
+  const [appliedPeriod, setAppliedPeriod] = useState({ dateFrom: defaults.desde, dateTo: defaults.hasta });
+
+  useEffect(() => {
+    setActiveReport(resolvedTab);
+  }, [resolvedTab]);
 
   const activeLabel = reportTypes.find((r) => r.id === activeReport)?.label ?? 'Informe';
+  const isSnapshotReport = SNAPSHOT_REPORTS.has(activeReport);
+
+  const selectReport = (id: ReportId) => {
+    setActiveReport(id);
+    setSearchParams({ tab: id }, { replace: true });
+  };
+
+  const applyPreset = (preset: 'today' | '7d' | 'month' | 'prev-month') => {
+    const now = new Date();
+    let from = defaults.desde;
+    let to = toIsoDate(now);
+    if (preset === 'today') {
+      from = to;
+    } else if (preset === '7d') {
+      const start = new Date(now);
+      start.setDate(start.getDate() - 6);
+      from = toIsoDate(start);
+    } else if (preset === 'month') {
+      from = toIsoDate(new Date(now.getFullYear(), now.getMonth(), 1));
+    } else if (preset === 'prev-month') {
+      from = toIsoDate(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+      to = toIsoDate(new Date(now.getFullYear(), now.getMonth(), 0));
+    }
+    setDateFrom(from);
+    setDateTo(to);
+    setAppliedPeriod({ dateFrom: from, dateTo: to });
+  };
 
   const handleGenerate = () => {
-    setGenerated(true);
+    setAppliedPeriod({ dateFrom, dateTo });
   };
 
   return (
     <AppLayout>
-      <div className="space-y-6 slide-up">
+      <div className="space-y-5 slide-up">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Informes</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Análisis y reportes del negocio — {activeLabel}
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Análisis y reportes del negocio — <span className="font-medium text-foreground">{activeLabel}</span>
             </p>
           </div>
-          <div className="flex gap-2">
-            <button type="button" className="btn-secondary flex items-center gap-2" onClick={() => window.print()}>
-              <Printer size={16} />
+          <div className="flex gap-2 print:hidden">
+            <button type="button" className="btn-secondary flex items-center gap-2 text-xs" onClick={() => window.print()}>
+              <Printer size={15} />
               Imprimir
             </button>
             <button
               type="button"
-              className="btn-primary flex items-center gap-2"
+              className="btn-primary flex items-center gap-2 text-xs"
               onClick={() => {
-                void exportReportPdf(activeReport, activeLabel, dateFrom, dateTo);
+                void exportReportPdf(activeReport, activeLabel, appliedPeriod.dateFrom, appliedPeriod.dateTo);
               }}
             >
-              <Download size={16} />
+              <Download size={15} />
               Exportar PDF
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 print:block">
-          <div className="card p-3 space-y-1 h-fit print:hidden">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1">
+        <div className="flex flex-col lg:flex-row gap-5 items-start print:block">
+          <div className="w-full lg:w-56 flex-shrink-0 card p-2.5 h-fit print:hidden">
+            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-2.5 py-1.5">
               Tipo de Informe
             </p>
-            {reportTypes.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => {
-                  setActiveReport(r.id);
-                  setGenerated(true);
-                  if (typeof window !== 'undefined') {
-                    const url = new URL(window.location.href);
-                    url.searchParams.set('tab', r.id);
-                    window.history.replaceState(null, '', url.toString());
-                  }
-                }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all text-left ${
-                  activeReport === r.id
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-                }`}
-              >
-                <span className={activeReport === r.id ? 'text-primary' : r.color}>{r.icon}</span>
-                {r.label}
-              </button>
-            ))}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-1 gap-1">
+              {reportTypes.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => selectReport(r.id)}
+                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs font-medium transition-all text-left ${
+                    activeReport === r.id
+                      ? 'bg-primary/10 text-primary font-semibold'
+                      : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                  }`}
+                >
+                  <span className={activeReport === r.id ? 'text-primary' : r.color}>{r.icon}</span>
+                  <span className="truncate">{r.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="lg:col-span-3 space-y-4 print:w-full print:p-0">
+          <div className="flex-1 min-w-0 w-full space-y-4 print:w-full print:p-0">
             {/* Cabecera formal de reporte para impresión */}
             <div className="hidden print:block pb-4 mb-4 border-b border-black text-center">
               <h2 className="text-base font-black uppercase text-black">MERCATO SUPERMERCADO S.R.L.</h2>
               <h3 className="text-sm font-bold uppercase text-black">{activeLabel}</h3>
               <p className="text-xs text-black/70">
-                Período: {dateFrom || 'Inicio'} al {dateTo || 'Actualidad'} · Generado el {new Date().toLocaleDateString('es-DO')}
+                {isSnapshotReport
+                  ? `Snapshot actual · Generado el ${new Date().toLocaleDateString('es-DO')}`
+                  : `Período: ${appliedPeriod.dateFrom || 'Inicio'} al ${appliedPeriod.dateTo || 'Actualidad'} · Generado el ${new Date().toLocaleDateString('es-DO')}`}
               </p>
             </div>
 
-            <div className="card p-4 flex flex-wrap gap-3 items-end print:hidden">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Desde</label>
-                <input
-                  type="date"
-                  className="input-field"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                />
+            {isSnapshotReport ? (
+              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground px-1 print:hidden">
+                <div className="flex items-center gap-2">
+                  <BarChart2 size={14} className="text-primary" />
+                  <span>Estado actual en tiempo real · Datos en vivo</span>
+                </div>
               </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Hasta</label>
-                <input
-                  type="date"
-                  className="input-field"
-                  value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Sucursal</label>
-                <select
-                  className="input-field"
-                  value={branch}
-                  onChange={(e) => setBranch(e.target.value)}
-                >
-                  <option value="all">Todas las sucursales</option>
-                </select>
-              </div>
-              <button type="button" className="btn-primary flex items-center gap-2" onClick={handleGenerate}>
-                <Filter size={16} />
-                Generar
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
-              <BarChart2 size={14} />
-              Periodo: {dateFrom} → {dateTo} · Datos en vivo desde Supabase
-            </div>
-
-            {generated ? (
-              renderReport(activeReport, dateFrom, dateTo)
             ) : (
-              <div className="card p-12 text-center text-muted-foreground">
-                Selecciona un periodo y pulsa <strong>Generar</strong> para ver el informe.
-              </div>
+              <>
+                <div className="card p-3.5 flex flex-wrap gap-3 items-end justify-between print:hidden">
+                  <div className="flex flex-wrap gap-3 items-end">
+                    <div>
+                      <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Desde</label>
+                      <input
+                        type="date"
+                        className="input-field py-1.5 text-xs"
+                        value={dateFrom}
+                        onChange={(e) => setDateFrom(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Hasta</label>
+                      <input
+                        type="date"
+                        className="input-field py-1.5 text-xs"
+                        value={dateTo}
+                        onChange={(e) => setDateTo(e.target.value)}
+                      />
+                    </div>
+                    <button type="button" className="btn-primary flex items-center gap-1.5 text-xs py-1.5 px-3" onClick={handleGenerate}>
+                      <Filter size={14} />
+                      Generar
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => applyPreset('today')}
+                      className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-secondary/60 hover:bg-secondary text-foreground transition-colors"
+                    >
+                      Hoy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyPreset('7d')}
+                      className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-secondary/60 hover:bg-secondary text-foreground transition-colors"
+                    >
+                      7 días
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyPreset('month')}
+                      className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-secondary/60 hover:bg-secondary text-foreground transition-colors"
+                    >
+                      Este mes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyPreset('prev-month')}
+                      className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-secondary/60 hover:bg-secondary text-foreground transition-colors"
+                    >
+                      Mes ant.
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs text-muted-foreground px-1 print:hidden">
+                  <BarChart2 size={14} />
+                  Periodo activo: {appliedPeriod.dateFrom} → {appliedPeriod.dateTo}
+                </div>
+              </>
             )}
+
+            {renderReport(activeReport, appliedPeriod.dateFrom, appliedPeriod.dateTo)}
           </div>
         </div>
       </div>

@@ -7,13 +7,18 @@ import {
 } from '@/services/combos.service';
 import type { Combo as UiCombo } from '@/lib/comboStore';
 
-export function useCombos(soloActivos = false) {
+export function useCombos(soloActivos = false, options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   const [combos, setCombos] = useState<UiCombo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const refetch = useCallback(async () => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -30,12 +35,16 @@ export function useCombos(soloActivos = false) {
     } finally {
       if (!ac.signal.aborted) setLoading(false);
     }
-  }, [soloActivos]);
+  }, [soloActivos, enabled]);
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     refetch();
     return () => abortRef.current?.abort();
-  }, [refetch]);
+  }, [refetch, enabled]);
 
   const guardar = useCallback(
     async (combo: UiCombo) => {

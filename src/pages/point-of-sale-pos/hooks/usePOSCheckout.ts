@@ -10,6 +10,13 @@ import type { FiscalInvoiceRecord, NCFType } from '@/lib/ncfStore';
 import type { PaymentSplit } from '@/lib/posStore';
 import type { CashRegisterId } from '@/lib/cashRegisters';
 import type { CartItem, Customer } from '../components/POSTerminal';
+import type { StockDelta } from '@/services/productos.service';
+import type { Combo } from '@/lib/comboStore';
+
+interface SaleSuccessInfo {
+  saleTotal: number;
+  stockDeltas: StockDelta[];
+}
 
 interface UsePOSCheckoutProps {
   cart: CartItem[];
@@ -25,12 +32,14 @@ interface UsePOSCheckoutProps {
   cashIsOpen: boolean;
   activeCashId: CashRegisterId;
   activeCashLabel: string;
+  activeCashSessionId?: string;
   activeCashCashierId?: string;
   activeCashCashierName?: string;
   user: { id?: string; name?: string } | null;
   clearCart: () => void;
   navigate: (to: string) => void;
-  onSaleSuccess?: () => void;
+  combos?: Combo[];
+  onSaleSuccess?: (info: SaleSuccessInfo) => void;
 }
 
 export function usePOSCheckout({
@@ -47,11 +56,13 @@ export function usePOSCheckout({
   cashIsOpen,
   activeCashId,
   activeCashLabel,
+  activeCashSessionId,
   activeCashCashierId,
   activeCashCashierName,
   user,
   clearCart,
   navigate,
+  combos,
   onSaleSuccess,
 }: UsePOSCheckoutProps) {
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -209,6 +220,7 @@ export function usePOSCheckout({
           cliente_id: selectedCustomer?.id ?? null,
           cliente_nombre: selectedCustomer?.name ?? 'Cliente General',
           caja_id: String(activeCashId),
+          cierre_id: activeCashSessionId ?? null,
           subtotal,
           monto_impuesto: taxTotal,
           monto_descuento: globalDiscountAmount,
@@ -299,7 +311,61 @@ export function usePOSCheckout({
         }
 
         setOrderCompleted(true);
-        if (onSaleSuccess) onSaleSuccess();
+        if (onSaleSuccess) {
+          const stockDeltas: StockDelta[] = [];
+          for (const item of activeItems) {
+            const qty = Number(item.qty || 0);
+            if (!Number.isFinite(qty) || qty <= 0) continue;
+
+            if (item.isCombo) {
+              const comboItems =
+                Array.isArray(item.comboItems) && item.comboItems.length > 0
+                  ? item.comboItems
+                  : combos?.find((c) => c.id === (item.comboId || item.productId))?.items;
+              if (Array.isArray(comboItems)) {
+                for (const ci of comboItems) {
+                  const pid = ci.productId || ci.product_id;
+                  if (!pid) continue;
+                  stockDeltas.push({
+                    productoId: String(pid),
+                    delta: -(Number(ci.quantity ?? ci.qty ?? 1) * qty),
+                  });
+                }
+              }
+              continue;
+            }
+
+            if (Array.isArray(item.composite_items) && item.composite_items.length > 0) {
+              for (const ci of item.composite_items) {
+                const pid = ci.product_id || ci.productId;
+                if (!pid) continue;
+                stockDeltas.push({
+                  productoId: String(pid),
+                  delta: -(Number(ci.quantity || 1) * qty),
+                });
+              }
+              continue;
+            }
+
+            if (item.isWeighted) {
+              stockDeltas.push({
+                productoId: item.producto_base_id || item.productId,
+                delta: -qty,
+              });
+            } else if (item.producto_base_id && Number(item.factor_conversion || 1) > 1) {
+              stockDeltas.push({
+                productoId: item.producto_base_id,
+                delta: -(qty * Number(item.factor_conversion)),
+              });
+            } else {
+              stockDeltas.push({
+                productoId: item.productId,
+                delta: -qty,
+              });
+            }
+          }
+          onSaleSuccess({ saleTotal: total, stockDeltas });
+        }
         return resultado;
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Error al registrar la venta');

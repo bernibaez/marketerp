@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Truck, FileText, Package, CreditCard } from 'lucide-react';
-import { KpiCard, ReportTable, formatRD, chartTooltipStyle, ReportLoading, ReportError, type ReportPeriodProps } from './shared';
+import { KpiCard, ReportTable, ReportSectionTabs, formatRD, chartTooltipStyle, ReportLoading, ReportError, type ReportPeriodProps } from './shared';
 import { informeProveedores, type InformeProveedores } from '@/services/informes.service';
 
 function parseMoney(v: string | number) {
@@ -24,10 +24,13 @@ const statusBadge = (status: string) => {
   return <span className={map[status] || 'badge-info'}>{status}</span>;
 };
 
+type SuppliersTab = 'purchases' | 'catalog';
+
 export default function SuppliersReport({ dateFrom, dateTo }: ReportPeriodProps) {
   const [data, setData] = useState<InformeProveedores | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<SuppliersTab>('purchases');
 
   useEffect(() => {
     let alive = true;
@@ -96,21 +99,32 @@ export default function SuppliersReport({ dateFrom, dateTo }: ReportPeriodProps)
         )}
       </div>
 
-      <div>
-        <h3 className="font-semibold text-foreground mb-3">Proveedores</h3>
-        <ReportTable
-          headers={['Código', 'Proveedor', 'Teléfono', 'Estado']}
-          rows={data.rows.map((r) => [r[0], r[1], r[2], statusBadge(String(r[3]))])}
-        />
-      </div>
+      <ReportSectionTabs
+        activeTab={activeTab}
+        onChange={setActiveTab}
+        tabs={[
+          { id: 'purchases', label: 'Compras por proveedor', count: data.purchaseRows.length, icon: <FileText size={13} /> },
+          { id: 'catalog', label: 'Proveedores', count: data.rows.length, icon: <Truck size={13} /> },
+        ]}
+      />
 
-      <div>
-        <h3 className="font-semibold text-foreground mb-3">Compras por proveedor</h3>
+      {activeTab === 'purchases' ? (
         <ReportTable
+          key="suppliers-purchases"
           headers={['Orden', 'Fecha', 'Proveedor', 'Total', 'Estado']}
           rows={data.purchaseRows.map((r) => [r[0], r[1], r[2], r[3], statusBadge(String(r[4]))])}
+          searchPlaceholder="Buscar por orden o proveedor…"
+          itemLabel="órdenes"
         />
-      </div>
+      ) : (
+        <ReportTable
+          key="suppliers-catalog"
+          headers={['Código', 'Proveedor', 'Teléfono', 'Estado']}
+          rows={data.rows.map((r) => [r[0], r[1], r[2], statusBadge(String(r[3]))])}
+          searchPlaceholder="Buscar proveedor…"
+          itemLabel="proveedores"
+        />
+      )}
     </div>
   );
 }

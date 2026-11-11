@@ -25,12 +25,14 @@ import { logAuditEvent } from '@/lib/auditStore';
 
 interface PosCashCloseModalProps {
   initialCajaId?: string;
+  initialCierreId?: string;
   onSuccess?: (cierre: CierreCaja) => void;
   onClose: () => void;
 }
 
 export default function PosCashCloseModal({
   initialCajaId,
+  initialCierreId,
   onSuccess,
   onClose,
 }: PosCashCloseModalProps) {
@@ -108,7 +110,10 @@ export default function PosCashCloseModal({
       setFetchingSummary(true);
       try {
         const targetId = selectedCaja?.dbId || selectedCajaId;
-        const res = await calcularResumenCajaAbierta(targetId, user?.id);
+        const targetCierreId =
+          selectedCaja?.cierreId ||
+          (selectedCajaId === initialCajaId ? initialCierreId : undefined);
+        const res = await calcularResumenCajaAbierta(targetId, user?.id, targetCierreId);
         if (alive) {
           setSummary(res);
           // Si el usuario no ha ingresado un monto aún, podemos sugerir o dejar listo
@@ -130,7 +135,7 @@ export default function PosCashCloseModal({
     return () => {
       alive = false;
     };
-  }, [selectedCajaId, selectedCaja?.dbId, user?.id]);
+  }, [selectedCajaId, selectedCaja?.dbId, selectedCaja?.cierreId, initialCajaId, initialCierreId, user?.id]);
 
   const countedReal = parseFloat(montoRealInput) || 0;
   const diferencia = Math.round((countedReal - summary.monto_esperado) * 100) / 100;
@@ -150,8 +155,13 @@ export default function PosCashCloseModal({
       const targetCajaId = String(selectedCaja?.dbId || selectedCaja?.id || selectedCajaId);
       const targetCajaLabel = selectedCaja?.label || `Caja #${selectedCajaId}`;
 
+      const targetCierreId =
+        summary.cierre_id ||
+        selectedCaja?.cierreId ||
+        (selectedCajaId === initialCajaId ? initialCierreId : undefined);
+
       const result = await cerrarTurnoCaja({
-        cierre_id: summary.cierre_id,
+        cierre_id: targetCierreId,
         caja_id: targetCajaId,
         caja_label: targetCajaLabel,
         cajero_id: cajeroId,
@@ -179,12 +189,13 @@ export default function PosCashCloseModal({
         role: user?.role ?? 'Cajero',
         action: 'Cierre de caja',
         module: 'Caja',
-        details: `Cierre de turno ${targetCajaLabel} por ${user?.name}. Esperado: RD$ ${summary.monto_esperado.toFixed(2)}, Real Contado: RD$ ${countedReal.toFixed(2)}, Diferencia: RD$ ${diferencia.toFixed(2)}`,
+        details: `Cierre de turno ${targetCajaLabel} por ${user?.name}. Esperado: RD$ ${result.monto_esperado.toFixed(2)}, Real Contado: RD$ ${result.monto_real.toFixed(2)}, Diferencia: RD$ ${result.monto_diferencia.toFixed(2)}`,
         after: {
-          caja_id: targetCajaId,
-          monto_esperado: summary.monto_esperado,
-          monto_real: countedReal,
-          diferencia,
+          cierre_id: result.id,
+          caja_id: result.caja_id,
+          monto_esperado: result.monto_esperado,
+          monto_real: result.monto_real,
+          diferencia: result.monto_diferencia,
         },
       });
 
@@ -287,10 +298,15 @@ export default function PosCashCloseModal({
                 <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">
                   RD$ {summary.total_efectivo.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                 </span>
+                {summary.total_entradas > 0 && (
+                  <span className="text-[10px] font-semibold text-emerald-500 block mt-0.5">
+                    + Entradas: RD$ {summary.total_entradas.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                  </span>
+                )}
               </div>
 
               <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
-                <span className="text-[10px] font-bold text-rose-500 uppercase block">(-) Gastos / Retiros</span>
+                <span className="text-[10px] font-bold text-rose-500 uppercase block">(-) Gastos / Retiros / Dev.</span>
                 <span className="text-sm font-black text-rose-600 dark:text-rose-400">
                   RD$ {(summary.total_retiros + summary.total_devoluciones).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                 </span>
@@ -304,7 +320,7 @@ export default function PosCashCloseModal({
                   Efectivo Total Esperado en Caja:
                 </span>
                 <span className="text-[11px] text-indigo-600 dark:text-indigo-400">
-                  Fondo Inicial + Ventas Efectivo - Retiros/Gastos
+                  Fondo Inicial + Ventas Efectivo + Entradas - Retiros/Gastos/Dev.
                 </span>
               </div>
               <span className="text-lg sm:text-xl font-black text-indigo-700 dark:text-indigo-300">
@@ -324,6 +340,11 @@ export default function PosCashCloseModal({
                 {summary.total_transferencia > 0 && (
                   <span className="font-semibold text-slate-700 dark:text-slate-300">
                     Transferencias: RD$ {summary.total_transferencia.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                  </span>
+                )}
+                {summary.total_otros > 0 && (
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                    Crédito: RD$ {summary.total_otros.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                   </span>
                 )}
               </div>

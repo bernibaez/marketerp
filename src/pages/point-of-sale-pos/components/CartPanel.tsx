@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback, useSyncExternalStore } from 'react';
 import {
   User,
   Search,
@@ -20,116 +20,105 @@ import {
 } from 'lucide-react';
 import type { CartItem, Customer } from './POSTerminal';
 import { useClientes } from '@/hooks/useClientes';
-import { initialProducts } from '@/lib/initialProducts';
 import { isVariableWeightBarcode, productMatchesScanCode } from '@/lib/scaleBarcode';
 import { obtenerProductos, productoAUi } from '@/services/productos.service';
 import PosAddCustomerModal from './PosAddCustomerModal';
 import { toast } from '@/lib/toast';
 import type { NCFType } from '@/lib/ncfStore';
+import { posPerfNow, recordNameSearch } from '@/lib/posPerfMetrics';
+import {
+  buildPosCatalogIndex,
+  findExactScanProduct,
+  searchPosCatalog,
+  type PosCatalogIndex,
+} from '../utils/posCatalogIndex';
+import type { POSSearchStore } from '../utils/posSearchStore';
 
-interface CartPanelProps {
-  cart: CartItem[];
-  customer: Customer | null;
-  onSetCustomer: (c: Customer | null) => void;
-  selectedNcfType?: NCFType;
-  onSelectNcfType?: (t: NCFType) => void;
-  onUpdateQty: (id: string, qty: number) => void;
-  onUpdateDiscount: (id: string, discount: number) => void;
-  onRemove: (id: string) => void;
-  onEditWeight?: (item: CartItem) => void;
-  onOpenWeightScan?: () => void;
-  globalDiscount: number;
-  onSetGlobalDiscount: (d: number) => void;
-  subtotal: number;
-  taxTotal: number;
-  globalDiscountAmount: number;
-  total: number;
-  onCheckout: () => void;
-  fiscalEnabled?: boolean;
-  onToggleFiscal?: () => void;
-  searchQuery?: string;
+const noopSubscribe = () => () => {};
+const fmtCurrency = (v: number) =>
+  `RD$ ${v.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+interface CartSearchBarProps {
+  effectiveCatalogIndex: PosCatalogIndex;
+  searchStore?: POSSearchStore;
+  propSearchQuery?: string;
   onSearchChange?: (q: string) => void;
   onSearchSubmit?: (q: string) => void | Promise<boolean | void>;
   onAddToCart?: (product: any, qty?: number) => void;
-  awaitingDelete?: boolean;
+  onEditWeight?: (item: CartItem) => void;
+  awaitingDelete: boolean;
+  hasCartItems: boolean;
+  cartRef: React.MutableRefObject<CartItem[]>;
   onToggleDeleteMode?: () => void;
   onCancelDelete?: () => void;
-  onToggleWholesale?: (id: string) => void;
   onToggleAllWholesale?: () => void;
-  isWholesaleMode?: boolean;
-  onOpenDiscountModal?: (item: CartItem) => void;
-  onOpenPriceModal?: (item: CartItem) => void;
-  isAdmin?: boolean;
-  catalogProducts?: any[];
+  isWholesaleMode: boolean;
 }
 
-export default function CartPanel({
-  cart,
-  customer,
-  onSetCustomer,
-  selectedNcfType = 'B02',
-  onSelectNcfType,
-  onUpdateQty,
-  onRemove,
-  onEditWeight,
-  onOpenWeightScan,
-  taxTotal,
-  total,
-  fiscalEnabled = false,
-  onToggleFiscal,
-  searchQuery = '',
+const CartSearchBar = React.memo(function CartSearchBar({
+  effectiveCatalogIndex,
+  searchStore,
+  propSearchQuery = '',
   onSearchChange,
   onSearchSubmit,
   onAddToCart,
-  awaitingDelete = false,
+  onEditWeight,
+  awaitingDelete,
+  hasCartItems,
+  cartRef,
   onToggleDeleteMode,
   onCancelDelete,
-  onToggleWholesale,
   onToggleAllWholesale,
-  isWholesaleMode = false,
-  onOpenDiscountModal,
-  onOpenPriceModal,
-  isAdmin = false,
-  catalogProducts,
-}: CartPanelProps) {
-  const { clientes, refetch } = useClientes('');
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [addCustomerOpen, setAddCustomerOpen] = useState(false);
+  isWholesaleMode,
+}: CartSearchBarProps) {
+  const storeQuery = useSyncExternalStore(
+    searchStore ? searchStore.subscribe : noopSubscribe,
+    searchStore ? searchStore.getQuery : () => propSearchQuery,
+    () => propSearchQuery
+  );
+  const searchQuery = searchStore ? storeQuery : propSearchQuery;
+
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [dbResults, setDbResults] = useState<any[]>([]);
   const [searchingDb, setSearchingDb] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const searchContainerRef = useRef<HTMLDivElement>(null);
-  const cartListRef = useRef<HTMLDivElement>(null);
 
-  // Mantener el scroll arriba cuando se agrega o escanea un producto (el último agregado aparece primero)
-  const topCartItemKey = cart[0] ? `${cart[0].id}-${cart[0].qty}` : '';
-  useEffect(() => {
-    if (cartListRef.current && topCartItemKey) {
-      cartListRef.current.scrollTop = 0;
-    }
-  }, [topCartItemKey]);
+  const setQueryValue = useCallback(
+    (next: string) => {
+      if (searchStore) searchStore.setQuery(next);
+      if (onSearchChange) onSearchChange(next);
+    },
+    [searchStore, onSearchChange]
+  );
 
-  // Usar catálogo compartido recibido de POSTerminal (0 peticiones duplicadas a Supabase)
-  const allProducts = useMemo(() => {
-    const source = catalogProducts || [];
-    const list = [...source.filter((p) => p.status === 'active' || p.status === undefined)];
-    const skus = new Set(list.map((p) => (p.sku || '').toLowerCase()));
-    for (const p of initialProducts) {
-      if (!skus.has(p.sku.toLowerCase()) && p.status !== 'inactive' && p.status !== 'discontinued') {
-        list.push(p as any);
-      }
-    }
-    return list;
-  }, [catalogProducts]);
+  // Coincidencias locales O(n) pre-indexadas en memoria (sin duplicar trabajo en POSTerminal)
+  const localSearchResult = useMemo(() => {
+    const q = searchQuery.trim();
+    if (!q) return { matches: [] as any[], durationMs: 0 };
+    const t0 = posPerfNow();
+    const matches = searchPosCatalog(effectiveCatalogIndex, q, { ranked: true, limit: 30 });
+    return { matches, durationMs: posPerfNow() - t0 };
+  }, [searchQuery, effectiveCatalogIndex]);
+  const localMatches = localSearchResult.matches;
 
-  // Consulta en tiempo real a Supabase / Base de datos con debounce cuando el usuario escribe en la barra
   useEffect(() => {
     const q = searchQuery.trim();
-    if (!q || q.length < 1) {
+    if (!q) return;
+    recordNameSearch(localSearchResult.durationMs, {
+      resultCount: localMatches.length,
+      remoteFallback: false,
+    });
+  }, [searchQuery, localSearchResult]);
+
+  // Consultar Supabase solo cuando no existen coincidencias locales y compartir resultados con ProductPanel
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q || q.length < 2 || localMatches.length > 0) {
       setDbResults([]);
       setSearchingDb(false);
       setSelectedIndex(0);
+      if (searchStore) searchStore.setRemoteResults('', []);
       return;
     }
 
@@ -137,6 +126,7 @@ export default function CartPanel({
     const abortCtrl = new AbortController();
 
     const timer = setTimeout(async () => {
+      const t0 = posPerfNow();
       try {
         const res = await obtenerProductos({
           busqueda: q,
@@ -145,95 +135,59 @@ export default function CartPanel({
           signal: abortCtrl.signal,
         });
         if (!abortCtrl.signal.aborted) {
-          setDbResults(res.datos.map(productoAUi));
+          const mapped = res.datos.map(productoAUi);
+          recordNameSearch(posPerfNow() - t0, {
+            resultCount: mapped.length,
+            remoteFallback: true,
+          });
+          setDbResults(mapped);
+          if (searchStore) searchStore.setRemoteResults(q, mapped);
           setSearchingDb(false);
           setSelectedIndex(0);
         }
-      } catch (err: any) {
+      } catch {
         if (!abortCtrl.signal.aborted) {
           setSearchingDb(false);
         }
       }
-    }, 180);
+    }, 250);
 
     return () => {
       clearTimeout(timer);
       abortCtrl.abort();
     };
-  }, [searchQuery]);
+  }, [searchQuery, localMatches.length, searchStore]);
 
-  // Resultados combinados: catálogo local instantáneo + resultados en vivo de la base de datos
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q || q.length < 1) return [];
+    if (!q) return [];
+    if (localMatches.length > 0) return localMatches;
+    if (dbResults.length === 0) return [];
 
-    // 1. Filtrar en catálogo local
-    const localMatches = allProducts.filter((p: any) => {
-      const name = (p.name || '').toLowerCase();
-      const sku = (p.sku || '').toLowerCase();
-      const barcode = (p.barcode || '').toLowerCase();
-      const plu = (p.plu || '').toLowerCase();
-      return name.includes(q) || sku.includes(q) || barcode.includes(q) || plu.includes(q);
-    });
+    const rankedDb = [...dbResults];
+    const getRank = (name: string, barcode: string, sku: string) => {
+      if (name === q || barcode === q || sku === q) return 0;
+      if (name.startsWith(q)) return 1;
+      if (barcode.startsWith(q) || sku.startsWith(q)) return 2;
+      if (name.includes(q)) return 3;
+      return 4;
+    };
 
-    // 2. Fusionar con resultados devueltos por la base de datos sin duplicados
-    const combined: any[] = [...localMatches];
-    const seenIds = new Set(localMatches.map((p) => p.id));
-    const seenSkus = new Set(localMatches.map((p) => (p.sku || '').toLowerCase()));
-
-    for (const dbItem of dbResults) {
-      if (!seenIds.has(dbItem.id) && !seenSkus.has((dbItem.sku || '').toLowerCase())) {
-        combined.push(dbItem);
-        seenIds.add(dbItem.id);
-        if (dbItem.sku) seenSkus.add(dbItem.sku.toLowerCase());
-      }
-    }
-
-    // 3. Ordenar por relevancia para que productos cuyo nombre empiece con la búsqueda (ej. "fresaya") aparezcan al inicio
-    combined.sort((a, b) => {
+    rankedDb.sort((a, b) => {
       const aName = (a.name || '').toLowerCase().trim();
       const bName = (b.name || '').toLowerCase().trim();
-      const aBarcode = (a.barcode || '').toLowerCase().trim();
-      const bBarcode = (b.barcode || '').toLowerCase().trim();
-      const aSku = (a.sku || '').toLowerCase().trim();
-      const bSku = (b.sku || '').toLowerCase().trim();
-
-      const getRank = (name: string, barcode: string, sku: string) => {
-        if (name === q || barcode === q || sku === q) return 0;
-        if (name.startsWith(q)) return 1;
-        if (barcode.startsWith(q) || sku.startsWith(q)) return 2;
-        if (name.includes(q)) return 3;
-        return 4;
-      };
-
-      // Priorizar productos activos sobre inactivos
       const inactA = a.status === 'inactive' || a.status === 'discontinued' || a.estado === 'inactivo';
       const inactB = b.status === 'inactive' || b.status === 'discontinued' || b.estado === 'inactivo';
       if (inactA !== inactB) return inactA ? 1 : -1;
 
-      const rankA = getRank(aName, aBarcode, aSku);
-      const rankB = getRank(bName, bBarcode, bSku);
+      const rankA = getRank(aName, (a.barcode || '').toLowerCase().trim(), (a.sku || '').toLowerCase().trim());
+      const rankB = getRank(bName, (b.barcode || '').toLowerCase().trim(), (b.sku || '').toLowerCase().trim());
       if (rankA !== rankB) return rankA - rankB;
       return aName.localeCompare(bName);
     });
 
-    return combined.slice(0, 30);
-  }, [searchQuery, allProducts, dbResults]);
-
-  useEffect(() => {
-    setCustomers(
-      clientes.map((c) => ({
-        id: c.id,
-        name: c.nombre,
-        phone: c.telefono ?? '',
-        credit: Number(c.limite_credito ?? 0),
-        rnc_cedula: c.rnc_cedula ?? null,
-        direccion: c.direccion ?? null,
-        tipo_cliente: c.tipo_cliente ?? null,
-        tipo_ncf: c.tipo_ncf ?? (c.tipo_cliente === 'fiscal' ? 'B01' : (c.rnc_cedula ? 'B01' : 'B02')),
-      }))
-    );
-  }, [clientes]);
+    return rankedDb.slice(0, 30);
+  }, [searchQuery, localMatches, dbResults]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -245,11 +199,6 @@ export default function CartPanel({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  const fmt = (v: number) =>
-    `RD$ ${v.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-  const totalItemsCount = cart.reduce((s, i) => s + i.qty, 0);
 
   const handleSelectProduct = (p: any) => {
     // 1. Validar que no esté inactivo
@@ -298,7 +247,7 @@ export default function CartPanel({
 
     const unitPrice = shouldWholesale && wholesale ? wholesale : basePrice;
 
-    const existingInCart = cart.find(
+    const existingInCart = cartRef.current.find(
       (i) => i.productId === p.id || (p.sku && i.sku && i.sku.toLowerCase() === p.sku.toLowerCase())
     );
 
@@ -320,6 +269,11 @@ export default function CartPanel({
         qty: existingInCart ? existingInCart.qty : 1,
         discount: existingInCart?.discount ?? 0,
         isWeighted: true,
+        stock: Number(p.currentStock ?? p.stock ?? 0),
+        currentStock: Number(p.currentStock ?? p.stock ?? 0),
+        producto_base_id: p.producto_base_id ?? null,
+        factor_conversion: p.factor_conversion ?? null,
+        composite_items: p.composite_items ?? null,
       });
     } else if (onAddToCart) {
       onAddToCart({
@@ -339,9 +293,14 @@ export default function CartPanel({
         isWeighted: isWeight,
         status: p.status,
         outOfStock: false,
+        stock: Number(p.currentStock ?? p.stock ?? 0),
+        currentStock: Number(p.currentStock ?? p.stock ?? 0),
+        producto_base_id: p.producto_base_id ?? null,
+        factor_conversion: p.factor_conversion ?? null,
+        composite_items: p.composite_items ?? null,
       });
     }
-    if (onSearchChange) onSearchChange('');
+    setQueryValue('');
     setDropdownOpen(false);
     const input = document.getElementById('pos-barcode-search-input');
     if (input) input.focus();
@@ -373,16 +332,11 @@ export default function CartPanel({
 
       const qLower = valueToSubmit.toLowerCase();
 
-      // 1. Si hay coincidencia exacta por código de barras, SKU o PLU en los resultados:
-      // (Priorizar siempre productos regulares para no confundir productos con código fijo
-      // que empieza en 20-29 con etiquetas de peso de balanza)
-      const upperSubmit = valueToSubmit.toUpperCase();
+      // 1. O(1) en índice local + fallback en dbResults
+      const exactIndexed = findExactScanProduct(effectiveCatalogIndex, valueToSubmit);
       const exactCode =
-        searchResults.find((p) => {
-          const b = String(p.barcode ?? '').trim().toUpperCase();
-          const s = String(p.sku ?? '').trim().toUpperCase();
-          return (b && b === upperSubmit) || (s && s === upperSubmit);
-        }) || searchResults.find((p) => productMatchesScanCode(p, valueToSubmit));
+        exactIndexed ||
+        searchResults.find((p) => productMatchesScanCode(p, valueToSubmit));
       if (exactCode) {
         handleSelectProduct(exactCode);
         return;
@@ -391,13 +345,13 @@ export default function CartPanel({
       // 2. Si es una etiqueta de balanza con peso embebido (EAN-13/12 prefijo 20-29) y NO es
       // un producto de catálogo con código exacto fijo:
       if (isVariableWeightBarcode(valueToSubmit) && onSearchSubmit) {
-        if (onSearchChange) onSearchChange('');
+        setQueryValue('');
         setDropdownOpen(false);
         void onSearchSubmit(valueToSubmit);
         return;
       }
 
-      // 2. Coincidencia exacta de nombre (ej. "fresaya")
+      // 3. Coincidencia exacta de nombre
       const exactName = searchResults.find(
         (p) => (p.name || '').trim().toLowerCase() === qLower
       );
@@ -406,7 +360,7 @@ export default function CartPanel({
         return;
       }
 
-      // 3. Coincidencia donde el nombre del producto inicia con el texto escrito (ej: "fresaya")
+      // 4. Coincidencia donde el nombre del producto inicia con el texto escrito
       const startsName = searchResults.find(
         (p) => (p.name || '').trim().toLowerCase().startsWith(qLower)
       );
@@ -415,13 +369,13 @@ export default function CartPanel({
         return;
       }
 
-      // 4. Si el usuario navegó activamente o tiene un ítem seleccionado en el dropdown (incluyendo el primero):
+      // 5. Ítem seleccionado en el dropdown
       if (dropdownOpen && searchResults.length > 0 && selectedIndex >= 0 && selectedIndex < searchResults.length) {
         handleSelectProduct(searchResults[selectedIndex]);
         return;
       }
 
-      // 5. Si hay un primer resultado que contiene el texto escrito:
+      // 6. Primer resultado que contiene el texto escrito
       if (searchResults.length > 0) {
         const topResult = searchResults[0];
         const topName = (topResult.name || '').toLowerCase();
@@ -433,9 +387,9 @@ export default function CartPanel({
         }
       }
 
-      // 6. Si no hay coincidencia local, delegar al procesador global (Supabase / combos):
+      // 7. Si no hay coincidencia local, delegar al procesador global (Supabase / combos):
       if (onSearchSubmit) {
-        if (onSearchChange) onSearchChange('');
+        setQueryValue('');
         setDropdownOpen(false);
         void onSearchSubmit(valueToSubmit);
         return;
@@ -447,6 +401,325 @@ export default function CartPanel({
       }
     }
   };
+
+  return (
+    <div className="md:col-span-7 relative flex items-center gap-1.5" ref={searchContainerRef}>
+      <div className="relative flex-1">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+        <input
+          id="pos-barcode-search-input"
+          type="text"
+          placeholder={
+            awaitingDelete
+              ? 'MODO QUITAR: Escanea o busca producto a restar/eliminar...'
+              : 'Buscar producto o escanear código...'
+          }
+          value={searchQuery}
+          onChange={(e) => {
+            setQueryValue(e.target.value);
+            setDropdownOpen(true);
+          }}
+          onFocus={() => setDropdownOpen(true)}
+          onKeyDown={handleKeyDown}
+          autoFocus
+          className={`w-full rounded-xl pl-9 pr-9 h-10 text-xs sm:text-sm font-semibold focus:outline-none transition-all ${
+            awaitingDelete
+              ? 'bg-rose-50/70 dark:bg-rose-950/40 border-2 border-rose-500 text-rose-900 dark:text-rose-100 placeholder:text-rose-400 focus:ring-2 focus:ring-rose-400'
+              : 'bg-slate-50/80 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
+          }`}
+        />
+        {awaitingDelete ? (
+          <Minus size={17} className="absolute right-3 top-1/2 -translate-y-1/2 text-rose-600 dark:text-rose-400 pointer-events-none" />
+        ) : (
+          <CreditCard size={17} className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-600 dark:text-blue-400 pointer-events-none" />
+        )}
+      </div>
+
+      {/* Botón Minimalista para Activar/Desactivar Modo Quitar Producto */}
+      <button
+        type="button"
+        onClick={() => {
+          if (!hasCartItems && !awaitingDelete) {
+            toast.error('El carrito está vacío');
+            return;
+          }
+          if (onToggleDeleteMode) onToggleDeleteMode();
+        }}
+        className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-all shadow-2xs cursor-pointer active:scale-95 border ${
+          awaitingDelete
+            ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-600 shadow-md ring-2 ring-rose-400/40'
+            : 'bg-slate-100 hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-950/40 text-slate-600 hover:text-rose-600 dark:text-slate-300 dark:hover:text-rose-400 border-slate-200 dark:border-slate-700 hover:border-rose-300'
+        }`}
+        title={
+          awaitingDelete
+            ? 'Modo quitar activo (clic para volver a modo normal o presiona Esc)'
+            : 'Activar modo quitar producto (F4)'
+        }
+      >
+        <Minus size={20} strokeWidth={3} />
+      </button>
+
+      {/* Botón para Activar/Desactivar Venta al Por Mayor */}
+      {onToggleAllWholesale && (
+        <button
+          type="button"
+          onClick={onToggleAllWholesale}
+          className={`h-10 px-2.5 rounded-xl flex items-center gap-1.5 flex-shrink-0 transition-all shadow-2xs cursor-pointer active:scale-95 border font-bold text-xs ${
+            isWholesaleMode
+              ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-md ring-2 ring-amber-400/40'
+              : 'bg-slate-100 hover:bg-amber-50 dark:bg-slate-800 dark:hover:bg-amber-950/40 text-slate-700 hover:text-amber-700 dark:text-slate-300 dark:hover:text-amber-400 border-slate-200 dark:border-slate-700 hover:border-amber-300'
+          }`}
+          title={
+            isWholesaleMode
+              ? 'Modo Por Mayor activo: clic para volver a precio normal'
+              : 'Activar modo venta al por mayor para todo el carrito'
+          }
+        >
+          <Tag size={15} className={isWholesaleMode ? 'text-white' : 'text-amber-600 dark:text-amber-400'} />
+          <span className="hidden sm:inline">{isWholesaleMode ? 'Al Por Mayor' : 'Por Mayor'}</span>
+        </button>
+      )}
+
+      {/* Floating Search Dropdown */}
+      {dropdownOpen && (searchResults.length > 0 || (searchQuery.trim().length >= 2 && searchingDb)) && (
+        <div className="absolute left-0 top-full mt-1.5 w-full min-w-[340px] max-w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl z-50 overflow-hidden divide-y divide-slate-100 dark:divide-slate-800 animate-in fade-in-50 duration-150">
+          <div className="px-3.5 py-2 bg-slate-50 dark:bg-slate-800/60 flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400">
+            <span className="flex items-center gap-1.5">
+              {searchingDb ? (
+                <>
+                  <Loader2 size={13} className="animate-spin text-blue-600" />
+                  <span>Consultando en base de datos...</span>
+                </>
+              ) : (
+                <span>{searchResults.length} productos encontrados</span>
+              )}
+            </span>
+            <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
+              ↑↓ para navegar · Enter para agregar
+            </span>
+          </div>
+
+          <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60 scrollbar-thin">
+            {searchResults.length === 0 ? (
+              <div className="px-4 py-8 text-center text-slate-400">
+                {searchingDb ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 size={22} className="animate-spin text-blue-500" />
+                    <p className="text-xs">Buscando "{searchQuery.trim()}" en la base de datos...</p>
+                  </div>
+                ) : (
+                  <p className="text-xs font-semibold">No se encontraron productos con "{searchQuery.trim()}" en la base de datos</p>
+                )}
+              </div>
+            ) : (
+              searchResults.map((item, index) => {
+                const isSelected = index === selectedIndex;
+                const stockVal = Number(item.currentStock ?? 0);
+                const unitStr = item.unit || 'Und';
+                const isOut = stockVal <= 0 || item.stockStatus === 'out';
+                const isLow = !isOut && (stockVal <= (item.minStock || 5) || item.stockStatus === 'low');
+                const isInactive =
+                  item.status === 'inactive' ||
+                  item.status === 'discontinued' ||
+                  (item as any).estado === 'inactivo' ||
+                  (item as any).estado === 'descontinuado';
+                const isWeight =
+                  Boolean(item.isWeightProduct) ||
+                  Boolean((item as any).es_pesado) ||
+                  item.saleType === 'weight' ||
+                  item.saleType === 'both';
+
+                return (
+                  <button
+                    key={item.id || index}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleSelectProduct(item)}
+                    onMouseEnter={() => setSelectedIndex(index)}
+                    className={`w-full text-left px-3.5 py-2.5 transition-all flex items-center justify-between gap-3 cursor-pointer group ${
+                      isInactive
+                        ? 'opacity-60 bg-slate-50/50 dark:bg-slate-900/50'
+                        : isSelected
+                        ? 'bg-blue-50 dark:bg-blue-950/50 border-l-4 border-blue-600 pl-2.5'
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center flex-shrink-0 overflow-hidden text-slate-500">
+                        {item.image ? (
+                          <img src={item.image} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                        ) : isWeight ? (
+                          <Scale size={16} className="text-amber-600 dark:text-amber-400" />
+                        ) : (
+                          <Package size={16} className="text-slate-500" />
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-xs font-bold text-slate-900 dark:text-white leading-tight truncate">
+                            {item.name}
+                          </p>
+                          {isInactive && (
+                            <span className="inline-flex items-center px-1.5 py-0.2 text-[9px] font-bold rounded-md bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300">
+                              Inactivo
+                            </span>
+                          )}
+                          {isWeight && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 text-[9px] font-bold rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                              <Scale size={10} /> Balanza
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                          {item.barcode && <span>Barras: {item.barcode}</span>}
+                          {item.sku && <span>SKU: {item.sku}</span>}
+                          {item.plu && <span>PLU: {item.plu}</span>}
+                          {item.category && item.category !== 'General' && (
+                            <span className="text-slate-400">· {item.category}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-sm font-black text-emerald-600 dark:text-emerald-400 font-mono tabular-nums">
+                        {fmtCurrency(item.salePrice ?? item.price ?? 0)}
+                      </p>
+                      <div className="mt-0.5 flex justify-end">
+                        <span
+                          className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md ${
+                            isOut
+                              ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                              : isLow
+                              ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                              : 'text-slate-500 dark:text-slate-400'
+                          }`}
+                        >
+                          {isOut ? 'Agotado' : `${stockVal} ${unitStr}`}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+interface CartPanelProps {
+  cart: CartItem[];
+  customer: Customer | null;
+  onSetCustomer: (c: Customer | null) => void;
+  selectedNcfType?: NCFType;
+  onSelectNcfType?: (t: NCFType) => void;
+  onUpdateQty: (id: string, qty: number) => void;
+  onUpdateDiscount: (id: string, discount: number) => void;
+  onRemove: (id: string) => void;
+  onEditWeight?: (item: CartItem) => void;
+  onOpenWeightScan?: () => void;
+  globalDiscount: number;
+  onSetGlobalDiscount: (d: number) => void;
+  subtotal: number;
+  taxTotal: number;
+  globalDiscountAmount: number;
+  total: number;
+  onCheckout: () => void;
+  fiscalEnabled?: boolean;
+  onToggleFiscal?: () => void;
+  searchQuery?: string;
+  onSearchChange?: (q: string) => void;
+  onSearchSubmit?: (q: string) => void | Promise<boolean | void>;
+  onAddToCart?: (product: any, qty?: number) => void;
+  awaitingDelete?: boolean;
+  onToggleDeleteMode?: () => void;
+  onCancelDelete?: () => void;
+  onToggleWholesale?: (id: string) => void;
+  onToggleAllWholesale?: () => void;
+  isWholesaleMode?: boolean;
+  onOpenDiscountModal?: (item: CartItem) => void;
+  onOpenPriceModal?: (item: CartItem) => void;
+  isAdmin?: boolean;
+  catalogProducts?: any[];
+  catalogIndex?: PosCatalogIndex;
+  searchStore?: POSSearchStore;
+}
+
+const CartPanel = React.memo(function CartPanel({
+  cart,
+  customer,
+  onSetCustomer,
+  selectedNcfType = 'B02',
+  onSelectNcfType,
+  onUpdateQty,
+  onRemove,
+  onEditWeight,
+  onOpenWeightScan,
+  taxTotal,
+  total,
+  fiscalEnabled = false,
+  onToggleFiscal,
+  searchQuery = '',
+  onSearchChange,
+  onSearchSubmit,
+  onAddToCart,
+  awaitingDelete = false,
+  onToggleDeleteMode,
+  onCancelDelete,
+  onToggleWholesale,
+  onToggleAllWholesale,
+  isWholesaleMode = false,
+  onOpenDiscountModal,
+  onOpenPriceModal,
+  isAdmin = false,
+  catalogProducts,
+  catalogIndex,
+  searchStore,
+}: CartPanelProps) {
+  const { clientes, refetch } = useClientes('');
+  const [createdCustomers, setCreatedCustomers] = useState<Customer[]>([]);
+  const [addCustomerOpen, setAddCustomerOpen] = useState(false);
+  const cartListRef = useRef<HTMLDivElement>(null);
+  const cartRef = useRef<CartItem[]>(cart);
+  cartRef.current = cart;
+
+  const customers = useMemo<Customer[]>(() => {
+    const mapped = clientes.map((c) => ({
+      id: c.id,
+      name: c.nombre,
+      phone: c.telefono ?? '',
+      credit: Number(c.limite_credito ?? 0),
+      rnc_cedula: c.rnc_cedula ?? null,
+      direccion: c.direccion ?? null,
+      tipo_cliente: c.tipo_cliente ?? null,
+      tipo_ncf: c.tipo_ncf ?? (c.tipo_cliente === 'fiscal' ? 'B01' : (c.rnc_cedula ? 'B01' : 'B02')),
+    }));
+    if (createdCustomers.length === 0) return mapped;
+    const seen = new Set(createdCustomers.map((c) => c.id));
+    return [...createdCustomers, ...mapped.filter((c) => !seen.has(c.id))];
+  }, [clientes, createdCustomers]);
+
+  const effectiveCatalogIndex = useMemo(
+    () => catalogIndex ?? buildPosCatalogIndex(catalogProducts),
+    [catalogIndex, catalogProducts]
+  );
+
+  // Mantener el scroll arriba cuando se agrega o escanea un producto (el último agregado aparece primero)
+  const topCartItemKey = cart[0] ? `${cart[0].id}-${cart[0].qty}` : '';
+  useEffect(() => {
+    if (cartListRef.current && topCartItemKey) {
+      cartListRef.current.scrollTop = 0;
+    }
+  }, [topCartItemKey]);
+
+  const fmt = fmtCurrency;
+  const totalItemsCount = cart.reduce((s, i) => s + i.qty, 0);
+  const hasCartItems = cart.length > 0;
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm p-3.5 overflow-hidden">
@@ -500,217 +773,22 @@ export default function CartPanel({
         </div>
 
         {/* Search Input with Autocomplete (Cols 7) */}
-        <div className="md:col-span-7 relative flex items-center gap-1.5" ref={searchContainerRef}>
-          <div className="relative flex-1">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
-            <input
-              id="pos-barcode-search-input"
-              type="text"
-              placeholder={
-                awaitingDelete
-                  ? 'MODO QUITAR: Escanea o busca producto a restar/eliminar...'
-                  : 'Buscar producto o escanear código...'
-              }
-              value={searchQuery}
-              onChange={(e) => {
-                if (onSearchChange) onSearchChange(e.target.value);
-                setDropdownOpen(true);
-              }}
-              onFocus={() => setDropdownOpen(true)}
-              onKeyDown={handleKeyDown}
-              autoFocus
-              className={`w-full rounded-xl pl-9 pr-9 h-10 text-xs sm:text-sm font-semibold focus:outline-none transition-all ${
-                awaitingDelete
-                  ? 'bg-rose-50/70 dark:bg-rose-950/40 border-2 border-rose-500 text-rose-900 dark:text-rose-100 placeholder:text-rose-400 focus:ring-2 focus:ring-rose-400'
-                  : 'bg-slate-50/80 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
-              }`}
-            />
-            {/* Card / Barcode reader icon inside right */}
-            {awaitingDelete ? (
-              <Minus size={17} className="absolute right-3 top-1/2 -translate-y-1/2 text-rose-600 dark:text-rose-400 pointer-events-none" />
-            ) : (
-              <CreditCard size={17} className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-600 dark:text-blue-400 pointer-events-none" />
-            )}
-          </div>
-
-          {/* Botón Minimalista para Activar/Desactivar Modo Quitar Producto */}
-          <button
-            type="button"
-            onClick={() => {
-              if (cart.length === 0 && !awaitingDelete) {
-                toast.error('El carrito está vacío');
-                return;
-              }
-              if (onToggleDeleteMode) onToggleDeleteMode();
-            }}
-            className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-all shadow-2xs cursor-pointer active:scale-95 border ${
-              awaitingDelete
-                ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-600 shadow-md ring-2 ring-rose-400/40'
-                : 'bg-slate-100 hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-950/40 text-slate-600 hover:text-rose-600 dark:text-slate-300 dark:hover:text-rose-400 border-slate-200 dark:border-slate-700 hover:border-rose-300'
-            }`}
-            title={
-              awaitingDelete
-                ? 'Modo quitar activo (clic para volver a modo normal o presiona Esc)'
-                : 'Activar modo quitar producto (F4)'
-            }
-          >
-            <Minus size={20} strokeWidth={3} />
-          </button>
-
-          {/* Botón para Activar/Desactivar Venta al Por Mayor */}
-          {onToggleAllWholesale && (
-            <button
-              type="button"
-              onClick={onToggleAllWholesale}
-              className={`h-10 px-2.5 rounded-xl flex items-center gap-1.5 flex-shrink-0 transition-all shadow-2xs cursor-pointer active:scale-95 border font-bold text-xs ${
-                isWholesaleMode
-                  ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-md ring-2 ring-amber-400/40'
-                  : 'bg-slate-100 hover:bg-amber-50 dark:bg-slate-800 dark:hover:bg-amber-950/40 text-slate-700 hover:text-amber-700 dark:text-slate-300 dark:hover:text-amber-400 border-slate-200 dark:border-slate-700 hover:border-amber-300'
-              }`}
-              title={
-                isWholesaleMode
-                  ? 'Modo Por Mayor activo: clic para volver a precio normal'
-                  : 'Activar modo venta al por mayor para todo el carrito'
-              }
-            >
-              <Tag size={15} className={isWholesaleMode ? 'text-white' : 'text-amber-600 dark:text-amber-400'} />
-              <span className="hidden sm:inline">{isWholesaleMode ? 'Al Por Mayor' : 'Por Mayor'}</span>
-            </button>
-          )}
-
-          {/* Floating Search Dropdown (Lista de productos en vivo desde Base de Datos) */}
-          {dropdownOpen && (searchResults.length > 0 || (searchQuery.trim().length >= 1 && searchingDb)) && (
-            <div className="absolute left-0 top-full mt-1.5 w-full min-w-[340px] max-w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl z-50 overflow-hidden divide-y divide-slate-100 dark:divide-slate-800 animate-in fade-in-50 duration-150">
-              {/* Barra de estado / cabecera */}
-              <div className="px-3.5 py-2 bg-slate-50 dark:bg-slate-800/60 flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                <span className="flex items-center gap-1.5">
-                  {searchingDb ? (
-                    <>
-                      <Loader2 size={13} className="animate-spin text-blue-600" />
-                      <span>Consultando en base de datos...</span>
-                    </>
-                  ) : (
-                    <span>{searchResults.length} productos encontrados</span>
-                  )}
-                </span>
-                <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
-                  ↑↓ para navegar · Enter para agregar
-                </span>
-              </div>
-
-              {/* Lista de productos */}
-              <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60 scrollbar-thin">
-                {searchResults.length === 0 ? (
-                  <div className="px-4 py-8 text-center text-slate-400">
-                    {searchingDb ? (
-                      <div className="flex flex-col items-center gap-2">
-                        <Loader2 size={22} className="animate-spin text-blue-500" />
-                        <p className="text-xs">Buscando "{searchQuery.trim()}" en la base de datos...</p>
-                      </div>
-                    ) : (
-                      <p className="text-xs font-semibold">No se encontraron productos con "{searchQuery.trim()}" en la base de datos</p>
-                    )}
-                  </div>
-                ) : (
-                  searchResults.map((item, index) => {
-                    const isSelected = index === selectedIndex;
-                    const stockVal = Number(item.currentStock ?? 0);
-                    const unitStr = item.unit || 'Und';
-                    const isOut = stockVal <= 0 || item.stockStatus === 'out';
-                    const isLow = !isOut && (stockVal <= (item.minStock || 5) || item.stockStatus === 'low');
-                    const isInactive =
-                      item.status === 'inactive' ||
-                      item.status === 'discontinued' ||
-                      (item as any).estado === 'inactivo' ||
-                      (item as any).estado === 'descontinuado';
-                    const isWeight =
-                      Boolean(item.isWeightProduct) ||
-                      Boolean((item as any).es_pesado) ||
-                      item.saleType === 'weight' ||
-                      item.saleType === 'both';
-
-                    return (
-                      <button
-                        key={item.id || index}
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => handleSelectProduct(item)}
-                        onMouseEnter={() => setSelectedIndex(index)}
-                        className={`w-full text-left px-3.5 py-2.5 transition-all flex items-center justify-between gap-3 cursor-pointer group ${
-                          isInactive
-                            ? 'opacity-60 bg-slate-50/50 dark:bg-slate-900/50'
-                            : isSelected
-                            ? 'bg-blue-50 dark:bg-blue-950/50 border-l-4 border-blue-600 pl-2.5'
-                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
-                        }`}
-                      >
-                        {/* Info Izquierda: Imagen/Icono + Nombre + SKU/Barcode */}
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center flex-shrink-0 overflow-hidden text-slate-500">
-                            {item.image ? (
-                              <img src={item.image} alt="" className="w-full h-full object-cover" />
-                            ) : isWeight ? (
-                              <Scale size={16} className="text-amber-600 dark:text-amber-400" />
-                            ) : (
-                              <Package size={16} className="text-slate-500" />
-                            )}
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <p className="text-xs font-bold text-slate-900 dark:text-white leading-tight truncate">
-                                {item.name}
-                              </p>
-                              {isInactive && (
-                                <span className="inline-flex items-center px-1.5 py-0.2 text-[9px] font-bold rounded-md bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300">
-                                  Inactivo
-                                </span>
-                              )}
-                              {isWeight && (
-                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 text-[9px] font-bold rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
-                                  <Scale size={10} /> Balanza
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500 dark:text-slate-400 font-mono">
-                              {item.barcode && <span>Barras: {item.barcode}</span>}
-                              {item.sku && <span>SKU: {item.sku}</span>}
-                              {item.plu && <span>PLU: {item.plu}</span>}
-                              {item.category && item.category !== 'General' && (
-                                <span className="text-slate-400">· {item.category}</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Info Derecha: Precio + Stock Badge */}
-                        <div className="text-right flex-shrink-0">
-                          <p className="text-sm font-black text-emerald-600 dark:text-emerald-400 font-mono tabular-nums">
-                            {fmt(item.salePrice ?? item.price ?? 0)}
-                          </p>
-                          <div className="mt-0.5 flex justify-end">
-                            <span
-                              className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md ${
-                                isOut
-                                  ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
-                                  : isLow
-                                  ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
-                                  : 'text-slate-500 dark:text-slate-400'
-                              }`}
-                            >
-                              {isOut ? 'Agotado' : `${stockVal} ${unitStr}`}
-                            </span>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+        <CartSearchBar
+          effectiveCatalogIndex={effectiveCatalogIndex}
+          searchStore={searchStore}
+          propSearchQuery={searchQuery}
+          onSearchChange={onSearchChange}
+          onSearchSubmit={onSearchSubmit}
+          onAddToCart={onAddToCart}
+          onEditWeight={onEditWeight}
+          awaitingDelete={awaitingDelete}
+          hasCartItems={hasCartItems}
+          cartRef={cartRef}
+          onToggleDeleteMode={onToggleDeleteMode}
+          onCancelDelete={onCancelDelete}
+          onToggleAllWholesale={onToggleAllWholesale}
+          isWholesaleMode={isWholesaleMode}
+        />
       </div>
 
       {/* Row 2: Factura Selector / Tipo de Comprobante Fiscal (DGII) */}
@@ -1110,7 +1188,7 @@ export default function CartPanel({
         <PosAddCustomerModal
           onClose={() => setAddCustomerOpen(false)}
           onCreated={async (c) => {
-            setCustomers((prev) => [c, ...prev.filter((x) => x.id !== c.id)]);
+            setCreatedCustomers((prev) => [c, ...prev.filter((x) => x.id !== c.id)]);
             onSetCustomer(c);
             if (c.tipo_ncf && onSelectNcfType) {
               onSelectNcfType(c.tipo_ncf as NCFType);
@@ -1121,4 +1199,6 @@ export default function CartPanel({
       )}
     </div>
   );
-}
+});
+
+export default CartPanel;

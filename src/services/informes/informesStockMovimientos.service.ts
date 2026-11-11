@@ -104,6 +104,43 @@ function formatFechaKardex(isoString?: string | null): string {
   }
 }
 
+function mapProductoToStockItem(p: Producto): StockGeneralItem {
+  const stock = Number(p.stock_actual ?? 0);
+  const min = Number(p.stock_minimo ?? 0);
+  const costo = Number(p.precio_costo ?? 0);
+  const venta = Number(p.precio_venta ?? 0);
+
+  const valor_compra = Math.round(stock * costo * 100) / 100;
+  const valor_venta = Math.round(stock * venta * 100) / 100;
+
+  let estado: 'Agotado' | 'Bajo' | 'OK' = 'OK';
+  if (stock <= 0) {
+    estado = 'Agotado';
+  } else if (stock <= min) {
+    estado = 'Bajo';
+  }
+
+  return {
+    id: p.id,
+    sku: p.sku || '—',
+    codigo_barras: p.codigo_barras || '',
+    nombre: p.nombre,
+    unidad: p.unidad || 'Unidad',
+    categoria: p.categoria || 'Sin categoría',
+    ubicacion: 'SUPERMERCADO REMANENTE',
+    precio_venta: venta,
+    precio_costo: costo,
+    stock_actual: stock,
+    stock_minimo: min,
+    valor_compra,
+    valor_venta,
+    estado,
+    es_pesado: Boolean(p.es_pesado),
+    producto_base_id: (p as any).producto_base_id ?? null,
+    factor_conversion: Number((p as any).factor_conversion ?? 1),
+  };
+}
+
 /**
  * Obtiene el informe general de stock con valoraciones por costo y por venta,
  * beneficio potencial y margen de beneficio global.
@@ -164,45 +201,12 @@ export async function obtenerInformeStockGeneral(): Promise<ResumenStockGeneral>
   let total_bajos = 0;
 
   const items: StockGeneralItem[] = converted.map((p) => {
-    const stock = Number(p.stock_actual ?? 0);
-    const min = Number(p.stock_minimo ?? 0);
-    const costo = Number(p.precio_costo ?? 0);
-    const venta = Number(p.precio_venta ?? 0);
-
-    const valor_compra = Math.round(stock * costo * 100) / 100;
-    const valor_venta = Math.round(stock * venta * 100) / 100;
-
-    stock_cierre_compra += valor_compra;
-    stock_cierre_venta += valor_venta;
-
-    let estado: 'Agotado' | 'Bajo' | 'OK' = 'OK';
-    if (stock <= 0) {
-      estado = 'Agotado';
-      total_agotados += 1;
-    } else if (stock <= min) {
-      estado = 'Bajo';
-      total_bajos += 1;
-    }
-
-    return {
-      id: p.id,
-      sku: p.sku || '—',
-      codigo_barras: p.codigo_barras || '',
-      nombre: p.nombre,
-      unidad: p.unidad || 'Unidad',
-      categoria: p.categoria || 'Sin categoría',
-      ubicacion: 'SUPERMERCADO REMANENTE',
-      precio_venta: venta,
-      precio_costo: costo,
-      stock_actual: stock,
-      stock_minimo: min,
-      valor_compra,
-      valor_venta,
-      estado,
-      es_pesado: Boolean(p.es_pesado),
-      producto_base_id: (p as any).producto_base_id ?? null,
-      factor_conversion: Number((p as any).factor_conversion ?? 1),
-    };
+    const item = mapProductoToStockItem(p);
+    stock_cierre_compra += item.valor_compra;
+    stock_cierre_venta += item.valor_venta;
+    if (item.estado === 'Agotado') total_agotados += 1;
+    else if (item.estado === 'Bajo') total_bajos += 1;
+    return item;
   });
 
   const beneficio_potencial = Math.round((stock_cierre_venta - stock_cierre_compra) * 100) / 100;
@@ -227,16 +231,37 @@ export async function obtenerInformeStockGeneral(): Promise<ResumenStockGeneral>
  * consolidando ventas, compras, ajustes de stock y devoluciones con saldos continuos.
  */
 export async function obtenerHistorialMovimientosProducto(
-  productoId: string
+  productoId: string,
+  preloadedProducto?: StockGeneralItem
 ): Promise<HistorialMovimientosProductoResult> {
-  const general = await obtenerInformeStockGeneral();
-  const producto = general.items.find((p) => p.id === productoId);
+  const sb = tryGetSupabase();
+  let producto: StockGeneralItem | undefined = preloadedProducto;
+
+  // Evita recargar los 3,000 productos si ya tenemos el ítem o es un producto simple en BD
+  if (!producto && sb) {
+    try {
+      const { data } = await sb
+        .from('productos')
+        .select('*')
+        .eq('id', productoId)
+        .maybeSingle();
+      const row = data as (Producto & { composite_items?: unknown[] }) | null;
+      if (row && !row.producto_base_id && (!Array.isArray(row.composite_items) || row.composite_items.length === 0)) {
+        producto = mapProductoToStockItem(row);
+      }
+    } catch {
+      // fallback a obtenerInformeStockGeneral
+    }
+  }
+
+  if (!producto) {
+    const general = await obtenerInformeStockGeneral();
+    producto = general.items.find((p) => p.id === productoId);
+  }
 
   if (!producto) {
     throw new Error(`Producto con ID ${productoId} no encontrado`);
   }
-
-  const sb = tryGetSupabase();
   const rawMovements: {
     tipo: MovimientoStockItem['tipo'];
     cantidad: number;

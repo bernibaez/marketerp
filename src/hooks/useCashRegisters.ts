@@ -30,6 +30,7 @@ export function useCashRegisters() {
           limite: 500,
           fechaInicio: todayStr,
           excluirAnuladas: true,
+          omitirDetalles: true,
         }).catch(() => ({ datos: [], total: 0 })),
       ]);
 
@@ -87,15 +88,14 @@ export function useCashRegisters() {
             : 0;
 
           const ventasTurno = ventasHoy.filter((v) => {
+            if (v.cierre_id) {
+              return String(v.cierre_id) === String(sessionAbierta.id);
+            }
             const matchesBox = keys.has(String(v.caja_id ?? ''));
-            const matchesCashierWithoutBox =
-              !v.caja_id &&
-              sessionAbierta.cajero_id &&
-              String(v.cajero_id ?? '') === String(sessionAbierta.cajero_id);
-            if (!matchesBox && !matchesCashierWithoutBox) return false;
+            if (!matchesBox) return false;
             if (openTime > 0 && v.creado_en) {
               const vt = new Date(v.creado_en).getTime();
-              if (!isNaN(vt) && vt < openTime - 10_000) return false;
+              if (!isNaN(vt) && vt < openTime) return false;
             }
             return true;
           });
@@ -218,9 +218,40 @@ export function useCashRegisters() {
     );
   }, []);
 
+  const recordSaleOnRegister = useCallback(
+    (cajaId: string, cierreId: string | undefined, saleTotal: number) => {
+      const amount = Math.round(Number(saleTotal || 0) * 100) / 100;
+      setRegisters((prev) =>
+        prev.map((r) => {
+          const matchesCierre = Boolean(
+            cierreId && r.cierreId && String(r.cierreId) === String(cierreId)
+          );
+          const matchesBox =
+            String(r.id) === String(cajaId) ||
+            String(r.dbId ?? '') === String(cajaId) ||
+            String(r.codigo ?? '') === String(cajaId);
+          if (!matchesCierre && !matchesBox) return r;
+          return {
+            ...r,
+            salesToday: Math.round((Number(r.salesToday || 0) + amount) * 100) / 100,
+            tickets: Number(r.tickets || 0) + 1,
+          };
+        })
+      );
+    },
+    []
+  );
+
   useEffect(() => {
     fetchDynamicRegisters();
   }, [fetchDynamicRegisters]);
 
-  return { registers, dbUsers, loading, refetch: fetchDynamicRegisters, markRegisterClosed };
+  return {
+    registers,
+    dbUsers,
+    loading,
+    refetch: fetchDynamicRegisters,
+    markRegisterClosed,
+    recordSaleOnRegister,
+  };
 }

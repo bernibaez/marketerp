@@ -3,6 +3,8 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
+let client: SupabaseClient | null = null;
+
 /** True cuando hay URL y anon key configuradas (no placeholders). */
 export function isSupabaseConfigured(): boolean {
   if (!url || !anonKey) return false;
@@ -10,7 +12,10 @@ export function isSupabaseConfigured(): boolean {
   return url.startsWith('http') && anonKey.length > 20;
 }
 
-let client: SupabaseClient | null = null;
+if (typeof globalThis !== 'undefined') {
+  (globalThis as Record<string, unknown>).__MERCATO_REAL_IS_SUPABASE_CONFIGURED__ =
+    isSupabaseConfigured;
+}
 
 export function getSupabase(): SupabaseClient {
   if (!isSupabaseConfigured()) {

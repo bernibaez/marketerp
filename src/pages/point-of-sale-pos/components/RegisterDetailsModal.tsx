@@ -3,12 +3,17 @@ import { X, Printer, Download, Briefcase } from 'lucide-react';
 import { exportTableToPdf, formatMoneyPdf } from '@/lib/exportPdf';
 import { useAuth } from '@/context/AuthContext';
 import { obtenerVentasTurno, type VentaConDetalle } from '@/services/ventas.service';
-import { obtenerCajaAbierta } from '@/services/cierresCaja.service';
+import {
+  obtenerCajaAbierta,
+  obtenerCierrePorId,
+  calcularEfectivoNetoVenta,
+} from '@/services/cierresCaja.service';
 import { toast } from '@/lib/toast';
 
 interface RegisterDetailsModalProps {
   onClose: () => void;
   cajaId?: string;
+  cierreId?: string;
   cajaLabel?: string;
   /** Si true (admin), incluye ventas del usuario aunque el turno esté a nombre de otro cajero. */
   includeUserSales?: boolean;
@@ -22,6 +27,7 @@ function money(n: number) {
 export default function RegisterDetailsModal({
   onClose,
   cajaId = 'principal',
+  cierreId,
   cajaLabel = 'Caja',
   includeUserSales = false,
   locationName = 'SUPERMERCADO REMANENTE',
@@ -41,7 +47,9 @@ export default function RegisterDetailsModal({
     (async () => {
       setLoading(true);
       try {
-        const abierta = await obtenerCajaAbierta(cajaId).catch(() => null);
+        const abierta =
+          (cierreId ? await obtenerCierrePorId(cierreId).catch(() => null) : null) ||
+          (await obtenerCajaAbierta(cajaId).catch(() => null));
         if (!abierta) {
           if (alive) {
             setAbiertaEn('');
@@ -58,34 +66,17 @@ export default function RegisterDetailsModal({
           setTurnoCajeroNombre(cajeroAbierta);
         }
 
+        const targetCierreId = abierta.id || cierreId;
         const cajaIds = Array.from(new Set([cajaId, abierta.caja_id].filter(Boolean) as string[]));
-        const porCaja = await obtenerVentasTurno({
+        const merged = await obtenerVentasTurno({
+          cierreId: targetCierreId,
           cajaId: cajaIds.length > 0 ? cajaIds : cajaId,
-          // No-admin: solo las ventas que él/ella realizó; Admin: todas las ventas de esta caja
+          incluirLegacySinCierreId: true,
+          // No-admin: solo las ventas de la sesión / cajero titular; Admin: todas las ventas del turno
           cajeroId: includeUserSales ? undefined : (abierta.cajero_id || user?.id),
           desde,
-          limite: 500,
+          todasPaginas: true,
         });
-
-        let merged = porCaja;
-        // Si hay ventas del cajero titular del turno sin caja_id explícita, incluirlas
-        const targetCajeroId = abierta.cajero_id || (!includeUserSales ? user?.id : undefined);
-        if (targetCajeroId) {
-          const porCajero = await obtenerVentasTurno({
-            cajeroId: targetCajeroId,
-            desde,
-            limite: 500,
-          });
-          const allowedSet = new Set(cajaIds.map(String));
-          const seen = new Set(merged.map((v) => v.id));
-          for (const v of porCajero) {
-            if (!seen.has(v.id) && (!v.caja_id || allowedSet.has(String(v.caja_id)))) {
-              merged = [...merged, v];
-              seen.add(v.id);
-            }
-          }
-          merged.sort((a, b) => (a.creado_en < b.creado_en ? 1 : -1));
-        }
 
         if (alive) setVentas(merged);
       } catch (e) {
@@ -98,7 +89,7 @@ export default function RegisterDetailsModal({
     return () => {
       alive = false;
     };
-  }, [cajaId, includeUserSales, user?.id]);
+  }, [cajaId, cierreId, includeUserSales, user?.id]);
 
   const dateRangeStr = useMemo(() => {
     const start = abiertaEn
@@ -128,7 +119,7 @@ export default function RegisterDetailsModal({
     let credit = 0;
     for (const v of ventas) {
       total += Number(v.monto_total) || 0;
-      cash += Number(v.monto_efectivo) || 0;
+      cash += calcularEfectivoNetoVenta(v);
       card += Number(v.monto_tarjeta) || 0;
       transfer += Number(v.monto_transferencia) || 0;
       credit += Number(v.monto_credito) || 0;

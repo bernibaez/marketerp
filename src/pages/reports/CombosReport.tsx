@@ -103,6 +103,8 @@ export default function CombosReport({ dateFrom, dateTo }: ReportPeriodProps) {
         <ReportTable
           headers={['Código', 'Nombre', 'Estado', 'Vendidos', 'Precio', 'Ingreso periodo']}
           rows={data.rows}
+          searchPlaceholder="Buscar por código o nombre de combo…"
+          itemLabel="combos"
         />
       </div>
     </div>

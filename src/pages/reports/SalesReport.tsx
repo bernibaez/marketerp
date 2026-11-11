@@ -97,6 +97,8 @@ export default function SalesReport({ dateFrom, dateTo }: ReportPeriodProps) {
         <ReportTable
           headers={['Factura', 'Fecha', 'Cliente', 'Ítems', 'Pago', 'Agente', 'Total']}
           rows={data.rows}
+          searchPlaceholder="Buscar por factura, cliente o agente…"
+          itemLabel="facturas"
         />
       </div>
     </div>

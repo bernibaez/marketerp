@@ -80,23 +80,7 @@ export default function PosExpenseModal({
         estado: 'aprobado',
       });
 
-      // 2. Registrar movimiento en movimientos_caja para arqueo y cuadre de caja
-      try {
-        await registrarMovimientoCaja({
-          caja_id: effectiveCajaId,
-          cierre_id: cierreId ?? null,
-          cajero_id: user?.id ?? null,
-          cajero_nombre: respName,
-          tipo: 'gasto',
-          monto: value,
-          concepto: description.trim(),
-          categoria: catName,
-        });
-      } catch (errMov) {
-        console.warn('Error al registrar movimiento de caja:', errMov);
-      }
-
-      // 3. Registrar en mercado_pos_expenses para persistencia local de POS
+      // 2. Registrar en mercado_pos_expenses solo para historial rápido de UI POS (crearGasto ya registró 1 movimiento en caja)
       const now = new Date();
       addCashExpense({
         id: `exp-${Date.now()}`,

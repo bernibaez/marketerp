@@ -25,12 +25,14 @@ export default function PosScaleModal({
   initialProduct,
   sharedCatalog,
 }: Props) {
-  const { productosUi: fallbackProductosUi } = useProductos(
-    sharedCatalog && sharedCatalog.length > 0
-      ? { pagina: 1, limite: 1 }
-      : { pagina: 1, limite: 100, estado: 'todos' }
-  );
-  const productosUi = (sharedCatalog && sharedCatalog.length > 0) ? sharedCatalog : fallbackProductosUi;
+  const hasSharedCatalog = sharedCatalog !== undefined;
+  const { productosUi: fallbackProductosUi } = useProductos({
+    pagina: 1,
+    limite: 100,
+    estado: 'todos',
+    enabled: !hasSharedCatalog,
+  });
+  const productosUi = hasSharedCatalog ? sharedCatalog : fallbackProductosUi;
   const [extraProducts, setExtraProducts] = useState<ScaleProduct[]>([]);
 
   const normalizedInitialProduct: ScaleProduct | null = useMemo(() => {
