@@ -11,18 +11,8 @@ export function usePurchaseItems() {
     [purchaseItems]
   );
 
-  const taxTotal = useMemo(
-    () =>
-      purchaseItems.reduce((sum, item) => {
-        if (item.taxPercent > 0) {
-          return sum + item.qty * item.price * (item.taxPercent / 100);
-        }
-        return sum;
-      }, 0),
-    [purchaseItems]
-  );
-
-  const grandTotal = subtotal + taxTotal;
+  const taxTotal = 0;
+  const grandTotal = subtotal;
 
   const handleUpdateLineQty = (id: string, qty: number) => {
     setPurchaseItems((prev) =>
@@ -84,6 +74,8 @@ export function usePurchaseItems() {
           salePrice: salePrice > 0 ? salePrice : copy[existingIdx].salePrice,
           wholesalePrice: wholesalePrice > 0 ? wholesalePrice : copy[existingIdx].wholesalePrice,
           taxPercent,
+          currentStock: product.currentStock ?? copy[existingIdx].currentStock ?? 0,
+          unit: product.unit || copy[existingIdx].unit || 'Und',
         };
         toast.success(`+${qty} "${product.name}" (Total en orden: ${newQty})`);
         return copy;
@@ -99,6 +91,8 @@ export function usePurchaseItems() {
         salePrice: salePrice,
         wholesalePrice: wholesalePrice,
         taxPercent,
+        currentStock: product.currentStock ?? 0,
+        unit: product.unit || 'Und',
       };
       toast.success(`"${product.name}" agregado a la compra`);
       return [...prev, newItem];
@@ -136,6 +130,8 @@ export function usePurchaseItems() {
           salePrice: newSale,
           wholesalePrice: newWholesale,
           taxPercent: newTax,
+          currentStock: newProduct.currentStock ?? 0,
+          unit: newProduct.unit || 'Und',
         };
       })
     );

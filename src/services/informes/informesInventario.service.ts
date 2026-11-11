@@ -1,4 +1,6 @@
 import { tryGetSupabase } from '../clienteSupabase';
+import { obtenerProductos } from '../productos.service';
+import { getStoredAdjustments } from '@/lib/stockAdjustmentStore';
 import { type PeriodoInforme, rangoFin, fmtFecha } from './informesShared';
 
 export type InformeInventario = {
@@ -10,19 +12,8 @@ export type InformeInventario = {
 };
 
 export async function informeInventario(): Promise<InformeInventario> {
-  const empty: InformeInventario = { valor: 0, skus: 0, bajos: 0, agotados: 0, rows: [] };
-  const sb = tryGetSupabase();
-  if (!sb) return empty;
-
-  const { data, error } = await sb
-    .from('productos')
-    .select('sku, nombre, categoria, stock_actual, stock_minimo, precio_costo, estado')
-    .eq('estado', 'activo')
-    .order('nombre')
-    .limit(2000);
-
-  if (error) throw error;
-  const prods = data ?? [];
+  const res = await obtenerProductos({ pagina: 1, limite: 10000, estado: 'todos' });
+  const prods = res.datos ?? [];
   let valor = 0;
   let bajos = 0;
   let agotados = 0;
@@ -36,9 +27,9 @@ export async function informeInventario(): Promise<InformeInventario> {
     else if (stock <= min) bajos += 1;
     const estado = stock <= 0 ? 'Agotado' : stock <= min ? 'Bajo' : 'OK';
     return [
-      p.sku,
+      p.sku || '—',
       p.nombre,
-      p.categoria,
+      p.categoria || 'General',
       stock,
       min,
       `RD$ ${val.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`,
@@ -66,44 +57,74 @@ export type InformeAjustes = {
 };
 
 export async function informeAjustes(p: PeriodoInforme): Promise<InformeAjustes> {
-  const empty: InformeAjustes = { total: 0, entradas: 0, salidas: 0, rows: [] };
   const sb = tryGetSupabase();
-  if (!sb) return empty;
+  const rowsMap = new Map<string, InformeAjustes['rows'][number]>();
 
-  const { data, error } = await sb
-    .from('ajustes_stock')
-    .select(
-      `
-      codigo, tipo_ajuste, cantidad_anterior, cantidad_nueva, motivo, creado_en,
-      productos ( nombre, sku )
-    `
-    )
-    .gte('creado_en', p.desde)
-    .lte('creado_en', rangoFin(p.hasta))
-    .order('creado_en', { ascending: false })
-    .limit(500);
+  if (sb) {
+    try {
+      const { data, error } = await sb
+        .from('ajustes_stock')
+        .select(
+          `
+          id, codigo, tipo_ajuste, cantidad_anterior, cantidad_nueva, motivo, creado_en,
+          productos ( nombre, sku )
+        `
+        )
+        .gte('creado_en', p.desde)
+        .lte('creado_en', rangoFin(p.hasta))
+        .order('creado_en', { ascending: false })
+        .limit(1000);
 
-  if (error) throw error;
-  const list = data ?? [];
+      if (!error && data) {
+        for (const a of data as Record<string, unknown>[]) {
+          const tipo = String(a.tipo_ajuste);
+          const prod = a.productos as { nombre?: string; sku?: string } | null;
+          const code = String(a.codigo || a.id);
+          const sku = prod?.sku ?? '—';
+          rowsMap.set(`${code}::${sku}`, {
+            code,
+            productName: prod?.nombre ?? 'Producto',
+            sku,
+            type: tipo,
+            previousQty: Number(a.cantidad_anterior ?? 0),
+            newQty: Number(a.cantidad_nueva ?? 0),
+            reason: String(a.motivo ?? ''),
+            date: fmtFecha(String(a.creado_en)),
+          });
+        }
+      }
+    } catch {
+      // Fallback a local
+    }
+  }
+
+  for (const localAdj of getStoredAdjustments()) {
+    if (localAdj.date >= p.desde && localAdj.date <= p.hasta) {
+      const key = `${localAdj.code}::${localAdj.sku || localAdj.productId}`;
+      if (!rowsMap.has(key)) {
+        rowsMap.set(key, {
+          code: localAdj.code,
+          productName: localAdj.productName,
+          sku: localAdj.sku || '—',
+          type: localAdj.type,
+          previousQty: localAdj.previousQty,
+          newQty: localAdj.newQty,
+          reason: localAdj.reason,
+          date: fmtFecha(localAdj.date),
+        });
+      }
+    }
+  }
+
+  const rows = Array.from(rowsMap.values());
   let entradas = 0;
   let salidas = 0;
-  const rows = list.map((a: Record<string, unknown>) => {
-    const tipo = String(a.tipo_ajuste);
-    if (tipo === 'entrada') entradas += 1;
+  for (const r of rows) {
+    if (r.type === 'entrada') entradas += 1;
     else salidas += 1;
-    const prod = a.productos as { nombre?: string; sku?: string } | null;
-    return {
-      code: String(a.codigo),
-      productName: prod?.nombre ?? 'Producto',
-      sku: prod?.sku ?? '—',
-      type: tipo,
-      previousQty: Number(a.cantidad_anterior),
-      newQty: Number(a.cantidad_nueva),
-      reason: String(a.motivo ?? ''),
-      date: fmtFecha(String(a.creado_en)),
-    };
-  });
-  return { total: list.length, entradas, salidas, rows };
+  }
+
+  return { total: rows.length, entradas, salidas, rows };
 }
 
 export type StockDetalleItem = {
@@ -117,22 +138,14 @@ export type StockDetalleItem = {
 };
 
 export async function informeStockDetalle(): Promise<StockDetalleItem[]> {
-  const sb = tryGetSupabase();
-  if (!sb) return [];
-  const { data, error } = await sb
-    .from('productos')
-    .select('id, sku, nombre, categoria, stock_actual, stock_minimo, precio_costo')
-    .eq('estado', 'activo')
-    .order('nombre')
-    .limit(2000);
-  if (error) throw error;
-  return (data ?? []).map((p) => ({
+  const res = await obtenerProductos({ pagina: 1, limite: 10000, estado: 'todos' });
+  return (res.datos ?? []).map((p) => ({
     id: p.id,
     name: p.nombre,
-    sku: p.sku,
-    category: p.categoria,
-    stock: Number(p.stock_actual),
-    min: Number(p.stock_minimo),
-    value: Number(p.stock_actual) * Number(p.precio_costo),
+    sku: p.sku || '—',
+    category: p.categoria || 'General',
+    stock: Number(p.stock_actual ?? 0),
+    min: Number(p.stock_minimo ?? 0),
+    value: Number(p.stock_actual ?? 0) * Number(p.precio_costo ?? 0),
   }));
 }

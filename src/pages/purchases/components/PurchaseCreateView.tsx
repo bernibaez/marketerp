@@ -5,6 +5,7 @@ import ModalShell from '@/components/ui/ModalShell';
 import { crearProveedor } from '@/services/proveedores.service';
 import { toast } from '@/lib/toast';
 import { getStoredProducts, type ProductItem } from '@/lib/productStore';
+import { useProductos } from '@/hooks/useProductos';
 import type { Proveedor } from '@/services/proveedores.service';
 
 export interface PurchaseLineItem {
@@ -17,6 +18,8 @@ export interface PurchaseLineItem {
   salePrice: number;
   wholesalePrice: number;
   taxPercent: number;
+  currentStock?: number;
+  unit?: string;
 }
 
 interface PurchaseCreateViewProps {
@@ -118,9 +121,16 @@ export function PurchaseCreateView({
   const [substituteSearch, setSubstituteSearch] = useState('');
   const [keepCurrentPriceAndQty, setKeepCurrentPriceAndQty] = useState(true);
 
+  const { productosUi } = useProductos({ pagina: 1, limite: 5000 });
+
   const allCatalogProducts = useMemo(() => {
-    return getStoredProducts();
-  }, [substitutingLine]);
+    const stored = getStoredProducts();
+    if (productosUi.length === 0) return stored;
+    const map = new Map<string, ProductItem>();
+    for (const p of stored) map.set(p.id, p);
+    for (const p of productosUi) map.set(p.id, p);
+    return Array.from(map.values());
+  }, [substitutingLine, productosUi]);
 
   const filteredSubstitutes = useMemo(() => {
     if (!substituteSearch.trim()) return allCatalogProducts.slice(0, 15);
@@ -482,16 +492,10 @@ export function PurchaseCreateView({
                   RD$ {subtotal.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                 </span>
               </div>
-              <div className="flex justify-between text-xs sm:text-sm">
-                <span className="text-muted-foreground">ITBIS Estimado (18%)</span>
-                <span className="font-bold tabular-nums">
-                  RD$ {taxTotal.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
-                </span>
-              </div>
               <div className="border-t border-border pt-2.5 flex justify-between font-black text-base sm:text-lg text-foreground">
                 <span>Total Final</span>
                 <span className="text-primary tabular-nums">
-                  RD$ {grandTotal.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                  RD$ {subtotal.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                 </span>
               </div>
             </div>
@@ -703,6 +707,17 @@ export function PurchaseCreateView({
                     const wholesaleMarginAmt = (item.wholesalePrice || 0) - item.price;
                     const wholesaleMarginPct =
                       item.price > 0 && item.wholesalePrice ? (wholesaleMarginAmt / item.price) * 100 : 0;
+                    const matchedProd = allCatalogProducts.find(
+                      (p) =>
+                        (item.productId && p.id === item.productId) ||
+                        (item.sku && p.sku && p.sku.toLowerCase() === item.sku.toLowerCase()) ||
+                        p.name.toLowerCase() === item.name.toLowerCase()
+                    );
+                    const currentStock =
+                      item.currentStock !== undefined
+                        ? item.currentStock
+                        : (matchedProd?.currentStock ?? 0);
+                    const unitLabel = item.unit || matchedProd?.unit || 'Und';
 
                     return (
                       <tr
@@ -716,7 +731,9 @@ export function PurchaseCreateView({
                           <p className="font-bold text-foreground text-xs truncate max-w-[220px]" title={item.name}>
                             {item.name}
                           </p>
-                          <p className="text-[10px] font-mono text-muted-foreground mt-0.5">{item.sku}</p>
+                          <p className="text-[10px] font-mono text-muted-foreground mt-0.5">
+                            {item.sku || matchedProd?.sku || '—'} · Stock: <strong className="text-foreground">{currentStock} {unitLabel}</strong>
+                          </p>
                         </td>
 
                         {/* Cantidad */}
@@ -753,6 +770,7 @@ export function PurchaseCreateView({
                               }}
                               onFocus={(e) => e.target.select()}
                               onClick={(e) => (e.target as HTMLInputElement).select()}
+                              onWheel={(e) => e.currentTarget.blur()}
                               className="input-field w-20 sm:w-24 text-right py-1 px-1.5 font-bold font-mono text-xs tabular-nums"
                               title="Precio de compra / costo"
                             />
@@ -775,6 +793,7 @@ export function PurchaseCreateView({
                               }}
                               onFocus={(e) => e.target.select()}
                               onClick={(e) => (e.target as HTMLInputElement).select()}
+                              onWheel={(e) => e.currentTarget.blur()}
                               className="input-field w-20 sm:w-24 text-right py-1 px-1.5 font-bold font-mono text-xs tabular-nums text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
                               title="Precio de venta"
                             />
@@ -802,6 +821,7 @@ export function PurchaseCreateView({
                                 }}
                                 onFocus={(e) => e.target.select()}
                                 onClick={(e) => (e.target as HTMLInputElement).select()}
+                                onWheel={(e) => e.currentTarget.blur()}
                                 className="input-field w-16 text-center py-1 px-1 font-extrabold text-xs tabular-nums text-emerald-600 dark:text-emerald-400 border-emerald-500/40 bg-emerald-500/5 focus:bg-background"
                                 title="Porcentaje de ganancia deseado (calcula el precio de venta automáticamente)"
                               />

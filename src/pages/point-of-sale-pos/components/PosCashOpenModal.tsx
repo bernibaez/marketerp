@@ -11,7 +11,8 @@ import {
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/context/AuthContext';
-import { findCashRegister } from '@/lib/cashRegisters';
+import { isAdminOrSuperAdmin } from '@/lib/auth';
+import { findCashRegister, doesRegisterMatchUser, isSameCashierName } from '@/lib/cashRegisters';
 import { useCashRegisters } from '@/hooks/useCashRegisters';
 import { iniciarCaja } from '@/services/cierresCaja.service';
 import type { CierreCaja } from '@/types/database';
@@ -36,46 +37,51 @@ export default function PosCashOpenModal({
 }: PosCashOpenModalProps) {
   const { user, logout } = useAuth();
   const { registers, refetch: refetchRegisters } = useCashRegisters();
-  const roleNorm = (user?.role || '').trim().toLowerCase();
-  const isAdmin =
-    roleNorm === 'administrador' ||
-    roleNorm === 'super administrador' ||
-    roleNorm === 'admin' ||
-    roleNorm === 'super_admin' ||
-    roleNorm === 'superadmin';
+  const isAdmin = isAdminOrSuperAdmin(user);
 
   const availableRegisters = isAdmin
     ? registers
     : registers.filter((c) => !c.isAdminBox);
 
   // 1. Identificar caja preferida:
-  // a) Si el nombre del usuario coincide con una caja (ej: Cheila, Valentina, Eroly, Beiliz, Elizabeth, Keyla)
-  const userBoxByName = user?.name
-    ? availableRegisters.find((c) => {
-        const u = user.name.trim().toLowerCase();
-        const l = c.label.toLowerCase();
-        return l.includes(u) || u.includes(l);
-      })
-    : undefined;
-
-  // b) Caja que ya tenga abierta el usuario
-  const userOpenBox = availableRegisters.find(
+  // a) Caja que ya tenga abierta el usuario en cualquier registradora
+  const userOpenBox = registers.find(
     (c) =>
       c.open &&
       ((c.cashierId && user?.id && String(c.cashierId) === String(user.id)) ||
-        (c.cashier && user?.name && c.cashier.trim().toLowerCase() === user.name.trim().toLowerCase()))
+        isSameCashierName(c.cashier, user?.name) ||
+        doesRegisterMatchUser(c.label, user?.name, user?.username || user?.email))
   );
+
+  // b) Si el nombre del usuario coincide con una caja (ej: Cheila, Valentina, Eroly, Beiliz, Elizabeth, Keyla/Keila)
+  const userBoxByName =
+    user?.name || user?.username
+      ? registers.find((c) => doesRegisterMatchUser(c.label, user?.name, user?.username || user?.email))
+      : undefined;
+
+  const KNOWN_CASHIER_NAMES = ['keila', 'keyla', 'valentina', 'cheila', 'sheila', 'eroly', 'beiliz', 'beilis', 'elizabeth'];
+  const isBoxOfOtherCashier = (label?: string) => {
+    if (!label) return false;
+    if (doesRegisterMatchUser(label, user?.name, user?.username || user?.email)) return false;
+    return KNOWN_CASHIER_NAMES.some((n) => doesRegisterMatchUser(label, n));
+  };
+
   const resolvedMatch =
     findCashRegister(availableRegisters, initialCajaId) ||
     findCashRegister(registers, initialCajaId);
+  const genericFreeBox = availableRegisters.find((c) => !c.open && !isBoxOfOtherCashier(c.label));
   const firstFreeBox = availableRegisters.find((c) => !c.open);
 
   const defaultCajaId =
-    userBoxByName?.id ||
     userOpenBox?.id ||
-    (resolvedMatch && !resolvedMatch.isAdminBox ? resolvedMatch.id : undefined) ||
+    userBoxByName?.id ||
+    (resolvedMatch && !resolvedMatch.isAdminBox && !isBoxOfOtherCashier(resolvedMatch.label)
+      ? resolvedMatch.id
+      : undefined) ||
+    genericFreeBox?.id ||
     firstFreeBox?.id ||
     availableRegisters[0]?.id ||
+    registers[0]?.id ||
     '1';
 
   const [selectedCajaId, setSelectedCajaId] = useState(defaultCajaId);
@@ -84,10 +90,10 @@ export default function PosCashOpenModal({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (defaultCajaId && !selectedCajaId) {
+    if (defaultCajaId) {
       setSelectedCajaId(defaultCajaId);
     }
-  }, [defaultCajaId, selectedCajaId]);
+  }, [defaultCajaId]);
 
   const selectedCaja =
     findCashRegister(availableRegisters, selectedCajaId) ||
@@ -103,6 +109,11 @@ export default function PosCashOpenModal({
         window.location.href = '/login';
       }
     } else {
+      try {
+        sessionStorage.removeItem('mercato_pending_cash_open');
+      } catch {
+        /* ignore */
+      }
       onClose();
     }
   };
@@ -123,7 +134,10 @@ export default function PosCashOpenModal({
 
       const targetBox = selectedCaja || availableRegisters[0];
       const targetCajaId = String(targetBox?.dbId || targetBox?.id || selectedCajaId);
-      const targetLabel = targetBox?.label || `Caja #${selectedCajaId}`;
+      const rawBoxLabel = targetBox?.label || `Caja #${selectedCajaId}`;
+      const targetLabel = isBoxOfOtherCashier(rawBoxLabel)
+        ? `Caja #${targetBox?.codigo || selectedCajaId} - ${cajeroNombre}`
+        : rawBoxLabel;
 
       const result = await iniciarCaja({
         caja_id: targetCajaId,
@@ -133,6 +147,10 @@ export default function PosCashOpenModal({
         cajero_username: cajeroUsername,
         monto_apertura: monto,
         notes: notes.trim() || undefined,
+<<<<<<< HEAD
+=======
+        forzarNueva: !isMandatory,
+>>>>>>> 57bbebe1c1b40ce6b28d91de9bc1ae3c21035762
       });
 
       logAuditEvent({
@@ -143,6 +161,13 @@ export default function PosCashOpenModal({
         details: `Inicio de turno en ${targetLabel} con fondo de RD$ ${monto.toLocaleString('es-DO', { minimumFractionDigits: 2 })}`,
         after: { caja_id: targetCajaId, cajero_id: cajeroId, monto_apertura: monto },
       });
+
+      try {
+        sessionStorage.removeItem('mercato_pending_cash_open');
+        sessionStorage.setItem('mercato_cash_opened_at_login', 'true');
+      } catch {
+        /* ignore */
+      }
 
       toast.success(`¡Caja ${targetLabel} iniciada con RD$ ${monto.toLocaleString('es-DO', { minimumFractionDigits: 2 })}! Listo para facturar.`);
       await refetchRegisters();
@@ -197,50 +222,23 @@ export default function PosCashOpenModal({
 
         {/* Formulario */}
         <form onSubmit={handleStart} className="space-y-5">
-          {/* Fila: Cajero y Caja */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Cajero */}
-            <div className="space-y-1.5">
-              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
-                <User size={14} className="text-emerald-600" />
-                <span>Cajero Responsable</span>
-              </label>
-              <div className="p-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white font-black text-sm flex items-center justify-center flex-shrink-0 shadow-xs">
-                  {activeUserName.charAt(0).toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                    {activeUserName}
-                  </p>
-                  <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 truncate">
-                    {activeUserRole}
-                  </p>
-                </div>
+          {/* Cajero Responsable */}
+          <div className="space-y-1.5">
+            <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
+              <User size={14} className="text-emerald-600" />
+              <span>Cajero Responsable</span>
+            </label>
+            <div className="p-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white font-black text-sm flex items-center justify-center flex-shrink-0 shadow-xs">
+                {activeUserName.charAt(0).toUpperCase()}
               </div>
-            </div>
-
-            {/* Caja Registradora */}
-            <div className="space-y-1.5">
-              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
-                <Monitor size={14} className="text-emerald-600" />
-                <span>Caja Registradora</span>
-              </label>
-              <div className="relative">
-                <select
-                  value={selectedCajaId}
-                  onChange={(e) => setSelectedCajaId(e.target.value)}
-                  className="w-full appearance-none bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30 cursor-pointer shadow-2xs"
-                >
-                  {availableRegisters.map((caja) => (
-                    <option key={caja.id} value={caja.id}>
-                      {caja.label} {caja.open ? '(En turno)' : '(Disponible)'}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-slate-400">
-                  <Monitor size={16} />
-                </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                  {activeUserName}
+                </p>
+                <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 truncate">
+                  {activeUserRole}
+                </p>
               </div>
             </div>
           </div>
@@ -268,6 +266,8 @@ export default function PosCashOpenModal({
                 required
                 autoFocus
                 value={montoApertura}
+                onFocus={(e) => e.currentTarget.select()}
+                onClick={(e) => e.currentTarget.select()}
                 onChange={(e) => setMontoApertura(e.target.value)}
                 placeholder="0.00"
                 className="w-full bg-transparent font-black text-3xl sm:text-4xl text-slate-900 dark:text-white focus:outline-none"
@@ -328,7 +328,7 @@ export default function PosCashOpenModal({
             ) : (
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleCancelOrExit}
                 className="px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold transition-all cursor-pointer"
               >
                 Cancelar

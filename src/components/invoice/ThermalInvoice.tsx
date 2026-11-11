@@ -404,28 +404,21 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
           </div>
         )}
 
-        {/* Cajero */}
-        {settings.showCashier && cashierName && (
-          <div className="flex justify-between items-baseline">
-            <span className="text-slate-800">Cajero:</span>
-            <span className="font-medium truncate max-w-[75%] text-right text-black">{cashierName}</span>
-          </div>
-        )}
+        {/* Cajera / Cajero que emite la factura */}
+        <div className="flex justify-between items-baseline">
+          <span className="text-slate-800">Cajera:</span>
+          <span className="font-bold truncate max-w-[75%] text-right text-black">
+            {cashierName || 'Cajera'}
+          </span>
+        </div>
 
-        {/* Fecha y Hora */}
-        {settings.showIssueTime ? (
-          <div className="flex justify-between items-baseline">
-            <span className="text-slate-800">{isNarrow ? 'Fecha:' : 'Fecha / Hora:'}</span>
-            <span className="tabular-nums font-mono text-right text-black">
-              {`${formattedDate} ${formattedTime}`}
-            </span>
-          </div>
-        ) : (
-          <div className="flex justify-between items-baseline">
-            <span className="text-slate-800">Fecha:</span>
-            <span className="tabular-nums font-mono text-right text-black">{formattedDate}</span>
-          </div>
-        )}
+        {/* Fecha y Hora de emisión */}
+        <div className="flex justify-between items-baseline">
+          <span className="text-slate-800">{isNarrow ? 'Fecha:' : 'Fecha / Hora:'}</span>
+          <span className="tabular-nums font-mono font-semibold text-right text-black">
+            {formattedTime ? `${formattedDate} ${formattedTime}` : formattedDate}
+          </span>
+        </div>
 
         {/* NCF si está habilitado y presente */}
         {settings.showNcf && ncfValue && (
@@ -620,32 +613,116 @@ export const ThermalInvoice: React.FC<ThermalInvoiceProps> = ({
         {/* ========================================================
             7. PAGO, EFECTIVO RECIBIDO Y CAMBIO
             ======================================================== */}
-        {(settings.showPaymentDetails ?? true) && (
-          <div className={`${lineSpacingClass} ${sectionGapClass}`} style={{ fontSize: smallFontSize }}>
-            <div className="flex justify-between items-baseline">
-              <span className="text-slate-800">Método de Pago:</span>
-              <span className="font-bold uppercase font-mono text-black">
-                {data.paymentMethod || 'EFECTIVO'}
-              </span>
-            </div>
+        {(settings.showPaymentDetails ?? true) && (() => {
+          const rawMethod = (data.paymentMethod || '').trim().toLowerCase();
+          const breakdown = Array.isArray(data.paymentBreakdown) ? data.paymentBreakdown : [];
 
-            <div className="flex justify-between items-baseline">
-              <span className="text-slate-800">Efectivo Recibido:</span>
-              <span className="tabular-nums font-mono font-medium text-black">
-                {formatCurrency(totals.pagado, currencySymbol)}
-              </span>
-            </div>
+          const findInBreakdown = (key: string) =>
+            breakdown.find((b) => b.method.toLowerCase().includes(key) || b.label.toLowerCase().includes(key))?.amount ?? 0;
 
-            {(settings.showChange ?? true) && (
+          const efectivoAmt = Number(data.montoEfectivo ?? 0) || findInBreakdown('efectivo') || findInBreakdown('cash');
+          const transferenciaAmt = Number(data.montoTransferencia ?? 0) || findInBreakdown('transfer');
+          const tarjetaAmt = Number(data.montoTarjeta ?? 0) || findInBreakdown('tarjeta') || findInBreakdown('card');
+          const creditoAmt = Number(data.montoCredito ?? 0) || findInBreakdown('credit') || findInBreakdown('crédito');
+
+          const activeAmountsCount = [efectivoAmt, transferenciaAmt, tarjetaAmt, creditoAmt].filter((v) => v > 0).length;
+          const isMultiPayment =
+            rawMethod === 'split' ||
+            rawMethod === 'mixto' ||
+            rawMethod === 'multiple' ||
+            rawMethod.includes('múltiple') ||
+            rawMethod.includes('multiple') ||
+            rawMethod.includes('mixto') ||
+            activeAmountsCount > 1 ||
+            breakdown.filter((b) => b.amount > 0).length > 1;
+
+          const singleMethodLabel =
+            rawMethod === 'transfer' || rawMethod === 'transferencia' || rawMethod.includes('transferencia')
+              ? 'TRANSFERENCIA'
+              : rawMethod === 'card' || rawMethod === 'tarjeta'
+                ? 'TARJETA'
+                : rawMethod === 'credit' || rawMethod === 'credito' || rawMethod === 'crédito'
+                  ? 'CRÉDITO'
+                  : 'EFECTIVO';
+
+          const singleAmountLabel =
+            singleMethodLabel === 'TRANSFERENCIA'
+              ? 'Monto Transferencia:'
+              : singleMethodLabel === 'TARJETA'
+                ? 'Pagado con Tarjeta:'
+                : singleMethodLabel === 'CRÉDITO'
+                  ? 'Monto a Crédito:'
+                  : 'Efectivo Recibido:';
+
+          const sumSplit = efectivoAmt + transferenciaAmt + tarjetaAmt + creditoAmt;
+          const totalPagadoDisplay = isMultiPayment && sumSplit > 0 ? sumSplit : totals.pagado;
+
+          return (
+            <div className={`${lineSpacingClass} ${sectionGapClass}`} style={{ fontSize: smallFontSize }}>
               <div className="flex justify-between items-baseline">
-                <span className="text-slate-800 font-bold">Cambio:</span>
-                <span className="font-bold font-mono tabular-nums text-black">
-                  {formatCurrency(totals.cambio, currencySymbol)}
+                <span className="text-slate-800">Método de Pago:</span>
+                <span className="font-bold uppercase font-mono text-black">
+                  {isMultiPayment ? 'PAGO MÚLTIPLE' : singleMethodLabel}
                 </span>
               </div>
-            )}
-          </div>
-        )}
+
+              {isMultiPayment ? (
+                <>
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-slate-800 font-semibold">Monto en Efectivo:</span>
+                    <span className="tabular-nums font-mono font-bold text-black">
+                      {formatCurrency(efectivoAmt, currencySymbol)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-slate-800 font-semibold">Monto Transferencia:</span>
+                    <span className="tabular-nums font-mono font-bold text-black">
+                      {formatCurrency(transferenciaAmt, currencySymbol)}
+                    </span>
+                  </div>
+                  {tarjetaAmt > 0 && (
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-slate-800 font-semibold">Monto en Tarjeta:</span>
+                      <span className="tabular-nums font-mono font-bold text-black">
+                        {formatCurrency(tarjetaAmt, currencySymbol)}
+                      </span>
+                    </div>
+                  )}
+                  {creditoAmt > 0 && (
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-slate-800 font-semibold">Monto a Crédito:</span>
+                      <span className="tabular-nums font-mono font-bold text-black">
+                        {formatCurrency(creditoAmt, currencySymbol)}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-baseline pt-0.5 border-t border-dotted border-slate-400">
+                    <span className="text-slate-800 font-bold">Total Recibido:</span>
+                    <span className="tabular-nums font-mono font-bold text-black">
+                      {formatCurrency(totalPagadoDisplay, currencySymbol)}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div className="flex justify-between items-baseline">
+                  <span className="text-slate-800">{singleAmountLabel}</span>
+                  <span className="tabular-nums font-mono font-medium text-black">
+                    {formatCurrency(totals.pagado, currencySymbol)}
+                  </span>
+                </div>
+              )}
+
+              {(settings.showChange ?? true) && (
+                <div className="flex justify-between items-baseline">
+                  <span className="text-slate-800 font-bold">Cambio:</span>
+                  <span className="font-bold font-mono tabular-nums text-black">
+                    {formatCurrency(totals.cambio, currencySymbol)}
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* ========================================================

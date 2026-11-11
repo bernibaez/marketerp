@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowRightLeft, Eye } from 'lucide-react';
+import { ArrowRightLeft, Eye, Printer } from 'lucide-react';
 import type { CotizacionConDetalle } from '@/services/cotizaciones.service';
 import { saleStatusMap } from '../types';
 
@@ -8,6 +8,7 @@ interface QuotesTableProps {
   loading: boolean;
   onConvert: (quote: CotizacionConDetalle) => void;
   onViewDetail: (quote: CotizacionConDetalle) => void;
+  onPrintQuote?: (quote: CotizacionConDetalle) => void;
 }
 
 export const QuotesTable: React.FC<QuotesTableProps> = ({
@@ -15,6 +16,7 @@ export const QuotesTable: React.FC<QuotesTableProps> = ({
   loading,
   onConvert,
   onViewDetail,
+  onPrintQuote,
 }) => {
   return (
     <div className="card overflow-hidden">
@@ -81,6 +83,16 @@ export const QuotesTable: React.FC<QuotesTableProps> = ({
                           title="Convertir a Factura"
                         >
                           <ArrowRightLeft size={13} /> Convertir Venta
+                        </button>
+                      )}
+                      {onPrintQuote && (
+                        <button
+                          type="button"
+                          onClick={() => onPrintQuote(q)}
+                          className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+                          title="Imprimir Cotización"
+                        >
+                          <Printer size={15} />
                         </button>
                       )}
                       <button

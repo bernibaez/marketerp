@@ -4,7 +4,8 @@ import {
   RotateCcw,
   Plus,
   Search,
-  Filter,
+  Calendar,
+  X,
   Download,
   Eye,
   Edit2,
@@ -52,6 +53,12 @@ interface PurchasesListViewProps {
   loadingList: boolean;
   search: string;
   setSearch: (v: string) => void;
+  singleDate?: string;
+  setSingleDate?: (v: string) => void;
+  dateFrom?: string;
+  setDateFrom?: (v: string) => void;
+  dateTo?: string;
+  setDateTo?: (v: string) => void;
   filteredPurchases: Purchase[];
   onNewPurchase: () => void;
   onViewPurchase: (id: string) => void;
@@ -68,6 +75,12 @@ export function PurchasesListView({
   loadingList,
   search,
   setSearch,
+  singleDate = '',
+  setSingleDate,
+  dateFrom = '',
+  setDateFrom,
+  dateTo = '',
+  setDateTo,
   filteredPurchases,
   onNewPurchase,
   onViewPurchase,
@@ -75,6 +88,8 @@ export function PurchasesListView({
   onAnularClick,
   onExportPdf,
 }: PurchasesListViewProps) {
+  const hasDateFilter = Boolean(singleDate || dateFrom || dateTo);
+
   return (
     <div className="space-y-6 slide-up">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -97,22 +112,22 @@ export function PurchasesListView({
         <div className="card p-4">
           <p className="text-xs text-muted-foreground">Total compras</p>
           <p className="text-2xl font-bold text-foreground mt-1">
-            RD$ {purchasesList.reduce((s, p) => s + p.total, 0).toLocaleString('es-DO')}
+            RD$ {filteredPurchases.reduce((s, p) => s + (p.subtotal || p.total), 0).toLocaleString('es-DO')}
           </p>
         </div>
         <div className="card p-4">
           <p className="text-xs text-muted-foreground">Órdenes totales</p>
-          <p className="text-2xl font-bold text-info mt-1">{loadingList ? '…' : purchasesList.length}</p>
+          <p className="text-2xl font-bold text-info mt-1">{loadingList ? '…' : filteredPurchases.length}</p>
         </div>
         <div className="card p-4">
           <p className="text-xs text-muted-foreground">Pendientes</p>
           <p className="text-2xl font-bold text-warning mt-1">
-            {purchasesList.filter((p) => p.status === 'pending').length}
+            {filteredPurchases.filter((p) => p.status === 'pending').length}
           </p>
         </div>
         <div className="card p-4">
           <p className="text-xs text-muted-foreground">Devoluciones</p>
-          <p className="text-2xl font-bold text-danger mt-1">2</p>
+          <p className="text-2xl font-bold text-danger mt-1">{returnsList.length}</p>
         </div>
       </div>
 
@@ -137,8 +152,8 @@ export function PurchasesListView({
         ))}
       </div>
 
-      <div className="card p-4 flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
+      <div className="card p-4 flex flex-col lg:flex-row gap-3">
+        <div className="relative flex-1 min-w-[220px]">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             className="input-field pl-9"
@@ -147,11 +162,94 @@ export function PurchasesListView({
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <div className="flex gap-2">
-          <button type="button" className="btn-secondary flex items-center gap-2 cursor-pointer">
-            <Filter size={16} />
-            Filtrar
-          </button>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {setSingleDate && (
+            <div className="flex items-center gap-1.5">
+              <Calendar size={14} className="text-muted-foreground shrink-0" />
+              <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
+                Fecha:
+              </span>
+              <input
+                type="date"
+                title="Buscar por fecha específica"
+                className="input-field py-1.5 px-2.5 text-xs w-auto"
+                value={singleDate}
+                onChange={(e) => {
+                  setSingleDate(e.target.value);
+                  setDateFrom?.('');
+                  setDateTo?.('');
+                }}
+              />
+            </div>
+          )}
+
+          {setDateFrom && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
+                Desde:
+              </span>
+              <input
+                type="date"
+                title="Fecha desde"
+                className="input-field py-1.5 px-2.5 text-xs w-auto"
+                value={dateFrom}
+                onChange={(e) => {
+                  setDateFrom(e.target.value);
+                  setSingleDate?.('');
+                }}
+              />
+            </div>
+          )}
+
+          {setDateTo && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
+                Hasta:
+              </span>
+              <input
+                type="date"
+                title="Fecha hasta"
+                className="input-field py-1.5 px-2.5 text-xs w-auto"
+                value={dateTo}
+                onChange={(e) => {
+                  setDateTo(e.target.value);
+                  setSingleDate?.('');
+                }}
+              />
+            </div>
+          )}
+
+          {setSingleDate && (
+            <button
+              type="button"
+              onClick={() => {
+                const today = new Date().toLocaleDateString('en-CA');
+                setSingleDate(today);
+                setDateFrom?.('');
+                setDateTo?.('');
+              }}
+              className="px-2.5 py-1.5 rounded-lg border border-border hover:bg-secondary text-xs font-semibold text-foreground transition cursor-pointer"
+            >
+              Hoy
+            </button>
+          )}
+
+          {hasDateFilter && (
+            <button
+              type="button"
+              onClick={() => {
+                setSingleDate?.('');
+                setDateFrom?.('');
+                setDateTo?.('');
+              }}
+              className="px-2.5 py-1.5 rounded-lg bg-danger/10 hover:bg-danger/20 text-danger text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
+            >
+              <X size={13} />
+              Limpiar fechas
+            </button>
+          )}
+
           <button
             type="button"
             onClick={onExportPdf}
@@ -171,30 +269,33 @@ export function PurchasesListView({
                 <tr className="border-b border-border bg-secondary/50">
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Código</th>
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Proveedor</th>
-                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden md:table-cell">Fecha</th>
+                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Fecha</th>
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">Productos</th>
-                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">ITBIS</th>
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Total</th>
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden md:table-cell">Estado</th>
                   <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Acciones</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredPurchases.map((p, i) => (
-                  <tr
-                    key={p.id}
-                    className={`border-b border-border hover:bg-secondary/30 transition-colors ${
-                      i % 2 === 0 ? '' : 'bg-secondary/10'
-                    }`}
-                  >
-                    <td className="px-4 py-3 font-mono text-primary font-medium">{p.code}</td>
-                    <td className="px-4 py-3 font-medium text-foreground">{p.supplier}</td>
-                    <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{p.date}</td>
-                    <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{p.items} items</td>
-                    <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">
-                      RD$ {p.tax.toLocaleString()}
+                {filteredPurchases.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                      No se encontraron compras con los filtros seleccionados
                     </td>
-                    <td className="px-4 py-3 font-bold text-foreground">RD$ {p.total.toLocaleString()}</td>
+                  </tr>
+                ) : (
+                  filteredPurchases.map((p, i) => (
+                    <tr
+                      key={p.id}
+                      className={`border-b border-border hover:bg-secondary/30 transition-colors ${
+                        i % 2 === 0 ? '' : 'bg-secondary/10'
+                      }`}
+                    >
+                      <td className="px-4 py-3 font-mono text-primary font-medium">{p.code}</td>
+                      <td className="px-4 py-3 font-medium text-foreground">{p.supplier}</td>
+                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{p.date}</td>
+                    <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">{p.items} items</td>
+                    <td className="px-4 py-3 font-bold text-foreground">RD$ {(p.subtotal || p.total).toLocaleString()}</td>
                     <td className="px-4 py-3 hidden md:table-cell">
                       <span className={statusMap[p.status].cls}>{statusMap[p.status].label}</span>
                     </td>
@@ -235,7 +336,8 @@ export function PurchasesListView({
                       </div>
                     </td>
                   </tr>
-                ))}
+                  ))
+                )}
               </tbody>
             </table>
           </div>

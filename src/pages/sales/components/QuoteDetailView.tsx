@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, ArrowRightLeft } from 'lucide-react';
+import { FileText, ArrowRightLeft, Printer } from 'lucide-react';
 import type { CotizacionConDetalle } from '@/services/cotizaciones.service';
 import { saleStatusMap } from '../types';
 
@@ -7,6 +7,7 @@ interface QuoteDetailViewProps {
   quote: CotizacionConDetalle;
   loadingDetail: boolean;
   onConvert: (quote: CotizacionConDetalle) => void;
+  onPrint?: (quote: CotizacionConDetalle) => void;
   onClose: () => void;
 }
 
@@ -14,6 +15,7 @@ export const QuoteDetailView: React.FC<QuoteDetailViewProps> = ({
   quote,
   loadingDetail,
   onConvert,
+  onPrint,
   onClose,
 }) => {
   return (
@@ -29,6 +31,15 @@ export const QuoteDetailView: React.FC<QuoteDetailViewProps> = ({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {onPrint && (
+            <button
+              type="button"
+              onClick={() => onPrint(quote)}
+              className="btn-secondary flex items-center gap-1.5 font-bold text-xs py-2 px-3.5"
+            >
+              <Printer size={14} /> Imprimir Cotización
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onConvert(quote)}
@@ -113,6 +124,15 @@ export const QuoteDetailView: React.FC<QuoteDetailViewProps> = ({
           </div>
 
           <div className="flex flex-col gap-2">
+            {onPrint && (
+              <button
+                type="button"
+                onClick={() => onPrint(quote)}
+                className="btn-secondary w-full py-2.5 text-xs font-bold flex items-center justify-center gap-1.5"
+              >
+                <Printer size={15} /> Imprimir Cotización
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onConvert(quote)}

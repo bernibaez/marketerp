@@ -12,7 +12,9 @@ export interface ItemCotizacionPayload {
 
 export interface PayloadCotizacion {
   cliente_id?: string | null;
+  cliente_nombre?: string;
   vendedor_id?: string | null;
+  vendedor_nombre?: string;
   subtotal: number;
   monto_impuesto: number;
   monto_total: number;
@@ -35,6 +37,10 @@ export interface CotizacionConDetalle extends Cotizacion {
 
 const LOCAL_COTIZACIONES_KEY = 'mercato_cotizaciones_local';
 
+function esUuid(val?: string | null): boolean {
+  return Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val));
+}
+
 function getLocalCotizaciones(): CotizacionConDetalle[] {
   try {
     const raw = localStorage.getItem(LOCAL_COTIZACIONES_KEY);
@@ -45,7 +51,11 @@ function getLocalCotizaciones(): CotizacionConDetalle[] {
 }
 
 function saveLocalCotizaciones(data: CotizacionConDetalle[]) {
-  localStorage.setItem(LOCAL_COTIZACIONES_KEY, JSON.stringify(data));
+  try {
+    localStorage.setItem(LOCAL_COTIZACIONES_KEY, JSON.stringify(data));
+  } catch {
+    // ignore
+  }
 }
 
 export async function obtenerCotizaciones(params: {
@@ -59,10 +69,11 @@ export async function obtenerCotizaciones(params: {
   const limite = params.limite ?? 50;
   const desde = (pagina - 1) * limite;
   const hasta = desde + limite - 1;
+  const localList = getLocalCotizaciones();
 
   const sb = tryGetSupabase();
   if (!sb) {
-    let list = getLocalCotizaciones();
+    let list = localList;
     if (params.estado) {
       list = list.filter((c) => c.estado === params.estado);
     }
@@ -77,50 +88,79 @@ export async function obtenerCotizaciones(params: {
     return { datos: list.slice(desde, hasta + 1), total: list.length };
   }
 
-  let query = sb
-    .from('cotizaciones')
-    .select('*, clientes(nombre), perfiles(nombre_completo)', { count: 'exact' })
-    .order('creado_en', { ascending: false })
-    .range(desde, hasta);
+  const buildQuery = (cols: string) => {
+    let query = sb
+      .from('cotizaciones')
+      .select(cols, { count: 'exact' })
+      .order('creado_en', { ascending: false })
+      .range(desde, hasta);
 
-  if (params.estado) {
-    query = query.eq('estado', params.estado);
+    if (params.estado) {
+      query = query.eq('estado', params.estado);
+    }
+    if (params.busqueda?.trim()) {
+      const q = params.busqueda.trim();
+      query = query.or(`codigo.ilike.%${q}%`);
+    }
+    if (params.signal) {
+      query = query.abortSignal(params.signal);
+    }
+    return query;
+  };
+
+  let { data, error, count } = await buildQuery('*, clientes(nombre), perfiles(nombre_completo)');
+  if (error) {
+    const fallback = await buildQuery('*');
+    data = fallback.data;
+    error = fallback.error;
+    count = fallback.count;
   }
-  if (params.busqueda?.trim()) {
-    const q = params.busqueda.trim();
-    query = query.or(`codigo.ilike.%${q}%`);
-  }
-  if (params.signal) {
-    query = query.abortSignal(params.signal);
+  if (error) {
+    return { datos: localList.slice(desde, hasta + 1), total: localList.length };
   }
 
-  const { data, error, count } = await query;
-  if (error) throw error;
+  const datosRemotos: CotizacionConDetalle[] = (data ?? []).map((row: any) => {
+    const localMatch = localList.find((l) => l.id === row.id || l.codigo === row.codigo);
+    return {
+      id: row.id,
+      codigo: row.codigo,
+      cliente_id: row.cliente_id,
+      vendedor_id: row.vendedor_id,
+      subtotal: Number(row.subtotal),
+      monto_impuesto: Number(row.monto_impuesto),
+      monto_total: Number(row.monto_total),
+      estado: row.estado,
+      valida_hasta: row.valida_hasta,
+      creado_en: row.creado_en,
+      cliente_nombre: row.clientes?.nombre ?? localMatch?.cliente_nombre ?? 'Cliente general',
+      vendedor_nombre: row.perfiles?.nombre_completo ?? localMatch?.vendedor_nombre ?? 'Cajero',
+      items: localMatch?.items,
+    };
+  });
 
-  const datos: CotizacionConDetalle[] = (data ?? []).map((row: any) => ({
-    id: row.id,
-    codigo: row.codigo,
-    cliente_id: row.cliente_id,
-    vendedor_id: row.vendedor_id,
-    subtotal: Number(row.subtotal),
-    monto_impuesto: Number(row.monto_impuesto),
-    monto_total: Number(row.monto_total),
-    estado: row.estado,
-    valida_hasta: row.valida_hasta,
-    creado_en: row.creado_en,
-    cliente_nombre: row.clientes?.nombre ?? 'Cliente general',
-    vendedor_nombre: row.perfiles?.nombre_completo ?? 'Sistema',
-  }));
+  const seenIds = new Set(datosRemotos.map((d) => d.id));
+  const seenCodes = new Set(datosRemotos.map((d) => d.codigo));
+  const extrasLocal = localList.filter((l) => !seenIds.has(l.id) && !seenCodes.has(l.codigo));
+  const merged = [...datosRemotos, ...extrasLocal];
 
-  return { datos, total: count ?? 0 };
+  return { datos: merged, total: Math.max(count ?? 0, merged.length) };
 }
 
 export async function crearCotizacion(payload: PayloadCotizacion): Promise<CotizacionConDetalle> {
   const sb = tryGetSupabase();
   const codigo = `COT-${Date.now().toString(36).toUpperCase()}`;
+  const validaHasta = payload.valida_hasta ?? new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  const mappedItems = payload.items.map((it, idx) => ({
+    id: `item-${Date.now()}-${idx}`,
+    producto_id: it.producto_id,
+    nombre_item: it.nombre_item,
+    cantidad: Number(it.cantidad),
+    precio_unitario: Number(it.precio_unitario),
+    subtotal: Number(it.subtotal),
+  }));
 
   if (!sb) {
-    const id = crypto.randomUUID();
+    const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `cot-${Date.now()}`;
     const cot: CotizacionConDetalle = {
       id,
       codigo,
@@ -130,26 +170,58 @@ export async function crearCotizacion(payload: PayloadCotizacion): Promise<Cotiz
       monto_impuesto: payload.monto_impuesto,
       monto_total: payload.monto_total,
       estado: 'pendiente',
-      valida_hasta: payload.valida_hasta ?? new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+      valida_hasta: validaHasta,
       creado_en: new Date().toISOString(),
-      cliente_nombre: 'Cliente',
-      vendedor_nombre: 'Vendedor',
-      items: payload.items.map((it) => ({
-        id: crypto.randomUUID(),
-        producto_id: it.producto_id,
-        nombre_item: it.nombre_item,
-        cantidad: it.cantidad,
-        precio_unitario: it.precio_unitario,
-        subtotal: it.subtotal,
-      })),
+      cliente_nombre: payload.cliente_nombre || 'Cliente general',
+      vendedor_nombre: payload.vendedor_nombre || 'Cajero',
+      items: mappedItems,
     };
     saveLocalCotizaciones([cot, ...getLocalCotizaciones()]);
     return cot;
   }
 
-  const { data: cotData, error: cotErr } = await sb
+  const clienteUuid = esUuid(payload.cliente_id) ? payload.cliente_id : null;
+  const vendedorUuid = esUuid(payload.vendedor_id) ? payload.vendedor_id : null;
+
+  let { data: cotData, error: cotErr } = await sb
     .from('cotizaciones')
     .insert({
+      codigo,
+      cliente_id: clienteUuid,
+      vendedor_id: vendedorUuid,
+      subtotal: payload.subtotal,
+      monto_impuesto: payload.monto_impuesto,
+      monto_total: payload.monto_total,
+      estado: 'pendiente',
+      valida_hasta: validaHasta,
+    })
+    .select('*, clientes(nombre), perfiles(nombre_completo)')
+    .single();
+
+  if (cotErr) {
+    const fallback = await sb
+      .from('cotizaciones')
+      .insert({
+        codigo,
+        cliente_id: clienteUuid,
+        vendedor_id: vendedorUuid,
+        subtotal: payload.subtotal,
+        monto_impuesto: payload.monto_impuesto,
+        monto_total: payload.monto_total,
+        estado: 'pendiente',
+        valida_hasta: validaHasta,
+      })
+      .select('*')
+      .single();
+    cotData = fallback.data;
+    cotErr = fallback.error;
+  }
+
+  if (cotErr || !cotData) {
+    // Fallback local para nunca perder la cotización
+    const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `cot-${Date.now()}`;
+    const cotLocal: CotizacionConDetalle = {
+      id,
       codigo,
       cliente_id: payload.cliente_id ?? null,
       vendedor_id: payload.vendedor_id ?? null,
@@ -157,16 +229,19 @@ export async function crearCotizacion(payload: PayloadCotizacion): Promise<Cotiz
       monto_impuesto: payload.monto_impuesto,
       monto_total: payload.monto_total,
       estado: 'pendiente',
-      valida_hasta: payload.valida_hasta ?? new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
-    })
-    .select('*, clientes(nombre), perfiles(nombre_completo)')
-    .single();
-
-  if (cotErr) throw cotErr;
+      valida_hasta: validaHasta,
+      creado_en: new Date().toISOString(),
+      cliente_nombre: payload.cliente_nombre || 'Cliente general',
+      vendedor_nombre: payload.vendedor_nombre || 'Cajero',
+      items: mappedItems,
+    };
+    saveLocalCotizaciones([cotLocal, ...getLocalCotizaciones()]);
+    return cotLocal;
+  }
 
   const itemsInsert = payload.items.map((it) => ({
     cotizacion_id: cotData.id,
-    producto_id: it.producto_id ?? null,
+    producto_id: esUuid(it.producto_id) ? it.producto_id : null,
     nombre_item: it.nombre_item,
     cantidad: it.cantidad,
     precio_unitario: it.precio_unitario,
@@ -178,7 +253,7 @@ export async function crearCotizacion(payload: PayloadCotizacion): Promise<Cotiz
     if (itemErr) console.warn('Error al guardar detalle de cotización:', itemErr);
   }
 
-  return {
+  const result: CotizacionConDetalle = {
     id: cotData.id,
     codigo: cotData.codigo,
     cliente_id: cotData.cliente_id,
@@ -189,26 +264,41 @@ export async function crearCotizacion(payload: PayloadCotizacion): Promise<Cotiz
     estado: cotData.estado,
     valida_hasta: cotData.valida_hasta,
     creado_en: cotData.creado_en,
-    cliente_nombre: cotData.clientes?.nombre ?? 'Cliente',
-    vendedor_nombre: cotData.perfiles?.nombre_completo ?? 'Sistema',
+    cliente_nombre: (cotData as any).clientes?.nombre ?? payload.cliente_nombre ?? 'Cliente general',
+    vendedor_nombre: (cotData as any).perfiles?.nombre_completo ?? payload.vendedor_nombre ?? 'Cajero',
+    items: mappedItems,
   };
+
+  saveLocalCotizaciones([result, ...getLocalCotizaciones().filter((c) => c.id !== result.id)]);
+  return result;
 }
 
 export async function obtenerDetalleCotizacion(id: string): Promise<CotizacionConDetalle | null> {
+  const localMatch = getLocalCotizaciones().find((c) => c.id === id);
   const sb = tryGetSupabase();
-  if (!sb) {
-    return getLocalCotizaciones().find((c) => c.id === id) ?? null;
+  if (!sb || !esUuid(id)) {
+    return localMatch ?? null;
   }
 
-  const { data, error } = await sb
+  let { data, error } = await sb
     .from('cotizaciones')
     .select('*, clientes(nombre), perfiles(nombre_completo), detalle_cotizaciones(*)')
     .eq('id', id)
     .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
 
-  const items = ((data as any).detalle_cotizaciones ?? []).map((it: any) => ({
+  if (error) {
+    const fallback = await sb
+      .from('cotizaciones')
+      .select('*, detalle_cotizaciones(*)')
+      .eq('id', id)
+      .maybeSingle();
+    data = fallback.data;
+    error = fallback.error;
+  }
+
+  if (error || !data) return localMatch ?? null;
+
+  const remoteItems = ((data as any).detalle_cotizaciones ?? []).map((it: any) => ({
     id: String(it.id),
     producto_id: it.producto_id,
     nombre_item: String(it.nombre_item),
@@ -228,9 +318,9 @@ export async function obtenerDetalleCotizacion(id: string): Promise<CotizacionCo
     estado: data.estado,
     valida_hasta: data.valida_hasta,
     creado_en: data.creado_en,
-    cliente_nombre: (data as any).clientes?.nombre ?? 'Cliente general',
-    vendedor_nombre: (data as any).perfiles?.nombre_completo ?? 'Sistema',
-    items,
+    cliente_nombre: (data as any).clientes?.nombre ?? localMatch?.cliente_nombre ?? 'Cliente general',
+    vendedor_nombre: (data as any).perfiles?.nombre_completo ?? localMatch?.vendedor_nombre ?? 'Cajero',
+    items: remoteItems.length > 0 ? remoteItems : (localMatch?.items ?? []),
   };
 }
 

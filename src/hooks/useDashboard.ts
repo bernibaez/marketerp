@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { obtenerAlertasStock, obtenerMetricasDashboard } from '@/services/dashboard.service';
 import type { MetricasDashboard } from '@/types/database';
 
-export function useDashboard(periodo: 'hoy' | 'semana' | 'mes' = 'hoy') {
+export function useDashboard(
+  periodo: 'hoy' | 'semana' | 'mes' | 'dia' = 'hoy',
+  fechaEspecifica?: string
+) {
   const [metricas, setMetricas] = useState<MetricasDashboard | null>(null);
   const [alertas, setAlertas] = useState<
     { id: string; sku: string; nombre: string; stock_actual: number; stock_minimo: number; nivel_alerta: string }[]
@@ -21,7 +24,7 @@ export function useDashboard(periodo: 'hoy' | 'semana' | 'mes' = 'hoy') {
     lastDateRef.current = new Date().toDateString();
     try {
       const [m, a] = await Promise.all([
-        obtenerMetricasDashboard(periodo, ac.signal),
+        obtenerMetricasDashboard(periodo, ac.signal, fechaEspecifica),
         obtenerAlertasStock(ac.signal),
       ]);
       if (!ac.signal.aborted) {
@@ -34,7 +37,7 @@ export function useDashboard(periodo: 'hoy' | 'semana' | 'mes' = 'hoy') {
     } finally {
       if (!ac.signal.aborted) setLoading(false);
     }
-  }, [periodo]);
+  }, [periodo, fechaEspecifica]);
 
   useEffect(() => {
     refetch();

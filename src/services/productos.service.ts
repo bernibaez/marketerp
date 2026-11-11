@@ -242,7 +242,7 @@ export function productoAUi(p: Producto): Product {
     unit: resolvedUnit,
     supplier: '',
     costPrice: Number(p.precio_costo ?? 0),
-    salePrice: Number(p.precio_venta ?? 0),
+    salePrice: Number(p.precio_venta ?? p.price_per_weight ?? 0),
     wholesalePrice: Number(p.precio_mayorista ?? 0),
     tax: Number(p.porcentaje_impuesto ?? 0),
     minStock: p.stock_minimo ?? 10,
@@ -254,7 +254,7 @@ export function productoAUi(p: Producto): Product {
     stockStatus,
     saleType: p.sale_type ?? (p.es_pesado ? 'weight' : 'unit'),
     weightUnit: p.weight_unit ?? 'lb',
-    pricePerWeight: p.price_per_weight ? Number(p.price_per_weight) : Number(p.precio_venta ?? 0),
+    pricePerWeight: Number(p.precio_venta ?? p.price_per_weight ?? 0),
     allowDecimal: p.allow_decimal ?? true,
     minWeight: p.min_weight != null ? Number(p.min_weight) : 0.01,
     maxWeight: p.max_weight != null ? Number(p.max_weight) : 999.99,
@@ -291,7 +291,7 @@ export function uiAProductoInsert(p: Omit<Product, 'id' | 'stockStatus'> & { id?
     marca: p.brand || null,
     unidad: p.unit || 'Unidad',
     precio_costo: p.costPrice,
-    precio_venta: p.salePrice,
+    precio_venta: Number(p.salePrice ?? p.pricePerWeight ?? 0),
     precio_mayorista: p.wholesalePrice,
     porcentaje_impuesto: p.tax,
     stock_minimo: p.minStock,
@@ -299,7 +299,7 @@ export function uiAProductoInsert(p: Omit<Product, 'id' | 'stockStatus'> & { id?
     es_pesado: isWeight,
     sale_type: p.saleType ?? (isWeight ? 'weight' : 'unit'),
     weight_unit: p.weightUnit ?? 'lb',
-    price_per_weight: p.pricePerWeight ?? p.salePrice,
+    price_per_weight: Number(p.salePrice ?? p.pricePerWeight ?? 0),
     allow_decimal: p.allowDecimal ?? true,
     min_weight: p.minWeight ?? 0.01,
     max_weight: p.maxWeight ?? 999.99,
@@ -355,7 +355,7 @@ function demoAsProductos(): Producto[] {
       es_pesado: isWeight,
       sale_type: p.saleType ?? (isWeight ? 'weight' : 'unit'),
       weight_unit: p.weightUnit ?? 'lb',
-      price_per_weight: p.pricePerWeight ? Number(p.pricePerWeight) : Number(p.salePrice ?? 0),
+      price_per_weight: Number(p.salePrice ?? p.pricePerWeight ?? 0),
       allow_decimal: p.allowDecimal ?? true,
       min_weight: p.minWeight ?? 0.01,
       max_weight: p.maxWeight ?? 999.99,
@@ -395,7 +395,7 @@ function localAsProductos(): Producto[] {
       es_pesado: isWeight,
       sale_type: p.saleType ?? (isWeight ? 'weight' : 'unit'),
       weight_unit: p.weightUnit ?? 'lb',
-      price_per_weight: p.pricePerWeight ? Number(p.pricePerWeight) : Number(p.salePrice ?? 0),
+      price_per_weight: Number(p.salePrice ?? p.pricePerWeight ?? 0),
       allow_decimal: p.allowDecimal ?? true,
       min_weight: p.minWeight ?? 0.01,
       max_weight: p.maxWeight ?? 999.99,
@@ -413,7 +413,7 @@ function localAsProductos(): Producto[] {
   });
 }
 
-const PRODUCTOS_CACHE_TTL = 10 * 60_000; // 10 minutos de cache para evitar consumo excesivo de egress en Supabase
+const PRODUCTOS_CACHE_TTL = 30_000; // 30 segundos de cache para mantener precios sincronizados entre vistas
 const productosCache = new Map<string, { timestamp: number; result: ProductosResultado }>();
 const inFlightRequests = new Map<string, Promise<ProductosResultado>>();
 
@@ -1020,15 +1020,14 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
     }
   }
 
-  // Obtenemos los productos de demostración/catálogo base
-  let fallbackList = demoAsProductos();
-  // Si no hay Supabase o falló, unimos también los productos locales
-  if (!sb || supabaseFailed) {
-    const local = localAsProductos();
-    const localSkus = new Set(local.map((p) => (p.sku || '').toLowerCase()));
-    const extras = fallbackList.filter((f) => !localSkus.has((f.sku || '').toLowerCase()));
-    fallbackList = [...local, ...extras];
-  }
+  // Obtenemos los productos locales y del catálogo base de demostración
+  const local = localAsProductos();
+  const localSkus = new Set(local.map((p) => (p.sku || '').toLowerCase()).filter(Boolean));
+  const localIds = new Set(local.map((p) => p.id.toLowerCase()));
+  const demoExtras = demoAsProductos().filter(
+    (f) => !localIds.has(f.id.toLowerCase()) && (!f.sku || !localSkus.has(f.sku.toLowerCase()))
+  );
+  let fallbackList = [...local, ...demoExtras];
 
   // Filtrar catálogo base según los parámetros solicitados
   if (params.busqueda?.trim()) {
@@ -1050,16 +1049,18 @@ export async function obtenerProductos(params: ProductosFiltro = {}): Promise<Pr
     fallbackList = fallbackList.filter((p) => p.estado === params.estado);
   }
 
-  // Excluir productos del catálogo base que ya existan en Supabase (por SKU o código de barras)
-  const dbSkus = new Set(dbProducts.map((p) => (p.sku || '').toLowerCase()));
-  const dbBarcodes = new Set(dbProducts.map((p) => (p.codigo_barras || '').toLowerCase()));
+  // Excluir productos del catálogo base que ya existan en Supabase (por ID, SKU o código de barras)
+  const dbIds = new Set(dbProducts.map((p) => p.id.toLowerCase()));
+  const dbSkus = new Set(dbProducts.map((p) => (p.sku || '').toLowerCase()).filter(Boolean));
+  const dbBarcodes = new Set(dbProducts.map((p) => (p.codigo_barras || '').toLowerCase()).filter(Boolean));
   const deletedKeys = getDeletedProductKeys();
   const missingFromDb = fallbackList.filter(
     (p) =>
       !deletedKeys.has(p.id.toLowerCase()) &&
       !deletedKeys.has((p.sku || '').toLowerCase()) &&
       !(p.codigo_barras && deletedKeys.has(p.codigo_barras.toLowerCase())) &&
-      !dbSkus.has((p.sku || '').toLowerCase()) &&
+      !dbIds.has(p.id.toLowerCase()) &&
+      (!p.sku || !dbSkus.has(p.sku.toLowerCase())) &&
       (!p.codigo_barras || !dbBarcodes.has(p.codigo_barras.toLowerCase()))
   );
 
@@ -1328,6 +1329,12 @@ export async function actualizarProducto(id: string, datos: Partial<Producto>): 
       unit: datos.unidad ?? base.unit,
       costPrice: datos.precio_costo != null ? Number(datos.precio_costo) : base.costPrice,
       salePrice: datos.precio_venta != null ? Number(datos.precio_venta) : base.salePrice,
+      pricePerWeight:
+        datos.precio_venta != null
+          ? Number(datos.precio_venta)
+          : datos.price_per_weight != null
+            ? Number(datos.price_per_weight)
+            : base.salePrice,
       wholesalePrice: datos.precio_mayorista != null ? Number(datos.precio_mayorista) : base.wholesalePrice,
       tax: datos.porcentaje_impuesto != null ? Number(datos.porcentaje_impuesto) : base.tax,
       minStock: datos.stock_minimo ?? base.minStock,
@@ -1403,15 +1410,88 @@ export async function actualizarProducto(id: string, datos: Partial<Producto>): 
     return nuevo;
   }
   const { id: _omitId, creado_en: _c, ...rest } = datos;
+  const syncedPrice =
+    rest.precio_venta != null
+      ? Number(rest.precio_venta)
+      : rest.price_per_weight != null
+        ? Number(rest.price_per_weight)
+        : undefined;
   const updatePayload = sanitizePayloadForPostgres({
     ...rest,
+    ...(syncedPrice !== undefined
+      ? {
+          precio_venta: syncedPrice,
+          price_per_weight: syncedPrice,
+        }
+      : {}),
     fecha_vencimiento: rest.fecha_vencimiento || null,
     actualizado_en: new Date().toISOString(),
   });
   const { data, error } = await writeProducto('update', updatePayload as Record<string, any>, id);
   if (error) throw errorSupabase(error);
+
+  const updatedProd = data as Producto;
+
+  // Si se actualizó el precio, sincronizar cualquier registro duplicado con el mismo nombre o PLU
+  // (ej. si "Pollo" fue importado dos veces) y reflejar en el almacenamiento local
+  if (syncedPrice !== undefined && updatedProd) {
+    try {
+      const sb = tryGetSupabase();
+      if (sb && updatedProd.nombre?.trim()) {
+        const dupSyncPayload = omitMissingProductoColumns({
+          precio_venta: syncedPrice,
+          price_per_weight: syncedPrice,
+          ...(rest.precio_costo != null ? { precio_costo: Number(rest.precio_costo) } : {}),
+          actualizado_en: new Date().toISOString(),
+        });
+        await sb
+          .from('productos')
+          .update(dupSyncPayload)
+          .neq('id', id)
+          .ilike('nombre', updatedProd.nombre.trim());
+        if (updatedProd.plu?.trim()) {
+          await sb
+            .from('productos')
+            .update(dupSyncPayload)
+            .neq('id', id)
+            .eq('plu', updatedProd.plu.trim());
+        }
+      }
+    } catch {
+      /* ignore duplicate sync errors */
+    }
+  }
+
+  try {
+    const stored = getStoredProducts();
+    const targetNameLower = (updatedProd?.nombre || rest.nombre || '').trim().toLowerCase();
+    const targetSkuLower = (updatedProd?.sku || rest.sku || '').trim().toLowerCase();
+    let changedLocal = false;
+    const nextStored = stored.map((sp) => {
+      const sameId = sp.id === id;
+      const sameSku = Boolean(targetSkuLower && sp.sku && sp.sku.trim().toLowerCase() === targetSkuLower);
+      const sameName = Boolean(targetNameLower && sp.name && sp.name.trim().toLowerCase() === targetNameLower);
+      if (!sameId && !sameSku && !sameName) return sp;
+      changedLocal = true;
+      return {
+        ...sp,
+        ...(syncedPrice !== undefined ? { salePrice: syncedPrice, pricePerWeight: syncedPrice } : {}),
+        ...(rest.precio_costo != null ? { costPrice: Number(rest.precio_costo) } : {}),
+        ...(sameId && rest.stock_actual != null ? { currentStock: Number(rest.stock_actual) } : {}),
+      };
+    });
+    if (changedLocal) {
+      saveStoredProducts(nextStored);
+    }
+  } catch {
+    /* ignore */
+  }
+
   invalidarCacheProductos();
-  return data as Producto;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('mercato_products_updated'));
+  }
+  return updatedProd;
 }
 
 async function buscarProductoExistenteParaImport(datos: Partial<Producto>): Promise<Producto | null> {

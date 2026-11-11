@@ -3,6 +3,8 @@ import AppLayout from '@/components/AppLayout';
 import { ShoppingBag, Download } from 'lucide-react';
 import { exportTableToPdf, formatMoneyPdf } from '@/lib/exportPdf';
 import type { CompraDetalle } from '@/services/compras.service';
+import { useProductos } from '@/hooks/useProductos';
+import { getStoredProducts } from '@/lib/productStore';
 
 const statusMap: Record<string, { label: string; cls: string }> = {
   received: { label: 'Recibido', cls: 'badge-success' },
@@ -30,6 +32,9 @@ export function PurchaseDetailView({
   loadingPurchaseDetail,
   onBack,
 }: PurchaseDetailViewProps) {
+  const { productosUi } = useProductos({ pagina: 1, limite: 5000 });
+  const catalogList = productosUi.length > 0 ? productosUi : getStoredProducts();
+
   return (
     <AppLayout>
       <div className="space-y-6 slide-up">
@@ -88,7 +93,7 @@ export function PurchaseDetailView({
               <div className="card p-4 space-y-1 bg-primary/5 border-primary/20">
                 <span className="text-xs text-muted-foreground font-semibold">Monto Total Compra</span>
                 <p className="text-xl font-black text-primary font-mono">
-                  RD$ {viewingPurchase.total.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                  RD$ {(viewingPurchase.subtotal || viewingPurchase.total).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                 </p>
               </div>
             </div>
@@ -114,6 +119,7 @@ export function PurchaseDetailView({
                     <tr>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground">#</th>
                       <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Producto / Descripción</th>
+                      <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Stock Actual</th>
                       <th className="text-center px-4 py-3 font-semibold text-muted-foreground">Cantidad</th>
                       <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Costo Unit.</th>
                       <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Subtotal</th>
@@ -122,24 +128,38 @@ export function PurchaseDetailView({
                   <tbody className="divide-y divide-border">
                     {viewingPurchase.lineas.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="p-6 text-center text-muted-foreground">
+                        <td colSpan={6} className="p-6 text-center text-muted-foreground">
                           No hay productos registrados en esta compra
                         </td>
                       </tr>
                     ) : (
-                      viewingPurchase.lineas.map((line, idx) => (
-                        <tr key={line.id || idx} className="hover:bg-secondary/20 transition-colors">
-                          <td className="px-4 py-3 text-muted-foreground font-mono text-xs">{idx + 1}</td>
-                          <td className="px-4 py-3 font-semibold text-foreground">{line.nombre}</td>
-                          <td className="px-4 py-3 text-center font-mono font-bold">{line.cantidad}</td>
-                          <td className="px-4 py-3 text-right font-mono tabular-nums text-muted-foreground">
-                            RD$ {line.precio_costo.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="px-4 py-3 text-right font-mono tabular-nums font-bold text-foreground">
-                            RD$ {line.subtotal.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
-                          </td>
-                        </tr>
-                      ))
+                      viewingPurchase.lineas.map((line, idx) => {
+                        const prod = catalogList.find(
+                          (p) =>
+                            (line.producto_id && p.id === line.producto_id) ||
+                            p.name.toLowerCase() === line.nombre.toLowerCase()
+                        );
+                        const stockActual = prod?.currentStock ?? 0;
+                        const unit = prod?.unit || 'Und';
+                        return (
+                          <tr key={line.id || idx} className="hover:bg-secondary/20 transition-colors">
+                            <td className="px-4 py-3 text-muted-foreground font-mono text-xs">{idx + 1}</td>
+                            <td className="px-4 py-3 font-semibold text-foreground">{line.nombre}</td>
+                            <td className="px-4 py-3 text-center font-mono text-xs">
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 font-bold">
+                                {stockActual} {unit}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center font-mono font-bold">{line.cantidad}</td>
+                            <td className="px-4 py-3 text-right font-mono tabular-nums text-muted-foreground">
+                              RD$ {line.precio_costo.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="px-4 py-3 text-right font-mono tabular-nums font-bold text-foreground">
+                              RD$ {line.subtotal.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -171,21 +191,15 @@ export function PurchaseDetailView({
 
                 <div className="w-full sm:w-72 space-y-1.5 text-xs">
                   <div className="flex justify-between text-muted-foreground">
-                    <span>Subtotal Neto:</span>
+                    <span>Subtotal:</span>
                     <span className="font-mono font-medium">
-                      RD$ {viewingPurchase.subtotal.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-amber-600 dark:text-amber-400 font-semibold">
-                    <span>ITBIS (Impuesto):</span>
-                    <span className="font-mono">
-                      RD$ {viewingPurchase.impuesto.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                      RD$ {(viewingPurchase.subtotal || viewingPurchase.total).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                     </span>
                   </div>
                   <div className="flex justify-between border-t border-border pt-2 text-base font-black text-foreground">
                     <span>Total General:</span>
                     <span className="text-primary font-mono">
-                      RD$ {viewingPurchase.total.toLocaleString('es-DO', { minimumFractionDigits: 2 })}
+                      RD$ {(viewingPurchase.subtotal || viewingPurchase.total).toLocaleString('es-DO', { minimumFractionDigits: 2 })}
                     </span>
                   </div>
                 </div>

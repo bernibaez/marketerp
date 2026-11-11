@@ -45,6 +45,9 @@ export default function PurchasesPage() {
   const [loadingList, setLoadingList] = useState(true);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
+  const [singleDate, setSingleDate] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingPurchaseId, setEditingPurchaseId] = useState<string | null>(null);
   const [invoiceNumber, setInvoiceNumber] = useState(() => nextPurchaseInvoice());
@@ -223,11 +226,20 @@ export default function PurchasesPage() {
     }
   };
 
-  const filteredPurchases = purchasesList.filter(
-    (p) =>
+  const filteredPurchases = purchasesList.filter((p) => {
+    const matchesText =
+      !search ||
       p.code.toLowerCase().includes(search.toLowerCase()) ||
-      p.supplier.toLowerCase().includes(search.toLowerCase())
-  );
+      p.supplier.toLowerCase().includes(search.toLowerCase());
+    if (!matchesText) return false;
+
+    const itemDate = (p.date || '').slice(0, 10);
+    if (singleDate && itemDate !== singleDate) return false;
+    if (dateFrom && itemDate < dateFrom) return false;
+    if (dateTo && itemDate > dateTo) return false;
+
+    return true;
+  });
 
   const handleStartEditPurchase = async (id: string) => {
     try {
@@ -247,17 +259,24 @@ export default function PurchasesPage() {
       setPaymentMethod(detail.metodo_pago || 'Transferencia');
       setPurchaseDate(detail.fecha || new Date().toISOString().split('T')[0]);
 
-      const items: PurchaseLineItem[] = detail.lineas.map((l, idx) => ({
-        id: l.id || `line-${Date.now()}-${idx}`,
-        productId: l.producto_id || '',
-        name: l.nombre,
-        sku: '',
-        qty: l.cantidad,
-        price: l.precio_costo,
-        salePrice: l.precio_venta,
-        wholesalePrice: (l as any).precio_mayorista || 0,
-        taxPercent: (l as any).porcentaje_impuesto || 0,
-      }));
+      const items: PurchaseLineItem[] = detail.lineas.map((l, idx) => {
+        const matched = catalogProducts.find(
+          (p) => (l.producto_id && p.id === l.producto_id) || p.name.toLowerCase() === l.nombre.toLowerCase()
+        );
+        return {
+          id: l.id || `line-${Date.now()}-${idx}`,
+          productId: l.producto_id || matched?.id || '',
+          name: l.nombre,
+          sku: matched?.sku || '',
+          qty: l.cantidad,
+          price: l.precio_costo,
+          salePrice: l.precio_venta,
+          wholesalePrice: (l as any).precio_mayorista || matched?.wholesalePrice || 0,
+          taxPercent: (l as any).porcentaje_impuesto || 0,
+          currentStock: matched?.currentStock,
+          unit: matched?.unit || 'Und',
+        };
+      });
 
       setPurchaseItems(items);
       setShowAddForm(true);
@@ -391,15 +410,14 @@ export default function PurchasesPage() {
       exportTableToPdf({
         title: 'Órdenes de Compra',
         filename: 'compras',
-        headers: ['Orden', 'Fecha', 'Proveedor', 'Ítems', 'Subtotal', 'ITBIS', 'Total', 'Pago', 'Estado'],
+        headers: ['Orden', 'Fecha', 'Proveedor', 'Ítems', 'Subtotal', 'Total', 'Pago', 'Estado'],
         rows: filteredPurchases.map((p) => [
           p.code,
           p.date,
           p.supplier,
           p.items,
           formatMoneyPdf(p.subtotal),
-          formatMoneyPdf(p.tax),
-          formatMoneyPdf(p.total),
+          formatMoneyPdf(p.subtotal || p.total),
           p.payment,
           statusMap[p.status]?.label ?? p.status,
         ]),
@@ -552,6 +570,12 @@ export default function PurchasesPage() {
         loadingList={loadingList}
         search={search}
         setSearch={setSearch}
+        singleDate={singleDate}
+        setSingleDate={setSingleDate}
+        dateFrom={dateFrom}
+        setDateFrom={setDateFrom}
+        dateTo={dateTo}
+        setDateTo={setDateTo}
         filteredPurchases={filteredPurchases}
         onNewPurchase={() => {
           setEditingPurchaseId(null);

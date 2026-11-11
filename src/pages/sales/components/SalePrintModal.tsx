@@ -66,9 +66,23 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
               <h3 className="font-bold text-foreground text-base leading-tight">
                 Imprimir Factura {sale.numero_factura}
               </h3>
-              {sale.ncf && (
-                <p className="text-xs text-muted-foreground font-mono mt-0.5">NCF: {sale.ncf}</p>
-              )}
+              <p className="text-xs text-muted-foreground font-medium mt-0.5">
+                Cajera: <span className="font-bold text-foreground">{sale.cajero_nombre || 'Cajera'}</span> · Fecha:{' '}
+                <span className="font-mono font-semibold text-foreground">
+                  {sale.creado_en
+                    ? new Date(sale.creado_en).toLocaleDateString('es-DO', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                      })
+                    : new Date().toLocaleDateString('es-DO', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                      })}
+                </span>
+                {sale.ncf ? ` · NCF: ${sale.ncf}` : ''}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2.5">
@@ -281,9 +295,29 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
                 isFiscal: Boolean(sale.ncf),
                 ncf: sale.ncf || undefined,
                 ncfType: sale.ncf ? sale.ncf.slice(0, 3) : undefined,
-                issueDate: new Date(sale.creado_en).toLocaleDateString('es-DO'),
-                issueTime: new Date(sale.creado_en).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' }),
-                cashier: sale.cajero_nombre || 'Cajero',
+                issueDate: sale.creado_en
+                  ? new Date(sale.creado_en).toLocaleDateString('es-DO', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                    })
+                  : new Date().toLocaleDateString('es-DO', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                    }),
+                issueTime: sale.creado_en
+                  ? new Date(sale.creado_en).toLocaleTimeString('es-DO', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: true,
+                    })
+                  : new Date().toLocaleTimeString('es-DO', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: true,
+                    }),
+                cashier: sale.cajero_nombre || 'Cajera',
                 customerName: sale.cliente_nombre || clients.find((c) => c.id === sale.cliente_id)?.nombre || 'Consumidor Final',
                 customerRnc: clients.find((c) => c.id === sale.cliente_id)?.rnc_cedula || undefined,
                 customerPhone: clients.find((c) => c.id === sale.cliente_id)?.telefono || undefined,
@@ -322,9 +356,12 @@ export const SalePrintModal: React.FC<SalePrintModalProps> = ({
           <button
             type="button"
             onClick={() => {
+              const fechaStr = sale.creado_en
+                ? `${new Date(sale.creado_en).toLocaleDateString('es-DO', { day: '2-digit', month: '2-digit', year: 'numeric' })} ${new Date(sale.creado_en).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}`
+                : new Date().toLocaleDateString('es-DO', { day: '2-digit', month: '2-digit', year: 'numeric' });
               exportTableToPdf({
                 title: `FACTURA FISCAL - ${sale.numero_factura}`,
-                subtitle: `Cliente: ${sale.cliente_nombre || 'Consumidor Final'} | NCF: ${sale.ncf || 'N/A'}`,
+                subtitle: `Fecha: ${fechaStr} | Cajera: ${sale.cajero_nombre || 'Cajera'} | Cliente: ${sale.cliente_nombre || 'Consumidor Final'} | NCF: ${sale.ncf || 'N/A'}`,
                 filename: `factura-${sale.numero_factura}`,
                 headers: ['Producto', 'Cant.', 'Precio Unit.', 'Subtotal'],
                 rows: (sale.detalle_ventas || []).map((it) => [

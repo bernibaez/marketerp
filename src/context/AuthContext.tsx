@@ -134,6 +134,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    try {
+      sessionStorage.removeItem('mercato_cash_opened_at_login');
+      sessionStorage.removeItem('mercato_pending_cash_open');
+    } catch {
+      /* ignore */
+    }
     await cerrarSesion();
     clearPermissionsCache();
     storeUser(null);

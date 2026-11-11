@@ -56,7 +56,7 @@ interface POSModalsProps {
 
   closeCashModalOpen: boolean;
   onCloseCloseCash: () => void;
-  onSuccessCloseCash: () => void;
+  onSuccessCloseCash: (cierre?: any) => void;
 
   weightScanOpen: boolean;
   onCloseWeightScan: () => void;

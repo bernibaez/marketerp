@@ -69,3 +69,7 @@ export function removeCashClosure(id: string): CashClosure[] {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   return updated;
 }
+<<<<<<< HEAD
+=======
+
+>>>>>>> 57bbebe1c1b40ce6b28d91de9bc1ae3c21035762

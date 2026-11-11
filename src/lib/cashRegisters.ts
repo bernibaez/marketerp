@@ -12,6 +12,12 @@ export type CashRegisterSession = {
   isAdminBox?: boolean;
   open: boolean;
   openedAt: string;
+  openedAtIso?: string;
+  baseCash?: number;
+  cashSales?: number;
+  cardSales?: number;
+  transferSales?: number;
+  expectedCash?: number;
   salesToday: number;
   tickets: number;
   cartItems: number;
@@ -98,3 +104,79 @@ export function findCashRegister(
   if (!id) return undefined;
   return registers.find((r) => registerMatchesId(r, id));
 }
+
+function normalizeNameText(val?: string | null): string {
+  return String(val || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\bkeyla\b/g, 'keila')
+    .replace(/\bcheila\b/g, 'sheila')
+    .replace(/\bbeiliz\b/g, 'beilis');
+}
+
+const GENERIC_REGISTER_WORDS = new Set([
+  'caja',
+  'cajero',
+  'cajera',
+  'principal',
+  'mostrador',
+  'servicio',
+  'rapido',
+  'express',
+  'sucursal',
+  'remanente',
+  'administrador',
+  'admin',
+  'general',
+  'disponible',
+  'turno',
+  'activo',
+]);
+
+export function extractUserNameTokens(userName?: string | null, username?: string | null): string[] {
+  const tokens = new Set<string>();
+  const normName = normalizeNameText(userName);
+  for (const part of normName.split(/[^a-z0-9]+/)) {
+    if (part.length >= 3 && !GENERIC_REGISTER_WORDS.has(part)) {
+      tokens.add(part);
+    }
+  }
+  const normUser = normalizeNameText(String(username || '').split('@')[0]);
+  for (const part of normUser.split(/[^a-z0-9]+/)) {
+    if (part.length >= 3 && !GENERIC_REGISTER_WORDS.has(part)) {
+      tokens.add(part);
+    }
+  }
+  return Array.from(tokens);
+}
+
+export function isSameCashierName(a?: string | null, b?: string | null): boolean {
+  const na = normalizeNameText(a);
+  const nb = normalizeNameText(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const tokensA = extractUserNameTokens(a);
+  const tokensB = extractUserNameTokens(b);
+  if (tokensA.length === 0 || tokensB.length === 0) return false;
+  // Primer nombre coincide
+  return tokensA[0] === tokensB[0];
+}
+
+export function doesRegisterMatchUser(
+  registerLabel?: string | null,
+  userName?: string | null,
+  username?: string | null
+): boolean {
+  const normLabel = normalizeNameText(registerLabel);
+  if (!normLabel) return false;
+  const labelTokens = normLabel
+    .split(/[^a-z0-9]+/)
+    .filter((p) => p.length >= 3 && !GENERIC_REGISTER_WORDS.has(p));
+  if (labelTokens.length === 0) return false;
+  const userTokens = extractUserNameTokens(userName, username);
+  if (userTokens.length === 0) return false;
+  return userTokens.some((ut) => labelTokens.includes(ut));
+}
+

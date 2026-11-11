@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { useAuth } from '@/context/AuthContext';
-import { getRoleHome, canAccessRoute } from '@/lib/auth';
+import { getRoleHome, canAccessRoute, normalizeRole } from '@/lib/auth';
 import { isSupabaseConfigured } from '@/services/clienteSupabase';
 
 const features = [
@@ -68,17 +68,35 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isProcessingLogin, setIsProcessingLogin] = useState(false);
   const [codeOpen, setCodeOpen] = useState(false);
   const [accessCode, setAccessCode] = useState('');
 
-  if (isAuthenticated && user) {
-    const target = from && from !== '/login' && canAccessRoute(user.role, from) ? from : getRoleHome(user.role);
+  if (isAuthenticated && user && !isProcessingLogin) {
+    const isCashier = normalizeRole(user.role).includes('cajer');
+    const target =
+      !isCashier && from && from !== '/login' && canAccessRoute(user.role, from)
+        ? from
+        : getRoleHome(user.role);
     return <Navigate to={target} replace />;
   }
 
   const goHome = (role: NonNullable<typeof user>['role']) => {
-    const target = from && from !== '/login' && canAccessRoute(role, from) ? from : getRoleHome(role);
+    const isCashier = normalizeRole(role).includes('cajer');
+    const target =
+      !isCashier && from && from !== '/login' && canAccessRoute(role, from)
+        ? from
+        : getRoleHome(role);
     navigate(target, { replace: true });
+  };
+
+  const markPendingCashOpen = () => {
+    try {
+      sessionStorage.removeItem('mercato_cash_opened_at_login');
+      sessionStorage.setItem('mercato_pending_cash_open', 'true');
+    } catch {
+      // ignore
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -88,14 +106,19 @@ export default function LoginPage() {
       setError('Ingresa usuario y contraseña');
       return;
     }
+
     setLoading(true);
+    setIsProcessingLogin(true);
     try {
       const result = await login(username, password);
       if (!result.ok) {
         setError(result.error);
+        setIsProcessingLogin(false);
         return;
       }
+      markPendingCashOpen();
       toast.success(`Bienvenido, ${result.user.name}`);
+      setIsProcessingLogin(false);
       goHome(result.user.role);
     } finally {
       setLoading(false);
@@ -104,14 +127,22 @@ export default function LoginPage() {
 
   const handleCodeAccess = async (e: React.FormEvent) => {
     e.preventDefault();
-    const result = await loginWithCode(accessCode);
-    if (!result.ok) {
-      toast.error(result.error);
-      return;
+    setIsProcessingLogin(true);
+    try {
+      const result = await loginWithCode(accessCode);
+      if (!result.ok) {
+        toast.error(result.error);
+        setIsProcessingLogin(false);
+        return;
+      }
+      markPendingCashOpen();
+      toast.success(`Acceso con código · ${result.user.name}`);
+      setCodeOpen(false);
+      setIsProcessingLogin(false);
+      goHome(result.user.role);
+    } catch {
+      setIsProcessingLogin(false);
     }
-    toast.success(`Acceso con código · ${result.user.name}`);
-    setCodeOpen(false);
-    goHome(result.user.role);
   };
 
   return (
@@ -309,7 +340,7 @@ export default function LoginPage() {
               </button>
             </div>
             <p className="text-sm text-gray-500">
-              Ingresa el código de acceso asignado a tu rol o caja.
+              Ingresa tu código de acceso rápido para iniciar sesión.
             </p>
             <form onSubmit={handleCodeAccess} className="space-y-3">
               <input

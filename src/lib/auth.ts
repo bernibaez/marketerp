@@ -91,7 +91,7 @@ const ALL_ROUTES = '*';
 /** Rutas permitidas por rol (`*` = todas) */
 export const ROLE_ROUTES: Record<UserRole, string[] | typeof ALL_ROUTES> = {
   Administrador: ALL_ROUTES,
-  Cajero: ['/point-of-sale-pos', '/cash-closure', '/sales'],
+  Cajero: ['/point-of-sale-pos', '/sales'],
   Vendedor: ['/sales', '/point-of-sale-pos', '/combos', '/contacts', '/accounts-receivable', '/cash-closure'],
   Almacenista: [
     '/product-management',
@@ -115,7 +115,9 @@ export const ROLE_HOME: Record<string, string> = {
   Administrador: '/',
   admin: '/',
   'Super Administrador': '/',
+  'Súper Administrador': '/',
   superadmin: '/',
+  super_admin: '/',
   Cajero: '/point-of-sale-pos',
   cajero: '/point-of-sale-pos',
   Vendedor: '/sales',
@@ -126,9 +128,28 @@ export const ROLE_HOME: Record<string, string> = {
   contable: '/reports',
 };
 
+export function normalizeRole(role?: string | null): string {
+  return String(role || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
 export function getRoleHome(role: UserRole): string {
   if (ROLE_HOME[role]) return ROLE_HOME[role];
-  const norm = String(role).toLowerCase();
+  const norm = normalizeRole(role);
+  if (norm.includes('cajer')) return '/point-of-sale-pos';
+  if (
+    norm === 'administrador' ||
+    norm === 'admin' ||
+    norm === 'super administrador' ||
+    norm === 'superadministrador' ||
+    norm === 'superadmin' ||
+    norm === 'super_admin'
+  ) {
+    return '/';
+  }
   if (ROLE_HOME[norm]) return ROLE_HOME[norm];
   const routes = routesFromPermissions(role);
   if (routes === '*' || (Array.isArray(routes) && routes.includes('/'))) return '/';
@@ -265,17 +286,26 @@ export function authenticateByCode(
 }
 
 export function canAccessRoute(role: UserRole, pathname: string): boolean {
-  const norm = String(role).trim().toLowerCase();
+  const norm = normalizeRole(role);
   if (
     norm === 'superadmin' ||
     norm === 'super_admin' ||
     norm === 'super administrador' ||
+    norm === 'superadministrador' ||
     norm === 'admin' ||
     norm === 'administrador'
   ) {
     return true;
   }
   const cleanPath = pathname.split('?')[0];
+
+  // Las cajeras únicamente pueden ver Punto de Venta (vender) y Ventas (ventas)
+  if (norm.includes('cajer')) {
+    const allowedCashierRoutes = ['/point-of-sale-pos', '/sales'];
+    return allowedCashierRoutes.some(
+      (r) => cleanPath === r || cleanPath.startsWith(`${r}/`)
+    );
+  }
 
   // Dashboard solo si el rol tiene permiso explícito sobre el módulo 'dashboard'
   if (cleanPath === '/' || cleanPath === '/dashboard') {
@@ -308,22 +338,51 @@ export function canAccessNav(role: UserRole, href: string): boolean {
 }
 
 export function isAdminOrSuperAdmin(
-  userOrRole?: { role?: string; rolDb?: string } | string | null
+  userOrRole?: { role?: string; rolDb?: string; username?: string; email?: string; name?: string } | string | null
 ): boolean {
   if (!userOrRole) return false;
   const roleStr =
     typeof userOrRole === 'string'
       ? userOrRole
       : (userOrRole.role || userOrRole.rolDb || '');
-  const norm = roleStr.trim().toLowerCase();
+  const norm = normalizeRole(roleStr);
+  const dbNorm = typeof userOrRole === 'object' ? normalizeRole(userOrRole.rolDb) : '';
   return (
     norm === 'administrador' ||
     norm === 'admin' ||
     norm === 'super administrador' ||
     norm === 'superadministrador' ||
     norm === 'superadmin' ||
-    norm === 'super_admin'
+    norm === 'super_admin' ||
+    dbNorm === 'admin' ||
+    dbNorm === 'superadmin' ||
+    dbNorm === 'super_admin'
   );
+}
+
+/**
+ * Determina si se debe ocultar el beneficio / ganancia bruta para el usuario actual
+ * (ej. usuario Elizabeth o rol Cajero/Cajera).
+ */
+export function shouldHideProfit(
+  user?: { name?: string; username?: string; email?: string; role?: string; rolDb?: string } | null
+): boolean {
+  if (!user) return false;
+  const nameNorm = normalizeRole(user.name);
+  const userNorm = normalizeRole(user.username);
+  const emailNorm = normalizeRole(user.email);
+  const roleNorm = normalizeRole(user.role || user.rolDb);
+  if (
+    nameNorm.includes('elizabeth') ||
+    userNorm.includes('elizabeth') ||
+    emailNorm.includes('elizabeth')
+  ) {
+    return true;
+  }
+  if (roleNorm.includes('cajer')) {
+    return true;
+  }
+  return false;
 }
 
 /**

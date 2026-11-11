@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import AppLayout from '@/components/AppLayout';
-import { Plus, Download, Monitor, Star, Search, ShieldCheck, X } from 'lucide-react';
+import { Plus, Download, Monitor, Star, Search, ShieldCheck, X, Lock, User } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { useCajas } from '@/hooks/useCajas';
+import { useCashRegisters } from '@/hooks/useCashRegisters';
+import type { CashRegisterSession } from '@/lib/cashRegisters';
 import { sugerirSiguienteCodigoCaja } from '@/services/cajas.service';
 import { exportTableToPdf } from '@/lib/exportPdf';
 import type { Caja } from '@/types/database';
+import PosCashCloseModal from '@/pages/point-of-sale-pos/components/PosCashCloseModal';
 import { CajaFormCard, type CajaFormData } from './cajas/components/CajaFormCard';
 import { CajasTable } from './cajas/components/CajasTable';
 
@@ -19,15 +22,20 @@ const emptyForm: CajaFormData = {
 
 export default function CajasPage() {
   const [busqueda, setBusqueda] = useState('');
-  const { cajas, loading, crearCaja, actualizarCaja, eliminarCaja, alternarActivaCaja } = useCajas({ busqueda });
+  const { cajas, loading, crearCaja, actualizarCaja, eliminarCaja, alternarActivaCaja } = useCajas({
+    busqueda,
+  });
+  const { registers, refetch: refetchRegisters } = useCashRegisters();
 
   const [showForm, setShowForm] = useState(false);
   const [editingCaja, setEditingCaja] = useState<Caja | null>(null);
   const [form, setForm] = useState<CajaFormData>(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [closingSession, setClosingSession] = useState<CashRegisterSession | null>(null);
 
   const isActiva = (c: Caja) => c.activa ?? c.activo ?? true;
   const isPrincipal = (c: Caja) => c.es_caja_principal ?? false;
+  const openRegisters = registers.filter((r) => r.open);
 
   const openCreate = async () => {
     setEditingCaja(null);
@@ -127,14 +135,23 @@ export default function CajasPage() {
     exportTableToPdf({
       title: 'Gestión de Cajas Registradoras',
       filename: 'cajas_registradoras',
-      headers: ['Código', 'Nombre', 'Descripción', 'Principal', 'Estado'],
-      rows: cajas.map((c) => [
-        c.codigo,
-        c.nombre,
-        c.descripcion || '—',
-        isPrincipal(c) ? 'Sí' : 'No',
-        isActiva(c) ? 'Activa' : 'Inactiva',
-      ]),
+      headers: ['Código', 'Nombre', 'Cajero en Turno', 'Principal', 'Estado'],
+      rows: cajas.map((c) => {
+        const openReg = registers.find(
+          (r) =>
+            r.open &&
+            (String(r.dbId) === String(c.id) ||
+              String(r.id) === String(c.codigo) ||
+              String(r.codigo) === String(c.codigo))
+        );
+        return [
+          c.codigo,
+          c.nombre,
+          openReg ? `En Turno: ${openReg.cashier}` : 'Cerrada / Disponible',
+          isPrincipal(c) ? 'Sí' : 'No',
+          isActiva(c) ? 'Activa' : 'Inactiva',
+        ];
+      }),
     });
   };
 
@@ -149,11 +166,15 @@ export default function CajasPage() {
               <span>Gestión de Cajas Registradoras</span>
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Registra, configura y administra las cajas disponibles para el Punto de Venta (POS)
+              Supervisa cajeros con turno activo, cierra cajas abiertas y administra las terminales POS
             </p>
           </div>
           <div className="flex gap-2">
-            <button type="button" onClick={handleExportPdf} className="btn-secondary flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleExportPdf}
+              className="btn-secondary flex items-center gap-2"
+            >
               <Download size={16} />
               Exportar PDF
             </button>
@@ -187,7 +208,7 @@ export default function CajasPage() {
         )}
 
         {/* Metrics Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
           <div className="card p-4 flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold">
               <Monitor size={20} />
@@ -200,11 +221,23 @@ export default function CajasPage() {
 
           <div className="card p-4 flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold">
+              <User size={20} />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground font-medium">Cajas Abiertas (En Turno)</p>
+              <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
+                {openRegisters.length}
+              </p>
+            </div>
+          </div>
+
+          <div className="card p-4 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-600 flex items-center justify-center font-bold">
               <ShieldCheck size={20} />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground font-medium">Cajas Activas</p>
-              <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
+              <p className="text-xs text-muted-foreground font-medium">Cajas Habilitadas</p>
+              <p className="text-2xl font-black text-indigo-600 dark:text-indigo-400">
                 {cajas.filter(isActiva).length}
               </p>
             </div>
@@ -226,7 +259,10 @@ export default function CajasPage() {
         {/* Search Bar */}
         <div className="card p-4">
           <div className="relative">
-            <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Search
+              size={18}
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
             <input
               type="text"
               value={busqueda}
@@ -240,11 +276,25 @@ export default function CajasPage() {
         {/* Cajas Table */}
         <CajasTable
           cajas={cajas}
+          registers={registers}
           loading={loading}
           onToggle={handleToggle}
           onEdit={openEdit}
           onDelete={handleDelete}
+          onCloseRegister={(reg) => setClosingSession(reg)}
         />
+
+        {closingSession && (
+          <PosCashCloseModal
+            initialCajaId={closingSession.dbId || closingSession.id}
+            initialCierreId={closingSession.cierreId}
+            onSuccess={() => {
+              void refetchRegisters();
+              setClosingSession(null);
+            }}
+            onClose={() => setClosingSession(null)}
+          />
+        )}
       </div>
     </AppLayout>
   );

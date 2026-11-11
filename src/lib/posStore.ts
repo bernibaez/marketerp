@@ -63,6 +63,9 @@ export type CashExpense = {
   time: string;
   user: string;
   cashier: string;
+  cajaId?: string;
+  cierreId?: string;
+  created_at?: string;
 };
 
 export type MaletaCut = {

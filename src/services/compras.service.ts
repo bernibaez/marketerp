@@ -107,6 +107,7 @@ export async function obtenerCompras(): Promise<CompraLista[]> {
   const localList = getLocalCompras();
   const localMap = new Map<string, CompraLista>();
   localList.forEach((lc) => {
+    const netTotal = Number(lc.subtotal ?? 0) > 0 ? Number(lc.subtotal) : Number(lc.total ?? 0);
     localMap.set(lc.id, {
       id: lc.id,
       codigo: lc.codigo,
@@ -114,9 +115,9 @@ export async function obtenerCompras(): Promise<CompraLista[]> {
       proveedor_id: lc.proveedor_id,
       fecha: lc.fecha,
       items: lc.items,
-      subtotal: lc.subtotal,
-      impuesto: lc.impuesto,
-      total: lc.total,
+      subtotal: netTotal,
+      impuesto: 0,
+      total: netTotal,
       estado: lc.estado,
       metodo_pago: lc.metodo_pago,
     });
@@ -152,6 +153,8 @@ export async function obtenerCompras(): Promise<CompraLista[]> {
       const proveedor = row.proveedores as { nombre?: string } | null;
       const detalle = (row.detalle_compras as { cantidad?: number }[] | null) ?? [];
       const items = detalle.reduce((s, d) => s + Number(d.cantidad ?? 0), 0);
+      const sub = Number(row.subtotal ?? 0);
+      const netTotal = sub > 0 ? sub : Number(row.monto_total ?? 0);
       return {
         id: String(row.id),
         codigo: String(row.codigo),
@@ -159,9 +162,9 @@ export async function obtenerCompras(): Promise<CompraLista[]> {
         proveedor_id: row.proveedor_id ? String(row.proveedor_id) : null,
         fecha: String(row.creado_en).slice(0, 10),
         items,
-        subtotal: Number(row.subtotal ?? 0),
-        impuesto: Number(row.monto_impuesto ?? 0),
-        total: Number(row.monto_total ?? 0),
+        subtotal: netTotal,
+        impuesto: 0,
+        total: netTotal,
         estado: row.estado as CompraLista['estado'],
         metodo_pago: String(row.metodo_pago ?? ''),
       };
@@ -189,11 +192,8 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
   }
 
   const subtotal = input.lineas.reduce((s, l) => s + l.cantidad * l.precio_costo, 0);
-  const impuesto = input.lineas.reduce(
-    (s, l) => s + l.cantidad * l.precio_costo * ((l.porcentaje_impuesto || 0) / 100),
-    0
-  );
-  const total = subtotal + impuesto;
+  const impuesto = 0;
+  const total = subtotal;
   const codigo =
     input.codigo?.trim() ||
     `FAC-COMP-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -357,6 +357,7 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
               stock_actual: updatedStock,
               precio_costo: costPrice > 0 ? costPrice : undefined,
               precio_venta: salePrice > 0 ? salePrice : undefined,
+              price_per_weight: salePrice > 0 ? salePrice : undefined,
               ...(wholesalePrice ? { precio_mayorista: wholesalePrice } : {}),
               estado: 'activo',
             });
@@ -365,6 +366,7 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
               await actualizarProducto(dbProd.id, {
                 precio_costo: costPrice > 0 ? costPrice : undefined,
                 precio_venta: salePrice > 0 ? salePrice : undefined,
+                price_per_weight: salePrice > 0 ? salePrice : undefined,
                 ...(wholesalePrice ? { precio_mayorista: wholesalePrice } : {}),
                 estado: 'activo',
               });
@@ -473,7 +475,7 @@ export async function crearCompra(input: NuevaCompraInput): Promise<CompraLista>
         cantidad_recibida: l.cantidad,
         precio_costo: l.precio_costo,
         precio_venta: l.precio_venta,
-        porcentaje_impuesto: l.porcentaje_impuesto || 0,
+        porcentaje_impuesto: 0,
         subtotal: l.cantidad * l.precio_costo,
       }));
 
@@ -608,6 +610,8 @@ export async function obtenerDetalleCompra(id: string): Promise<CompraDetalle | 
       if (!error && data) {
         const proveedor = data.proveedores as { nombre?: string } | null;
         const detalle = (data.detalle_compras as Record<string, unknown>[] | null) ?? [];
+        const sub = Number(data.subtotal ?? 0);
+        const netTotal = sub > 0 ? sub : Number(data.monto_total ?? 0);
 
         return {
           id: String(data.id),
@@ -616,9 +620,9 @@ export async function obtenerDetalleCompra(id: string): Promise<CompraDetalle | 
           proveedor_id: data.proveedor_id ? String(data.proveedor_id) : null,
           fecha: String(data.creado_en).slice(0, 10),
           items: detalle.reduce((s, d) => s + Number(d.cantidad ?? 0), 0),
-          subtotal: Number(data.subtotal ?? 0),
-          impuesto: Number(data.monto_impuesto ?? 0),
-          total: Number(data.monto_total ?? 0),
+          subtotal: netTotal,
+          impuesto: 0,
+          total: netTotal,
           estado: data.estado as CompraLista['estado'],
           metodo_pago: String(data.metodo_pago ?? ''),
           notas: data.notas ? String(data.notas) : null,
@@ -643,6 +647,7 @@ export async function obtenerDetalleCompra(id: string): Promise<CompraDetalle | 
   const localList = getLocalCompras();
   const found = localList.find((c) => c.id === id || c.codigo === id);
   if (found) {
+    const netTotal = Number(found.subtotal ?? 0) > 0 ? Number(found.subtotal) : Number(found.total ?? 0);
     return {
       id: found.id,
       codigo: found.codigo,
@@ -650,9 +655,9 @@ export async function obtenerDetalleCompra(id: string): Promise<CompraDetalle | 
       proveedor_id: found.proveedor_id,
       fecha: found.fecha,
       items: found.items,
-      subtotal: found.subtotal,
-      impuesto: found.impuesto,
-      total: found.total,
+      subtotal: netTotal,
+      impuesto: 0,
+      total: netTotal,
       estado: found.estado,
       metodo_pago: found.metodo_pago,
       notas: found.notas ?? null,
@@ -719,11 +724,8 @@ export async function editarCompra(
   }
 
   const subtotal = input.lineas.reduce((s, l) => s + l.cantidad * l.precio_costo, 0);
-  const impuesto = input.lineas.reduce(
-    (s, l) => s + l.cantidad * l.precio_costo * ((l.porcentaje_impuesto || 0) / 100),
-    0
-  );
-  const total = subtotal + impuesto;
+  const impuesto = 0;
+  const total = subtotal;
   const codigo = input.codigo?.trim() || existingDetail.codigo;
 
   const rawProvId = typeof input.proveedor_id === 'string' && input.proveedor_id.trim() ? input.proveedor_id.trim() : null;
@@ -775,8 +777,13 @@ export async function editarCompra(
     const delta = Math.round((newData.qty - oldQty) * 1000) / 1000;
 
     const matchingLine = input.lineas.find((l) => (l.producto_id || l.nombre) === key);
+    const oldMatchingLine = existingDetail.lineas.find((l) => (l.producto_id || l.nombre) === key);
     const costPrice = matchingLine?.precio_costo ?? 0;
-    const salePrice = matchingLine?.precio_venta ?? 0;
+    const rawSalePrice = matchingLine?.precio_venta ?? 0;
+    const oldSalePrice = oldMatchingLine?.precio_venta ?? 0;
+    // Solo sobrescribir el precio de venta actual del producto si el usuario cambió el precio de venta en esta edición (o es una línea nueva)
+    const salePriceChanged = !oldMatchingLine || Math.abs(rawSalePrice - oldSalePrice) > 0.001;
+    const salePrice = salePriceChanged ? rawSalePrice : 0;
 
     if (delta !== 0) {
       updateProductPurchaseDataInStore(key, delta, costPrice, salePrice);
@@ -858,12 +865,20 @@ export async function editarCompra(
             });
 
             if (prodUuid) {
+              const oldMatchingLine = existingDetail.lineas.find(
+                (l) => l.producto_id === prodUuid || l.nombre === newLine.nombre
+              );
+              const salePriceChanged =
+                !oldMatchingLine ||
+                Math.abs((newLine.precio_venta ?? 0) - (oldMatchingLine.precio_venta ?? 0)) > 0.001;
               const { data: pData } = await sb.from('productos').select('stock_actual').eq('id', prodUuid).maybeSingle();
               const cur = Number(pData?.stock_actual || 0);
               await sb.from('productos').update({
                 stock_actual: cur + newLine.cantidad,
                 precio_costo: newLine.precio_costo > 0 ? newLine.precio_costo : undefined,
-                precio_venta: newLine.precio_venta > 0 ? newLine.precio_venta : undefined,
+                ...(salePriceChanged && newLine.precio_venta > 0
+                  ? { precio_venta: newLine.precio_venta }
+                  : {}),
               }).eq('id', prodUuid);
             }
           }

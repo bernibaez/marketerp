@@ -128,7 +128,9 @@ export function usePOSCheckout({
     try {
       const cot = await crearCotizacion({
         cliente_id: selectedCustomer?.id ?? null,
+        cliente_nombre: selectedCustomer?.name ?? 'Cliente General',
         vendedor_id: user?.id ?? null,
+        vendedor_nombre: user?.name ?? 'Cajero',
         subtotal,
         monto_impuesto: taxTotal,
         monto_total: total,
@@ -137,15 +139,16 @@ export function usePOSCheckout({
           nombre_item: item.name,
           precio_unitario: item.price,
           cantidad: item.qty,
-          subtotal: item.price * item.qty * (1 - item.discount / 100),
+          subtotal: Math.round(item.price * item.qty * (1 - item.discount / 100) * 100) / 100,
         })),
       });
-      toast.success(`Cotización ${cot.codigo} creada`);
-      navigate('/sales');
+      clearCart();
+      toast.success(`Cotización ${cot.codigo} creada — lista para imprimir`);
+      navigate(`/sales?tab=quotes&printQuote=${cot.id}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo crear la cotización');
     }
-  }, [cart, selectedCustomer, user, subtotal, taxTotal, total, navigate]);
+  }, [cart, selectedCustomer, user, subtotal, taxTotal, total, clearCart, navigate]);
 
   const paymentProps = {
     checkoutSessionId,
@@ -155,6 +158,10 @@ export function usePOSCheckout({
     taxTotal,
     discountTotal: globalDiscountAmount,
     registerNumber: activeCashLabel,
+    cashierName:
+      (user?.name && user.name.trim()) ||
+      (activeCashCashierName && activeCashCashierName.trim()) ||
+      'Cajera',
     cart,
     customer: selectedCustomer,
     orderCompleted,
@@ -192,6 +199,17 @@ export function usePOSCheckout({
       const costoTotal = activeItems.reduce((s, i) => s + i.cost * i.qty, 0);
       const montoPagado =
         _payments.cash + _payments.card + _payments.transfer + _payments.credit;
+      const noEfectivoPagado =
+        (Number(_payments.card) || 0) +
+        (Number(_payments.transfer) || 0) +
+        (Number(_payments.credit) || 0);
+      const efectivoNetoGaveta = Math.max(
+        0,
+        Math.min(
+          Number(_payments.cash) || 0,
+          Math.round((total - noEfectivoPagado) * 100) / 100
+        )
+      );
 
       try {
         const effectiveNcfType =
@@ -228,11 +246,11 @@ export function usePOSCheckout({
           costo_total: costoTotal,
           metodo_pago: metodo,
           monto_pagado: montoPagado,
-          monto_efectivo: _payments.cash,
+          monto_efectivo: efectivoNetoGaveta,
           monto_tarjeta: _payments.card,
           monto_transferencia: _payments.transfer,
           monto_credito: _payments.credit,
-          devuelta_entregada: Math.max(0, montoPagado - total),
+          devuelta_entregada: Math.max(0, Math.round((montoPagado - total) * 100) / 100),
           ncf: isSupabaseConfigured() ? null : (fiscalInvoice?.ncf ?? null),
           tipo_ncf: effectiveNcfType,
           items: activeItems.map((item) => ({
@@ -279,6 +297,12 @@ export function usePOSCheckout({
             itbis: taxTotal,
             total,
             paymentMethod: metodo,
+            montoEfectivo: _payments.cash,
+            montoTarjeta: _payments.card,
+            montoTransferencia: _payments.transfer,
+            montoCredito: _payments.credit,
+            cashReceived: montoPagado,
+            change: Math.max(0, montoPagado - total),
             cashier: effectiveCajeroNombre,
             expirationDate: fiscalInvoice?.expirationDate || '2027-12-31',
             items: activeItems.map((item) => ({

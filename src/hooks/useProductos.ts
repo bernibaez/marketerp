@@ -130,12 +130,14 @@ export function useProductos(params: UseProductosParams = {}) {
       }
     };
     window.addEventListener('mercato_products_updated', handleProductsUpdated);
+    window.addEventListener('focus', handleProductsUpdated);
 
     return () => {
       mountedRef.current = false;
       reqIdRef.current += 1;
       clearHydrationTimer();
       window.removeEventListener('mercato_products_updated', handleProductsUpdated);
+      window.removeEventListener('focus', handleProductsUpdated);
     };
   }, [enabled, refetch, clearHydrationTimer]);
 

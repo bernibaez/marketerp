@@ -6,6 +6,7 @@ import { useVentas } from '@/hooks/useVentas';
 import { useCotizaciones } from '@/hooks/useCotizaciones';
 import { useDevoluciones } from '@/hooks/useDevoluciones';
 import { useAuth } from '@/context/AuthContext';
+import { isAdminOrSuperAdmin, normalizeRole, shouldHideProfit } from '@/lib/auth';
 import { hasPermission } from '@/lib/permissionsStore';
 import PosReturnModal from '@/pages/point-of-sale-pos/components/PosReturnModal';
 import { syncInvoiceSettingsFromSupabase } from '@/lib/invoiceSettingsStore';
@@ -21,6 +22,7 @@ import { SaleCreateView } from './sales/components/SaleCreateView';
 import { QuoteCreateView } from './sales/components/QuoteCreateView';
 import { SaleAnularModal } from './sales/components/SaleAnularModal';
 import { SalePrintModal } from './sales/components/SalePrintModal';
+import { QuotePrintModal } from './sales/components/QuotePrintModal';
 import { SalesTable } from './sales/components/SalesTable';
 import { QuotesTable } from './sales/components/QuotesTable';
 import { ReturnsTable } from './sales/components/ReturnsTable';
@@ -36,22 +38,24 @@ export default function SalesPage() {
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState<SalesTab>('sales');
   const [search, setSearch] = useState(() => searchParams.get('q') ?? '');
+  const [singleDate, setSingleDate] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
-  const roleNorm = (user?.role ?? '').trim().toLowerCase();
-  const isAdmin =
-    roleNorm === 'administrador' ||
-    roleNorm === 'super administrador' ||
-    roleNorm === 'admin' ||
-    roleNorm === 'super_admin' ||
-    roleNorm === 'superadmin';
-  const canSeeAllSales = isAdmin || roleNorm === 'contador';
-  const canEditSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'editar');
+  const effectiveDateFrom = singleDate || dateFrom;
+  const effectiveDateTo = singleDate || dateTo;
+
+  const roleNorm = normalizeRole(user?.role || user?.rolDb);
+  const isAdmin = isAdminOrSuperAdmin(user);
+  const hideProfit = shouldHideProfit(user);
+  const isCajero = roleNorm.includes('cajer');
+  const canSeeAllSales = true;
+  const canEditSales = isAdmin || isCajero || hasPermission(user?.role ?? 'Cajero', 'ventas', 'editar');
   const canDeleteSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'eliminar');
   const canCreateSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'crear');
   const canExportSales = isAdmin || hasPermission(user?.role ?? 'Cajero', 'ventas', 'exportar');
-  const ownCajeroId = !canSeeAllSales ? user?.id : undefined;
+  const ownCajeroId = undefined;
+  const ownCajeroNombre = undefined;
 
   useEffect(() => {
     void syncInvoiceSettingsFromSupabase();
@@ -60,11 +64,15 @@ export default function SalesPage() {
   useEffect(() => {
     const q = searchParams.get('q');
     if (q) setSearch(q);
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'quotes' || tabParam === 'sales' || tabParam === 'returns' || tabParam === 'held') {
+      setTab(tabParam);
+    }
   }, [searchParams]);
 
   // Pagination State
   const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(50);
+  const [limit, setLimit] = useState(200);
   const [heldSales, setHeldSales] = useState<HeldSale[]>([]);
   const [loadingHeldSales, setLoadingHeldSales] = useState(false);
 
@@ -87,7 +95,7 @@ export default function SalesPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, dateFrom, dateTo, tab]);
+  }, [search, singleDate, dateFrom, dateTo, tab]);
 
   // Data Hooks
   const {
@@ -104,13 +112,14 @@ export default function SalesPage() {
     pagina: page,
     limite: limit,
     busqueda: search,
-    fechaInicio: dateFrom || undefined,
-    fechaFin: dateTo || undefined,
+    fechaInicio: effectiveDateFrom || undefined,
+    fechaFin: effectiveDateTo || undefined,
     cajeroId: ownCajeroId,
+    cajeroNombre: ownCajeroNombre,
   });
 
   const {
-    cotizaciones,
+    cotizaciones: rawCotizaciones,
     loading: loadingCotizaciones,
     guardarCotizacion,
     convertirAVenta,
@@ -119,13 +128,27 @@ export default function SalesPage() {
   });
 
   const {
-    devoluciones,
+    devoluciones: rawDevoluciones,
     loading: loadingDevoluciones,
     procesarEstado: procesarEstadoDevolucion,
     refetch: refetchDevoluciones,
   } = useDevoluciones({
     busqueda: tab === 'returns' ? search : undefined,
   });
+
+  const matchesDateRange = (rawIsoOrDate?: string) => {
+    if (!effectiveDateFrom && !effectiveDateTo) return true;
+    const utcD = String(rawIsoOrDate || '').slice(0, 10);
+    const dt = rawIsoOrDate ? new Date(rawIsoOrDate) : null;
+    const localD = dt && !isNaN(dt.getTime()) ? dt.toLocaleDateString('en-CA') : utcD;
+    if (effectiveDateFrom && localD < effectiveDateFrom && utcD < effectiveDateFrom) return false;
+    if (effectiveDateTo && localD > effectiveDateTo && utcD > effectiveDateTo) return false;
+    return true;
+  };
+
+  const cotizaciones = rawCotizaciones.filter((c) => matchesDateRange(c.creado_en));
+  const devoluciones = rawDevoluciones.filter((d) => matchesDateRange(d.creado_en));
+  const filteredHeldSales = heldSales.filter((h) => matchesDateRange(h.savedAt));
 
   // Modal and View Coordinator Hook
   const {
@@ -156,6 +179,10 @@ export default function SalesPage() {
     setViewingQuote,
     loadingQuoteDetail,
     handleOpenQuoteDetail,
+    printingQuote,
+    setPrintingQuote,
+    loadingPrintQuote,
+    handleOpenPrintQuote,
     convertQuote,
     setConvertQuote,
     handleConfirmConvertQuote,
@@ -171,6 +198,26 @@ export default function SalesPage() {
     actualizar,
     convertirAVenta,
   });
+
+  useEffect(() => {
+    const editId = searchParams.get('edit');
+    if (editId && ventas.length > 0 && !editingSale) {
+      const target = ventas.find((v) => String(v.id) === String(editId));
+      if (target) {
+        void handleOpenEditSale(target);
+      }
+    }
+  }, [searchParams, ventas, editingSale]);
+
+  useEffect(() => {
+    const printQuoteId = searchParams.get('printQuote');
+    if (printQuoteId && rawCotizaciones.length > 0 && !printingQuote) {
+      const target = rawCotizaciones.find((c) => String(c.id) === String(printQuoteId));
+      if (target) {
+        void handleOpenPrintQuote(target);
+      }
+    }
+  }, [searchParams, rawCotizaciones, printingQuote]);
 
   const handleCreateSaleSubmit = async (payload: Parameters<typeof cobrar>[0]) => {
     try {
@@ -188,9 +235,15 @@ export default function SalesPage() {
 
   const handleCreateQuoteSubmit = async (payload: Parameters<typeof guardarCotizacion>[0]) => {
     try {
-      const cot = await guardarCotizacion(payload);
+      const cot = await guardarCotizacion({
+        ...payload,
+        vendedor_id: payload.vendedor_id ?? user?.id ?? null,
+        vendedor_nombre: payload.vendedor_nombre ?? user?.name ?? 'Cajero',
+      });
       toast.success(`Cotización ${cot.codigo} guardada exitosamente`);
       setShowAddQuoteForm(false);
+      setTab('quotes');
+      void handleOpenPrintQuote(cot);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al crear la cotización');
     }
@@ -262,6 +315,11 @@ export default function SalesPage() {
         <SaleDetailView
           sale={viewingSale}
           loadingDetail={loadingSaleDetail}
+          canEdit={canEditSales}
+          onEdit={(s) => {
+            setViewingSale(null);
+            void handleOpenEditSale(s);
+          }}
           onPrint={(s) => {
             setViewingSale(null);
             void handleOpenPrintSale(s);
@@ -297,8 +355,17 @@ export default function SalesPage() {
           quote={viewingQuote}
           loadingDetail={loadingQuoteDetail}
           onConvert={(q) => setConvertQuote(q)}
+          onPrint={(q) => void handleOpenPrintQuote(q)}
           onClose={() => setViewingQuote(null)}
         />
+        {printingQuote && (
+          <QuotePrintModal
+            quote={printingQuote}
+            clients={dbClientes}
+            loadingPrintDetail={loadingPrintQuote}
+            onClose={() => setPrintingQuote(null)}
+          />
+        )}
       </AppLayout>
     );
   }
@@ -322,7 +389,7 @@ export default function SalesPage() {
       ? cotizaciones.length
       : tab === 'returns'
       ? devoluciones.length
-      : heldSales.length;
+      : filteredHeldSales.length;
 
   return (
     <AppLayout>
@@ -344,6 +411,7 @@ export default function SalesPage() {
           totalVentas={totalVentas}
           cotizaciones={cotizaciones}
           devoluciones={devoluciones}
+          hideProfit={hideProfit}
         />
 
         {/* Tab Navigation and Filter Toolbar */}
@@ -354,10 +422,12 @@ export default function SalesPage() {
             sales: totalVentas,
             quotes: cotizaciones.length,
             returns: devoluciones.length,
-            held: heldSales.length,
+            held: filteredHeldSales.length,
           }}
           search={search}
           onSearchChange={setSearch}
+          singleDate={singleDate}
+          onSingleDateChange={setSingleDate}
           dateFrom={dateFrom}
           onDateFromChange={setDateFrom}
           dateTo={dateTo}
@@ -378,6 +448,7 @@ export default function SalesPage() {
             canSeeAllSales={canSeeAllSales}
             canEditSales={canEditSales}
             canDeleteSales={canDeleteSales}
+            hideProfit={hideProfit}
             page={page}
             limit={limit}
             onPageChange={setPage}
@@ -400,6 +471,7 @@ export default function SalesPage() {
             loading={loadingCotizaciones}
             onConvert={(q) => setConvertQuote(q)}
             onViewDetail={(q) => void handleOpenQuoteDetail(q)}
+            onPrintQuote={(q) => void handleOpenPrintQuote(q)}
           />
         )}
 
@@ -422,7 +494,7 @@ export default function SalesPage() {
         {/* Tab 4: Held Sales Table */}
         {tab === 'held' && (
           <HeldSalesTable
-            heldSales={heldSales}
+            heldSales={filteredHeldSales}
             loading={loadingHeldSales}
             onRefresh={fetchHeldSales}
             canManage={canEditSales || canDeleteSales}
@@ -446,6 +518,15 @@ export default function SalesPage() {
             clients={dbClientes}
             loadingPrintDetail={loadingPrintDetail}
             onClose={() => setPrintingSale(null)}
+          />
+        )}
+
+        {printingQuote && (
+          <QuotePrintModal
+            quote={printingQuote}
+            clients={dbClientes}
+            loadingPrintDetail={loadingPrintQuote}
+            onClose={() => setPrintingQuote(null)}
           />
         )}
       </div>
